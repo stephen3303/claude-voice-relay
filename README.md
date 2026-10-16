@@ -1,0 +1,23 @@
+# claude-voice-relay
+
+Hands-free Claude Code agents: start them with Siri, hear them in your AirPods, answer by voice.
+
+- **relay.mjs** (runs on Windows) — Telegram bot + agent manager. Each agent is its own Docker
+  container with only its repo mounted at `/work`, running headless Claude Code; your replies
+  resume the same session.
+- **hooks/notify.mjs** — Claude Code Notification hook for your normal interactive sessions;
+  forwards "Claude needs you" to Telegram (notify only; answer those at a screen or via the Claude app).
+
+## Voice commands (via Telegram)
+- `task: in <project>, <what to do>` — new agent (the iPhone Shortcut adds the `task:` prefix)
+- `yes` / `no` / anything else — answers the agent that's waiting (prefix with the agent name to target one)
+- `status`, `stop <agent>`, `full <agent>` (full text, for when you're at a screen)
+
+Spoken project names match folder names under PROJECTS_ROOT; add nicknames to `aliases.json`,
+e.g. `{ "trading bot": "Roundtable_Trading" }`.
+
+## Setup
+1. `copy .env.example .env` and fill it in.
+2. `npm run build-agent`
+3. `npm run install-hook`
+4. `npm start` (or let the ClaudeVoiceRelay scheduled task start it at logon)

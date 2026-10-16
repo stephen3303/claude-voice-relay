@@ -1,0 +1,11 @@
+{
+  "name": "claude-voice-relay",
+  "private": true,
+  "type": "module",
+  "description": "Hands-free Claude Code agents over Telegram + AirPods",
+  "scripts": {
+    "start": "node --env-file=.env relay.mjs",
+    "build-agent": "docker build -t claude-voice-agent:latest agent",
+    "install-hook": "node install-hook.mjs"
+  }
+}
