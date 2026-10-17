@@ -315,7 +315,7 @@ if (cfg.voiceToken) {
     });
   }).on('clientError', (err, socket) => {
     // Malformed requests (e.g. a hidden character in a header) never reach the handler above.
-    const raw = String(err.rawPacket || '').slice(0, 400).replace(/(Bearer\s+)\S+/i, '$1****');
+    const raw = String(err.rawPacket || '').slice(0, 400).replace(/(authorization\s*:)[^\r\n]*/gi, '$1 ****');
     log(`voice clientError ${err.code}: ${err.message}; raw: ${JSON.stringify(raw)}`);
     try { socket.end('HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nBad request. Check the Authorization header for extra characters.'); } catch { /* socket gone */ }
   }).listen(cfg.voicePort, '0.0.0.0', () => log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`));
