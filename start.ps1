@@ -1,6 +1,6 @@
-# Started at logon by the ClaudeVoiceRelay scheduled task.
+﻿# Started at logon by the ClaudeVoiceRelay scheduled task.
+# Starts the relay right away: Docker is only needed when an agent launches,
+# and a hung Docker engine must not keep the relay (and its voice endpoint) down.
 Set-Location $PSScriptRoot
 New-Item -ItemType Directory -Force logs | Out-Null
-# Wait for Docker Desktop so agent containers can start.
-for ($i = 0; $i -lt 60; $i++) { docker info *> $null; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep 5 }
 node --env-file=.env relay.mjs *>> logs\console.log
