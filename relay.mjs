@@ -19,7 +19,7 @@ const cfg = {
   chatId: process.env.TELEGRAM_CHAT_ID || '',
   oauth: process.env.CLAUDE_CODE_OAUTH_TOKEN,
   projectsRoot: process.env.PROJECTS_ROOT || path.resolve(ROOT, '..'),
-  hookPort: Number(process.env.HOOK_PORT || 8787),
+  hookPort: Number(process.env.HOOK_PORT || 47878),
   image: process.env.AGENT_IMAGE || 'claude-voice-agent:latest',
 };
 

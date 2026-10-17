@@ -8,7 +8,7 @@ process.stdin.on('end', async () => {
     const e = JSON.parse(input || '{}');
     const project = e.cwd ? path.basename(e.cwd).replace(/[_\-.]+/g, ' ') : 'Claude Code';
     const text = `${project}: ${e.message || 'Claude needs your input.'}`;
-    await fetch(`http://127.0.0.1:${process.env.CLAUDE_RELAY_PORT || 8787}/notify`, {
+    await fetch(`http://127.0.0.1:${process.env.CLAUDE_RELAY_PORT || 47878}/notify`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }), signal: AbortSignal.timeout(2000),
     });
