@@ -2,6 +2,7 @@
 // Telegram <-> containerized Claude Code agents, plus a localhost endpoint
 // that host-side Claude Code hooks post "needs you" notifications to.
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
@@ -18,6 +19,8 @@ const cfg = {
   token: process.env.TELEGRAM_BOT_TOKEN,
   chatId: process.env.TELEGRAM_CHAT_ID || '',
   oauth: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+  voicePort: Number(process.env.VOICE_PORT || 47879),
+  voiceToken: process.env.VOICE_TOKEN || '',
   projectsRoot: process.env.PROJECTS_ROOT || path.resolve(ROOT, '..'),
   hookPort: Number(process.env.HOOK_PORT || 47878),
   image: process.env.AGENT_IMAGE || 'claude-voice-agent:latest',
@@ -252,7 +255,11 @@ async function onMessage(m) {
   const from = String(m.chat.id);
   if (!cfg.chatId) return log(`Message from chat ${from}. If that's you, set TELEGRAM_CHAT_ID=${from} in .env and restart.`);
   if (from !== cfg.chatId) return log('ignored message from chat', from);
-  const text = m.text.trim();
+  return dispatch(m.text.trim());
+}
+
+// Shared by Telegram and the iPhone Shortcut endpoint.
+async function dispatch(text) {
   if (/^(new\s+)?task\s*[:,.]?\s+/i.test(text)) return startTask(text.replace(/^(new\s+)?task\s*[:,.]?\s+/i, ''));
   if (/^\/?status\b/i.test(text)) return status();
   if (/^\/?(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^\/?(stop|kill)\s*/i, ''));
@@ -284,6 +291,28 @@ http.createServer((req, res) => {
     res.writeHead(204).end();
   });
 }).listen(cfg.hookPort, '127.0.0.1', () => log(`hook endpoint on 127.0.0.1:${cfg.hookPort}`));
+
+// ---------- voice endpoint for the iPhone Shortcut (firewalled to Tailscale) ----------
+if (cfg.voiceToken) {
+  const want = Buffer.from(`Bearer ${cfg.voiceToken}`);
+  http.createServer((req, res) => {
+    const got = Buffer.from(String(req.headers.authorization || ''));
+    const ok = got.length === want.length && crypto.timingSafeEqual(got, want);
+    if (!ok) { res.writeHead(401).end(); return; }
+    if (req.method !== 'POST' || req.url !== '/voice') { res.writeHead(404).end(); return; }
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });
+    req.on('end', () => {
+      let text = body;
+      try { const j = JSON.parse(body); if (j && typeof j.text === 'string') text = j.text; } catch { /* plain-text body */ }
+      text = String(text).trim();
+      if (!text) { res.writeHead(400, { 'content-type': 'text/plain' }).end('Nothing heard.'); return; }
+      log('voice:', text);
+      res.writeHead(200, { 'content-type': 'text/plain' }).end('Sent.');
+      dispatch(text).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
+    });
+  }).listen(cfg.voicePort, '0.0.0.0', () => log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`));
+} else log('VOICE_TOKEN not set; voice endpoint disabled.');
 
 load();
 log(`relay up. projects root: ${cfg.projectsRoot}. ${agents.size} saved agent(s).`);
