@@ -21,3 +21,5 @@ e.g. `{ "trading bot": "Roundtable_Trading" }`.
 2. `npm run build-agent`
 3. `npm run install-hook`
 4. `npm start` (or let the ClaudeVoiceRelay scheduled task start it at logon)
+
+Tested from my phone: the relay has been verified end to end from an iPhone.
