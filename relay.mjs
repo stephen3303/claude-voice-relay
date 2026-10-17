@@ -90,7 +90,8 @@ function projectDirs() {
     .filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name);
 }
 function aliases() {
-  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'aliases.json'), 'utf8')); } catch { return {}; }
+  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'aliases.json'), 'utf8').replace(/^\uFEFF/, '')); }
+  catch (e) { log('aliases.json unreadable:', e.message); return {}; }
 }
 // strict = alias or exact folder name only; loose also allows a unique best word-overlap match
 function resolveRepo(spoken, loose) {
