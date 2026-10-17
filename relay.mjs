@@ -298,14 +298,16 @@ if (cfg.voiceToken) {
   http.createServer((req, res) => {
     const got = Buffer.from(String(req.headers.authorization || ''));
     const ok = got.length === want.length && crypto.timingSafeEqual(got, want);
-    if (!ok) { res.writeHead(401).end(); return; }
-    if (req.method !== 'POST' || req.url !== '/voice') { res.writeHead(404).end(); return; }
+    const h = String(req.headers.authorization || '');
+    if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}, auth len ${h.length} (want ${want.length}), starts '${h.slice(0, 7)}', ends '${h.slice(-3)}'`); res.writeHead(401).end(); return; }
+    if (req.method !== 'POST' || req.url !== '/voice') { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });
     req.on('end', () => {
       let text = body;
       try { const j = JSON.parse(body); if (j && typeof j.text === 'string') text = j.text; } catch { /* plain-text body */ }
       text = String(text).trim();
+      if (!text) log(`voice empty body, content-type ${req.headers['content-type']}, raw: ${body.slice(0, 200)}`);
       if (!text) { res.writeHead(400, { 'content-type': 'text/plain' }).end('Nothing heard.'); return; }
       log('voice:', text);
       res.writeHead(200, { 'content-type': 'text/plain' }).end('Sent.');
