@@ -17,13 +17,15 @@ Spoken project names match folder names under PROJECTS_ROOT; add nicknames to `a
 e.g. `{ "trading bot": "Roundtable_Trading" }`.
 
 ## iPhone Shortcut ("Tell Claude") with read-back
-The relay reads your task back and waits for **send it** before anything starts. Point the
-Shortcut at `/voice/confirm` and wrap it in a loop:
+The relay reads your task back and waits for **send it** before anything starts. This is on for
+`/voice` by default (set `VOICE_CONFIRM=0` in `.env` to send immediately), so the existing
+Shortcut confirms with no changes: run it once to dictate, and again to say "send it".
+To keep listening in one run instead, wrap the actions in a loop:
 
 1. **Repeat** 6 times
 2. &nbsp;&nbsp;**Dictate text**
 3. &nbsp;&nbsp;**Text**: `task: ` + Dictated Text
-4. &nbsp;&nbsp;**Get contents of** `http://<relay>:47879/voice/confirm` (POST, same Authorization header and Text body as before)
+4. &nbsp;&nbsp;**Get contents of** `http://<relay>:47879/voice` (POST, same Authorization header and Text body as before)
 5. &nbsp;&nbsp;**Speak** Contents of URL (leave *Wait Until Finished* on, or dictation hears the speech)
 6. &nbsp;&nbsp;**If** Contents of URL *does not contain* `again` → **Stop This Shortcut**
 7. **End Repeat**
@@ -35,7 +37,7 @@ On each turn, say one of these:
 
 The read-back also names the project it resolved, so a misheard project gets caught before
 the agent starts. Any reply that is waiting on you contains "again"; "Sent." and "Cancelled." don't, which is what ends the loop.
-An unconfirmed task expires after 10 minutes. Plain `/voice` still sends straight away.
+An unconfirmed task expires after 10 minutes.
 
 ## Setup
 1. `copy .env.example .env` and fill it in.

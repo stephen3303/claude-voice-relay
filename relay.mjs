@@ -21,6 +21,8 @@ const cfg = {
   oauth: process.env.CLAUDE_CODE_OAUTH_TOKEN,
   voicePort: Number(process.env.VOICE_PORT || 47879),
   voiceToken: process.env.VOICE_TOKEN || '',
+  // Read every Shortcut task back and wait for "send it"; VOICE_CONFIRM=0 sends immediately.
+  voiceConfirm: process.env.VOICE_CONFIRM !== '0',
   projectsRoot: process.env.PROJECTS_ROOT || path.resolve(ROOT, '..'),
   hookPort: Number(process.env.HOOK_PORT || 47878),
   image: process.env.AGENT_IMAGE || 'claude-voice-agent:latest',
@@ -344,7 +346,7 @@ if (cfg.voiceToken) {
       let text = body;
       try { const j = JSON.parse(body); if (j && typeof j.text === 'string') text = j.text; } catch { /* plain-text body */ }
       text = String(text).trim();
-      if (req.url === '/voice/confirm') {
+      if (req.url === '/voice/confirm' || cfg.voiceConfirm) {
         log('voice confirm:', text);
         res.writeHead(200, { 'content-type': 'text/plain' }).end(confirmStep(text));
         return;
