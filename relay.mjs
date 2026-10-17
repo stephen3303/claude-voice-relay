@@ -316,7 +316,11 @@ async function poll() {
         offset = u.update_id + 1;
         await onMessage(u.message).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
       }
-    } catch (e) { log('poll error:', e.message); await sleep(5000); }
+    } catch (e) {
+      // fetch hides the network reason (DNS, timeout, refused) in e.cause
+      log('poll error:', e.message, e.cause ? `(${e.cause.code || e.cause.message})` : '');
+      await sleep(5000);
+    }
   }
 }
 
