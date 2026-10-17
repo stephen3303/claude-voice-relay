@@ -260,13 +260,49 @@ async function onMessage(m) {
 }
 
 // Shared by Telegram and the iPhone Shortcut endpoint.
+const TASK_PREFIX = /^(new\s+)?task\b\s*[:,.]?\s*/i;
 async function dispatch(text) {
-  if (/^(new\s+)?task\s*[:,.]?\s+/i.test(text)) return startTask(text.replace(/^(new\s+)?task\s*[:,.]?\s+/i, ''));
+  if (TASK_PREFIX.test(text)) return startTask(text.replace(TASK_PREFIX, ''));
   if (/^\/?status\b/i.test(text)) return status();
   if (/^\/?(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^\/?(stop|kill)\s*/i, ''));
   if (/^\/?full\b/i.test(text)) return full(text.replace(/^\/?full\s*/i, ''));
   if (/^\/start\b/i.test(text)) return say('Relay online.');
   return reply(text);
+}
+
+// ---------- read-back loop for the iPhone Shortcut (/voice/confirm) ----------
+// Each utterance is held and read back until the user says "send it". Every reply that
+// expects another utterance contains the word "again"; the Shortcut stops listening otherwise.
+const SEND = /^(?:(?:yes|yeah|ok(?:ay)?)[\s,]+)?(?:send(?: it)?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
+const CANCEL = /^(?:cancel|never ?mind|forget it|stop)[\s.!]*$/i;
+const CONFIRM_TTL = 10 * 60000;
+let pending = null; // { text, at }
+
+function confirmStep(raw) {
+  if (pending && Date.now() - pending.at > CONFIRM_TTL) pending = null;
+  const isTask = TASK_PREFIX.test(raw);
+  const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
+  if (!body) return "I didn't catch that. Say the task again.";
+  if (SEND.test(body)) {
+    if (!pending) return 'Nothing is waiting to send. Say the task again.';
+    const { text } = pending;
+    pending = null;
+    log('voice confirmed:', text);
+    dispatch(text).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
+    return 'Sent.';
+  }
+  if (CANCEL.test(body)) { pending = null; return 'Cancelled. Nothing sent.'; }
+  if (isTask) {
+    const parsed = parseTask(body);
+    if (!parsed?.task) {
+      pending = null;
+      return `I heard: ${body}. I can't tell which project that's for. Say the task again, starting with in and the project name.`;
+    }
+    pending = { text: raw, at: Date.now() };
+    return `I heard: ${body}. That goes to ${spokenName(parsed.repo)}. Say send it, or say the task again.`;
+  }
+  pending = { text: raw, at: Date.now() };
+  return `I heard: ${body}. Say send it, or say it again.`;
 }
 
 async function poll() {
@@ -301,13 +337,18 @@ if (cfg.voiceToken) {
     const ok = got.length === want.length && crypto.timingSafeEqual(got, want);
     const h = String(req.headers.authorization || '');
     if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}, auth len ${h.length} (want ${want.length}), starts '${h.slice(0, 7)}', ends '${h.slice(-3)}'`); res.writeHead(401).end(); return; }
-    if (req.method !== 'POST' || req.url !== '/voice') { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
+    if (req.method !== 'POST' || (req.url !== '/voice' && req.url !== '/voice/confirm')) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });
     req.on('end', () => {
       let text = body;
       try { const j = JSON.parse(body); if (j && typeof j.text === 'string') text = j.text; } catch { /* plain-text body */ }
       text = String(text).trim();
+      if (req.url === '/voice/confirm') {
+        log('voice confirm:', text);
+        res.writeHead(200, { 'content-type': 'text/plain' }).end(confirmStep(text));
+        return;
+      }
       if (!text) log(`voice empty body, content-type ${req.headers['content-type']}, raw: ${body.slice(0, 200)}`);
       if (!text) { res.writeHead(400, { 'content-type': 'text/plain' }).end('Nothing heard.'); return; }
       log('voice:', text);
