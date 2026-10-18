@@ -42,7 +42,8 @@ const store = {
     } }));
     return id;
   },
-  // Natural-voice characters spent today, per account and in total (pk ALL). Refused, and not counted, past max.
+  // Natural-voice characters spent today, per account (pk SPEECH#<sub>, outside USER#<sub> so deleting and
+  // recreating an account doesn't reset it; it expires in 3 days) and in total (pk ALL). Refused past max.
   async spendSpeech(key, day, chars, max) {
     try {
       await db.send(new UpdateCommand({

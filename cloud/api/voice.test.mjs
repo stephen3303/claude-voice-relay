@@ -187,11 +187,11 @@ test('tts refunds the budget when nothing was spoken', async () => {
   const { call, budget, now } = setup();
   const day = new Date(now()).toISOString().slice(0, 10);
   await call('POST', '/voice/tts', { body: 'fail' });
-  assert.equal(budget.get(`USER#u1/${day}`), 0);
+  assert.equal(budget.get(`SPEECH#u1/${day}`), 0);
   assert.equal(budget.get(`ALL/${day}`), 0);
   budget.set(`ALL/${day}`, 1_000_000);
   assert.equal((await call('POST', '/voice/tts', { body: 'hello' })).statusCode, 429);
-  assert.equal(budget.get(`USER#u1/${day}`), 0, 'the total cap refused it, so u1 is not charged');
+  assert.equal(budget.get(`SPEECH#u1/${day}`), 0, 'the total cap refused it, so u1 is not charged');
 });
 
 test('tts refuses JSON without a text string instead of reading it out', async () => {
