@@ -10,12 +10,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code
 USER node
-# Mirror the host's line-ending policy, trust the bind-mounted repo, push over HTTPS with GH_TOKEN.
+# Mirror the host's line-ending policy, trust the bind-mounted repo, push over HTTPS with GH_TOKEN
+# (offered to github.com only, so another host a dependency points at never sees it).
 # The relay sets GH_TOKEN for each turn (a GitHub App token for this repo only); gh reads it too.
 RUN mkdir -p /home/node/.claude \
  && git config --global core.autocrlf input \
  && git config --global --add safe.directory '*' \
  && git config --global url."https://github.com/".insteadOf git@github.com: \
- && git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
+ && git config --global credential.https://github.com.helper '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
 WORKDIR /work
 CMD ["sleep", "infinity"]
