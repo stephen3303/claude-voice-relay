@@ -161,6 +161,13 @@ struct TranscriptLine: View {
             Text(text)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        // Long-press to copy or share the message (the menu also shows up in VoiceOver's actions).
+        .contextMenu {
+            Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+            ShareLink(item: text)
+        }
     }
 }
 
