@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bridge: talk to your Claude agents hands-free</title>
-<meta name="description" content="Bridge lets you talk to your Claude Code agents hands-free: from the Bridge iPhone app with Ray-Ban Meta glasses or any Bluetooth headset, or from any Claude app through the Bridge connector.">
+<meta name="description" content="Bridge lets you talk to your Claude Code agents hands-free: from the Bridge iPhone app with Ray-Ban Meta glasses or any Bluetooth headset, and soon from any Claude app through the Bridge connector.">
 <meta name="theme-color" content="#0E1730">
 <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
 <link rel="icon" type="image/png" sizes="256x256" href="icon-256.png">
@@ -31,13 +31,13 @@
     <div class="wrap">
       <img class="hero-icon" src="icon-256.png" alt="Bridge app icon: glasses with sound waves" width="128" height="128">
       <h1 id="hero-title">Bridge</h1>
-      <p class="pitch">Talk to your Claude Code agents hands-free, through Ray-Ban Meta glasses, your headphones, or any Claude app.</p>
+      <p class="pitch">Talk to your Claude Code agents hands-free, through Ray-Ban Meta glasses or your headphones, and soon from any Claude app.</p>
       <p class="badge">Coming soon to the App Store</p>
       <div class="hero-links">
         <a href="#how">How it works</a>
         <a href="https://github.com/stephen3303/claude-voice-relay">Relay on GitHub</a>
       </div>
-      <p class="works-with">Works with Ray-Ban Meta glasses · Works with any Bluetooth headset · Works with Claude and Claude Code</p>
+      <p class="works-with">Works with Ray-Ban Meta glasses · Works with any Bluetooth headset · Works with Claude Code</p>
     </div>
   </section>
 
@@ -47,7 +47,7 @@
       <ul class="grid three">
         <li class="card">
           <h3>Any Claude app</h3>
-          <p>Add Bridge as a connector in Claude, and Claude can start tasks for your agents and read their answers. Connectors sync across Claude on the web, desktop and mobile, so it isn't tied to one computer or phone.</p>
+          <p>Add Bridge as a connector in Claude, and Claude can start tasks for your agents in Bridge Cloud and read their answers. It works with Bridge Cloud, not the self-hosted relay. Connectors sync across Claude on the web, desktop and mobile, so it isn't tied to one computer or phone.</p>
           <p class="note">Coming with Bridge Cloud.</p>
         </li>
         <li class="card">
@@ -72,7 +72,7 @@
         <li class="card">
           <span class="step-number" aria-hidden="true">1</span>
           <h3>You speak</h3>
-          <p>Bridge turns your speech into text on your iPhone, using Apple's on-device speech recognition. Your audio stays on the phone.</p>
+          <p>Bridge turns your speech into text on your iPhone, using Apple's speech recognition. Where the iPhone can recognise your language on-device, your audio stays on the phone; otherwise Apple's servers recognise it.</p>
         </li>
         <li class="card">
           <span class="step-number" aria-hidden="true">2</span>
@@ -117,7 +117,7 @@
       <h2 id="req-title">What you need</h2>
       <div class="card">
         <ul>
-          <li>For the connector: Claude on any device, and a Bridge account (Sign in with Apple).</li>
+          <li>For the connector (coming with Bridge Cloud): a Claude plan that allows custom connectors, and a Bridge account (Sign in with Apple).</li>
           <li>For hands-free voice: an iPhone running iOS 17.2 or later, and any Bluetooth headset. Ray-Ban Meta glasses add the camera features.</li>
           <li>To self-host: a Windows PC running the relay, with Docker and Tailscale, and your own Claude subscription signed in to Claude Code on that PC.</li>
         </ul>
@@ -150,15 +150,15 @@
       <h2 id="faq-title">Questions</h2>
       <details>
         <summary>Do I need a Windows PC?</summary>
-        <p>Only to self-host. The relay on your own PC is one way to run your agents; the connector and Bridge Cloud don't need one.</p>
+        <p>Today, yes: your agents run in the relay on your own PC. When Bridge Cloud launches, the connector and the app will work without one.</p>
       </details>
       <details>
         <summary>Does my voice leave my iPhone?</summary>
-        <p>No. Speech is recognised on the iPhone. Only the recognised text is sent on: to the relay on your own PC over your Tailscale network, or to Bridge Cloud if you use it.</p>
+        <p>Not where the iPhone can recognise your language on-device; otherwise Apple's speech recognition servers receive it. Bridge itself only sends the recognised text: to the relay on your own PC over your Tailscale network, or to Bridge Cloud if you use it.</p>
       </details>
       <details>
         <summary>Do I need an account?</summary>
-        <p>Not to self-host: with the relay on your PC there is no account, and it uses your own Claude subscription, signed in to Claude Code on that PC. The connector and Bridge Cloud use a Bridge account, created with Sign in with Apple. Either way there are no analytics, no ads and no tracking.</p>
+        <p>Not to self-host: with the relay on your PC there is no account, and it uses your own Claude subscription, signed in to Claude Code on that PC. The relay has no analytics, no ads and no tracking. The connector and Bridge Cloud, when they launch, will use a Bridge account created with Sign in with Apple.</p>
       </details>
       <details>
         <summary>Do I need Ray-Ban Meta glasses?</summary>
