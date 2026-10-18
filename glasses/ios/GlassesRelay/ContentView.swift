@@ -74,6 +74,9 @@ struct ContentView: View {
                         Button("End", role: .destructive) { conversation.end(saying: nil) }
                     }
                     if !conversation.status.isEmpty { Text(conversation.status).font(.footnote).foregroundStyle(.secondary) }
+                    if !conversation.transcript.isEmpty {
+                        Button("Clear history", role: .destructive) { conversation.transcript = [] }
+                    }
                     ForEach(Array(conversation.transcript.enumerated()), id: \.offset) { _, line in
                         VStack(alignment: .leading) {
                             Text(line.who).font(.caption).foregroundStyle(.secondary)

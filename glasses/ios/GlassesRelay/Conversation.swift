@@ -10,7 +10,17 @@ final class Conversation: NSObject, ObservableObject {
     enum Phase: String { case idle = "Idle", listening = "Listening", thinking = "Thinking", speaking = "Speaking" }
 
     @Published var phase: Phase = .idle
-    @Published var transcript: [(who: String, text: String)] = []
+    /// Kept across launches (last 200 lines).
+    @Published var transcript: [(who: String, text: String)] = Conversation.loadTranscript() {
+        didSet {
+            if transcript.count > 200 { transcript.removeFirst(transcript.count - 200) }
+            UserDefaults.standard.set(transcript.map { ["who": $0.who, "text": $0.text] }, forKey: "transcript")
+        }
+    }
+    private static func loadTranscript() -> [(who: String, text: String)] {
+        let saved = UserDefaults.standard.array(forKey: "transcript") as? [[String: String]] ?? []
+        return saved.compactMap { d in d["who"].flatMap { w in d["text"].map { (who: w, text: $0) } } }
+    }
     @Published var status = ""
     /// Takes a photo with the glasses; set by GlassesController.
     var takePhoto: (() async throws -> Data)?
