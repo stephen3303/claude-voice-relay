@@ -47,6 +47,7 @@ test('"send it" with nothing held, cancel, and expiry', async () => {
   await call('POST', '/voice/confirm', { body: 'task: in app, fix login' });
   advance(11 * 60_000);
   assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /waited over ten minutes/);
+  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /Nothing is waiting/, 'the expired hold is cleared');
   assert.equal(started.length, 0);
 });
 

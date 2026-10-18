@@ -232,8 +232,9 @@ function findAgentPrefix(text) {
     .find((a) => t.startsWith(norm(a.name)));
 }
 
+// `body` is what was said after "task:", or { repo, task } already resolved by the read-back.
 async function startTask(body) {
-  const parsed = parseTask(body);
+  const parsed = typeof body === 'string' ? parseTask(body) : body;
   if (!parsed || !parsed.task) return say("I couldn't tell which project. Say task, in, the project name, a pause, then the task.");
   const name = spokenName(parsed.repo);
   let a = agents.get(name);
@@ -307,7 +308,7 @@ const confirmStep = makeConfirm({
   resolveProject: (spoken) => resolveRepo(spoken, false),
   spokenName,
   agentAwaiting: () => [...agents.values()].some((a) => a.awaiting),
-  dispatch: (text) => dispatch(text).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); }),
+  dispatch: (text) => (typeof text === 'string' ? dispatch(text) : startTask(text)).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); }),
   log,
 });
 
@@ -484,10 +485,19 @@ if (cfg.voiceToken) {
     if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
     if (req.method !== 'POST' || !['/voice', '/voice/confirm', '/voice/send'].includes(req.url)) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
     let body = '', tooBig = false;
-    req.on('data', (c) => { if (!tooBig) body += c; if (body.length > 20000) tooBig = true; });
+    req.setEncoding('utf8'); // a character split across chunks stays whole
+    req.on('data', (c) => {
+      if (tooBig) return;
+      body += c;
+      if (body.length <= 20000) return;
+      // Answer in words at once (a dropped connection is all the Shortcut could say otherwise),
+      // then close the connection instead of reading the rest.
+      tooBig = true;
+      res.writeHead(413, { 'content-type': 'text/plain', connection: 'close' })
+        .end('That was too long. Say it again, shorter.', () => req.destroy());
+    });
     req.on('end', () => {
-      // Answer in words: a dropped connection is all the Shortcut could say otherwise.
-      if (tooBig) { res.writeHead(413, { 'content-type': 'text/plain' }).end('That was too long. Say it again, shorter.'); return; }
+      if (tooBig) return;
       const text = utterance(body, req.headers['content-type']);
       // /voice/send skips the read-back: the app's "Read back what I said" setting is off.
       if (req.url === '/voice/confirm' || (cfg.voiceConfirm && req.url !== '/voice/send')) {

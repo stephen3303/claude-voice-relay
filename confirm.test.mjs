@@ -36,7 +36,7 @@ test('a task is read back with its project, then "send it" starts it', async () 
     'I heard: add a stop-loss check. That goes to Roundtable Trading. Say send it, or say the task again.');
   assert.deepEqual(sent, []);
   assert.equal(await say('task: Send it'), 'Sent.');
-  assert.deepEqual(sent, ['task: in trading bot, add a stop-loss check']);
+  assert.deepEqual(sent, [{ repo: '/p/Roundtable_Trading', task: 'add a stop-loss check' }]);
   assert.match(await say('send it'), /Nothing is waiting/, 'sent once only');
 });
 
@@ -55,7 +55,7 @@ test('saying the task again replaces it', async () => {
   await say('task: in trading bot, add a stop loss');
   assert.match(await say('task: in voice relay, change the voice'), /That goes to claude voice relay/);
   await say('send it');
-  assert.deepEqual(sent, ['task: in voice relay, change the voice']);
+  assert.deepEqual(sent, [{ repo: '/p/claude-voice-relay', task: 'change the voice' }]);
 });
 
 test('cancel drops the task', async () => {
@@ -90,7 +90,7 @@ test('dictation that stops after the project name keeps the project and asks for
   assert.equal(await say('task: send me a Telegram if you get this'),
     'I heard: send me a Telegram if you get this. That goes to claude voice relay. Say send it, or say the task again.');
   assert.equal(await say('send it'), 'Sent.');
-  assert.deepEqual(sent, ['task: in claude voice relay, send me a Telegram if you get this']);
+  assert.deepEqual(sent, [{ repo: '/p/claude-voice-relay', task: 'send me a Telegram if you get this' }]);
 });
 
 test('the task after a project named on its own can come without the task prefix (glasses app)', async () => {
@@ -99,7 +99,17 @@ test('the task after a project named on its own can come without the task prefix
   assert.equal(await say('change the voice'),
     'I heard: change the voice. That goes to claude voice relay. Say send it, or say the task again.');
   assert.equal(await say('send it'), 'Sent.');
-  assert.deepEqual(sent, ['task: in claude voice relay, change the voice']);
+  assert.deepEqual(sent, [{ repo: '/p/claude-voice-relay', task: 'change the voice' }]);
+});
+
+test('a held project is kept unless an exact project name replaces it', async () => {
+  const { say, sent } = setup();
+  await say('task: in voice relay');
+  assert.match(await say('task: for the README, fix typos'), /I heard: for the README, fix typos\. That goes to claude voice relay/);
+  await say('task: in voice relay');
+  assert.match(await say('task: in trading bot, add a stop loss'), /That goes to Roundtable Trading/);
+  await say('send it');
+  assert.deepEqual(sent, [{ repo: '/p/Roundtable_Trading', task: 'add a stop loss' }]);
 });
 
 test('a task with no project is not held', async () => {
@@ -122,6 +132,12 @@ test('with nothing held, "yes" answers a waiting agent but "send it" does not', 
   assert.equal(await waiting.say('Yes'), 'Sent.');
   assert.deepEqual(waiting.sent, ['yes']);
   assert.match(await waiting.say('send it'), /Nothing is waiting/);
+
+  const expired = setup({ awaiting: true });
+  await expired.say('task: in trading bot, add a stop loss');
+  expired.advance(11 * 60_000);
+  assert.match(await expired.say('go ahead'), /waited over ten minutes/, 'meant for the expired task, not the agent');
+  assert.deepEqual(expired.sent, []);
 
   const idle = setup();
   assert.match(await idle.say('yes'), /Nothing is waiting/);
@@ -155,7 +171,8 @@ test('a failing dispatch never breaks the reply', async () => {
 test('the request body can be JSON, a form, or plain text', () => {
   assert.equal(utterance('{"text":" task: in x, y "}', 'application/json'), 'task: in x, y');
   assert.equal(utterance('text=task%3A+in+x%2C+y', 'application/x-www-form-urlencoded'), 'task: in x, y');
-  assert.equal(utterance('said=send+it', 'application/x-www-form-urlencoded; charset=utf-8'), 'send it');
+  assert.equal(utterance('text=send+it', 'application/x-www-form-urlencoded; charset=utf-8'), 'send it');
+  assert.equal(utterance('task: in relay, set timeout=30', 'application/x-www-form-urlencoded'), 'task: in relay, set timeout=30');
   assert.equal(utterance('', 'application/x-www-form-urlencoded'), '');
   assert.equal(utterance('task: send it', 'application/x-www-form-urlencoded'), 'task: send it');
   assert.equal(utterance('send it\n', 'text/plain'), 'send it');

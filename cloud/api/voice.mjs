@@ -34,7 +34,7 @@ export function makeHandler(deps) {
   async function confirm(user, raw) {
     let held = await deps.store.getHeld(user);
     const expired = held && now() - held.at > HOLD_MS;
-    if (expired) held = null;
+    if (expired) { held = null; await deps.store.setHeld(user, null); }
     const isTask = TASK_PREFIX.test(raw);
     const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
     if (!body) return "I didn't catch that. Say the task again.";
