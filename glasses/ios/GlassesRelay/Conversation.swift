@@ -329,8 +329,7 @@ final class Conversation: NSObject, ObservableObject {
         }
         let u = AVSpeechUtterance(string: text)
         u.voice = Self.bestVoice()
-        let q = u.voice.map { ["default", "enhanced", "premium"][min($0.quality.rawValue - 1, 2)] } ?? "none"
-        status = "Voice: \(u.voice?.name ?? "none") (\(q))"
+        status = "Voice: \(u.voice?.name ?? "none") (\(u.voice.map(Self.qualityName) ?? "none"))"
         u.rate = 0.5
         await withCheckedContinuation { c in
             speechDone = c
@@ -339,12 +338,25 @@ final class Conversation: NSObject, ObservableObject {
         }
     }
 
-    /// The default en-US voice is the robotic compact one. Prefer the best installed voice
-    /// (Premium, then Enhanced); download more in Settings > Accessibility > Spoken Content > Voices.
+    /// The voice picked in Settings (stored by identifier), or else the best installed English voice
+    /// (Premium, then Enhanced; the default compact one is robotic). Download more in Settings >
+    /// Accessibility > Spoken Content > Voices.
     private static func bestVoice() -> AVSpeechSynthesisVoice? {
+        if let id = UserDefaults.standard.string(forKey: "voiceId"), !id.isEmpty,
+           let chosen = AVSpeechSynthesisVoice(identifier: id) { return chosen }
         let english = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "en-US" }
         return english.max { $0.quality.rawValue < $1.quality.rawValue }
             ?? AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    static func qualityName(_ v: AVSpeechSynthesisVoice) -> String {
+        ["default", "enhanced", "premium"][min(max(v.quality.rawValue - 1, 0), 2)]
+    }
+
+    /// Installed English voices for the Settings picker, best first.
+    static func installedVoices() -> [AVSpeechSynthesisVoice] {
+        AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
+            .sorted { ($0.quality.rawValue, $1.name) > ($1.quality.rawValue, $0.name) }
     }
 
     fileprivate func finished(_ u: AVSpeechUtterance) {

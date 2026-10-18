@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var testResult = ""
     @State private var photoResult = ""
     @State private var readBack = Conversation.readBack
+    @AppStorage("voiceId") private var voiceId = ""
     @State private var showPaywall = false
     @State private var showManage = false
     @State private var confirmDelete = false
@@ -51,10 +52,17 @@ struct SettingsView: View {
                 Section {
                     Toggle("Read back what I said", isOn: $readBack)
                         .onChange(of: readBack) { _, on in Conversation.readBack = on }
+                    Picker("Phone voice", selection: $voiceId) {
+                        Text("Best installed").tag("")
+                        ForEach(Conversation.installedVoices(), id: \.identifier) { v in
+                            Text("\(v.name) (\(Conversation.qualityName(v)))").tag(v.identifier)
+                        }
+                    }
                 } header: { Text("Voice") } footer: {
-                    Text(readBack
-                         ? "Bridge repeats what it heard and waits for \"send it\"."
-                         : "Bridge sends what you say after a 2-second pause, without repeating it.")
+                    Text((readBack
+                         ? "Bridge repeats what it heard and waits for \"send it\". "
+                         : "Bridge sends what you say after a 2-second pause, without repeating it. ")
+                         + "The phone voice is used when no natural voice is available. Download Premium voices in Settings > Accessibility > Spoken Content > Voices.")
                 }
                 #if APP_STORE
                 if account.signedIn && mode.wrappedValue == .cloud { callsSection }
