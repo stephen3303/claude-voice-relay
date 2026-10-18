@@ -14,12 +14,12 @@ if (-not (Select-String -Quiet 'environment:aws-deploy' $template)) {
   throw 'This template still has the old trust. Run the script from the branch that has the aws-deploy trust policy.'
 }
 
-# The trust matches GitHub's default subject for a job with an environment. A custom subject template
-# that leaves out "environment" would never match it.
+# The trust matches GitHub's default subject for a job with an environment,
+# repo:OWNER/REPO:environment:NAME. Any custom subject template changes that, so it would never match.
 $sub = gh api "repos/$repo/actions/oidc/customization/sub" | ConvertFrom-Json
 if ($LASTEXITCODE) { throw 'reading the OIDC subject settings failed' }
-if (-not $sub.use_default -and $sub.include_claim_keys -notcontains 'environment') {
-  throw "The repo's OIDC subject template ($($sub.include_claim_keys -join ', ')) has no environment claim; the new trust would never match."
+if (-not $sub.use_default) {
+  throw "The repo uses a custom OIDC subject template ($($sub.include_claim_keys -join ', ')); the new trust would never match."
 }
 
 # 1. The environment, accepting deployments from main only. Without this rule, a workflow on any branch
@@ -27,16 +27,16 @@ if (-not $sub.use_default -and $sub.include_claim_keys -notcontains 'environment
 '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' |
   gh api -X PUT "repos/$repo/environments/aws-deploy" --input - | Out-Null
 if ($LASTEXITCODE) { throw 'creating the aws-deploy environment failed' }
-$rules = gh api "repos/$repo/environments/aws-deploy/deployment-branch-policies" --jq '.branch_policies[] | "\(.id) \(.type) \(.name)"'
+# Parse the JSON here: Windows PowerShell splits a quoted --jq filter into several arguments.
+$rules = (gh api "repos/$repo/environments/aws-deploy/deployment-branch-policies" | ConvertFrom-Json).branch_policies
 if ($LASTEXITCODE) { throw 'reading the branch rules failed' }
 $names = @()
 foreach ($rule in @($rules | Where-Object { $_ })) {
-  $id, $type, $name = $rule -split ' ', 3
-  if ($type -eq 'branch' -and $name -eq 'main') { $names += $name; continue }
+  if ($rule.type -eq 'branch' -and $rule.name -eq 'main') { $names += $rule.name; continue }
   # Any other rule (a pattern like * or a tag) would let more than main deploy.
-  gh api -X DELETE "repos/$repo/environments/aws-deploy/deployment-branch-policies/$id" | Out-Null
-  if ($LASTEXITCODE) { throw "removing the branch rule '$name' failed" }
-  Write-Host "Removed branch rule '$name'"
+  gh api -X DELETE "repos/$repo/environments/aws-deploy/deployment-branch-policies/$($rule.id)" | Out-Null
+  if ($LASTEXITCODE) { throw "removing the branch rule '$($rule.name)' failed" }
+  Write-Host "Removed branch rule '$($rule.name)'"
 }
 if ($names -notcontains 'main') {
   gh api -X POST "repos/$repo/environments/aws-deploy/deployment-branch-policies" -f name=main -f type=branch | Out-Null

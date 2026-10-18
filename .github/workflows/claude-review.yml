@@ -76,12 +76,14 @@ jobs:
           persist-credentials: false
 
       # Claude Code loads CLAUDE.md and .claude/ from any subdirectory it reads, so remove the PR's copies
-      # everywhere in its tree. Their changes still show in .review/diff.patch.
+      # everywhere in its tree, and its symlinks. Their changes still show in .review/diff.patch.
       - name: Remove the PR's Claude config
         if: steps.fork.outputs.ok
         run: |
           find pr -path pr/.git -prune -o \( -name CLAUDE.md -o -name CLAUDE.local.md -o -name .claude -o -name .mcp.json \) -print0 |
             xargs -0 rm -rf
+          # A symlink could point Read(./**) at a path outside the tree, such as ~/.claude or /proc.
+          find pr -path pr/.git -prune -o -type l -print0 | xargs -0 rm -f
 
       # Claude Code refuses `git -C pr ...`, so hand reviewers the diff as files instead of git access.
       - name: Write the diff for the reviewers
