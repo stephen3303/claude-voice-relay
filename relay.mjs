@@ -62,6 +62,8 @@ const VOICE_PROMPT = [
   'If you need a decision, stop and make the SPOKEN line a single yes-or-no question, then continue after the user answers.',
   'Everything above the SPOKEN line may be as detailed as you like; the user reads it later.',
 ].join(' ');
+// Added when a turn has no GitHub token, so the user hears that work wasn't pushed instead of a failed push.
+const NO_GITHUB = 'This turn has no GitHub access: commit locally, do not push or open a pull request, and say in the SPOKEN line that the work is committed but not pushed.';
 
 // ---------- what the relay says ----------
 // Everything said is held for the glasses app, which long-polls /voice/inbox and reads new
@@ -110,12 +112,21 @@ if (!ghApp && !cfg.agentGhToken) log('WARNING: no GitHub access for agents (GITH
 // Agents can rewrite their repo's .git/config, so each folder's GitHub repo is pinned the first time
 // it's read (before any agent has run there) and kept across agents and restarts: a changed origin
 // must not get a token for another repo the App is installed on.
+// A pins file that exists but can't be read stops all tokens rather than being rebuilt from live config.
 const PINS_FILE = path.join(ROOT, 'github-pins.json');
 let pins = {};
-try { pins = JSON.parse(fs.readFileSync(PINS_FILE, 'utf8')); } catch { /* first run */ }
-function pinRepo(repoPath, slug) {
-  const key = path.resolve(repoPath).toLowerCase();
-  if (!pins[key]) { pins[key] = slug; fs.writeFileSync(PINS_FILE, JSON.stringify(pins, null, 2)); }
+try { pins = JSON.parse(fs.readFileSync(PINS_FILE, 'utf8')); }
+catch (e) { if (e.code !== 'ENOENT') { pins = null; log(`WARNING: ${PINS_FILE} is unreadable (${e.message}); agents get no GitHub token until it's fixed or deleted.`); } }
+function pinRepo(a, slug) {
+  if (!pins) return null;
+  const key = path.resolve(a.repoPath).toLowerCase();
+  if (!pins[key]) {
+    pins[key] = slug;
+    fs.writeFileSync(PINS_FILE, JSON.stringify(pins, null, 2));
+    // An agent from before pinning may already have changed origin, so this pin is only as good as that config.
+    log(a.ranBeforePins ? `WARNING: pinned ${a.repoPath} to ${slug} after an agent already ran there; check it's right, or fix it in github-pins.json.`
+      : `Pinned ${a.repoPath} to GitHub repo ${slug}.`);
+  }
   return pins[key];
 }
 
@@ -126,9 +137,9 @@ async function githubEnv(a) {
   if (ghApp) {
     const remote = parseRemote(await hostValue('git', ['-C', a.repoPath, 'remote', 'get-url', 'origin']));
     const slug = remote && `${remote.owner}/${remote.repo}`.toLowerCase();
-    const pinned = slug && pinRepo(a.repoPath, slug);
+    const pinned = slug && pinRepo(a, slug);
     if (!slug) log(a.name, 'has no GitHub origin remote, so no GitHub token.');
-    else if (slug !== pinned) log(a.name, `origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in github-pins.json if that was you.`);
+    else if (pinned && slug !== pinned) log(a.name, `origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in github-pins.json if that was you.`);
     token = slug && slug === pinned ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
     who = (await ghApp.identity()) || hostGit;
   }
@@ -148,7 +159,7 @@ function save() {
 }
 function load() {
   try {
-    for (const a of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))) agents.set(a.name, { ...a, busy: false, queue: [] });
+    for (const a of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))) agents.set(a.name, { ...a, busy: false, queue: [], ranBeforePins: !pins?.[path.resolve(a.repoPath).toLowerCase()] });
   } catch { /* first run */ }
 }
 
@@ -211,7 +222,8 @@ async function ensureContainer(a) {
 function runClaude(a, prompt, ghEnv) {
   return new Promise((resolve, reject) => {
     const args = ['exec', '-i', '-w', '/work', ...GH_ENV.flatMap((k) => ['-e', k]), a.container,
-      'claude', '-p', '--output-format', 'json', '--dangerously-skip-permissions', '--append-system-prompt', VOICE_PROMPT];
+      'claude', '-p', '--output-format', 'json', '--dangerously-skip-permissions', '--append-system-prompt',
+      ghEnv.GH_TOKEN ? VOICE_PROMPT : `${VOICE_PROMPT} ${NO_GITHUB}`];
     if (a.sessionId) args.push('--resume', a.sessionId);
     const p = spawn('docker', args, { windowsHide: true, env: { ...process.env, ...ghEnv } });
     let out = '', err = '';
