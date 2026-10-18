@@ -267,6 +267,8 @@ final class Conversation: NSObject, ObservableObject {
         phase = .speaking
         let u = AVSpeechUtterance(string: text)
         u.voice = Self.bestVoice()
+        let q = u.voice.map { ["default", "enhanced", "premium"][min($0.quality.rawValue - 1, 2)] } ?? "none"
+        status = "Voice: \(u.voice?.name ?? "none") (\(q))"
         u.rate = 0.5
         await withCheckedContinuation { c in
             speechDone = c
