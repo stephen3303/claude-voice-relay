@@ -89,17 +89,20 @@ export function runCloud({ spawn, claudeBin = 'claude', env, cwd, sessionId, pro
 // can't have a cloud agent, or '' when it can.
 export function makeCloudTurn({ run = runCloud, checkRepo, exists, say, speakResult, log = () => {} }) {
   return async function cloudTurn(a, prompt) {
-    if (!exists(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
     // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
     // failed after the session may have started) would start one with only that one line, next to an orphan
     // that can still push.
     if (!a.cloudId && !a.cloudNew) throw new Error(`I lost track of its cloud session; it may be in the Claude app. Start a new task for ${a.name}.`);
+    // Only the task's own first turn may start a session, so it's used up here whatever happens next:
+    // after a failed check, a later "yes" must not become a session's whole task.
+    const fresh = a.cloudNew;
+    a.cloudNew = false;
+    if (!exists(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
     // Checked once per task, before the session exists: what it pushes later is held by the repo's rules.
-    if (a.cloudNew) {
+    if (fresh) {
       const why = await checkRepo(a);
       if (why) throw new Error(why);
     }
-    a.cloudNew = false; // from here the session may exist, so a failure means start over
     let r;
     try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt }); }
     catch (e) {

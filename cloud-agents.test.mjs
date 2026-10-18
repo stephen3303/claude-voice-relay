@@ -115,7 +115,9 @@ test('cloudTurn starts nothing for a repo without the protection the relay requi
   const a = newAgent();
   await assert.rejects(h.cloudTurn(a, 'x'), /isn't set up for agents/);
   assert.equal(h.runs.length, 0);
-  assert.equal(a.cloudNew, true); // nothing started, so the task can be retried
+  // A later reply can't become a session's whole task, even once the repo passes.
+  await assert.rejects(h.cloudTurn(a, 'Yes, go ahead.'), /Start a new task/);
+  assert.equal(h.runs.length, 0);
 });
 
 test('cloudTurn refuses a reply with no session to go to', async () => {
