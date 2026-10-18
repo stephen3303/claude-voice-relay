@@ -1,5 +1,5 @@
-// BridgeApi: accounts (Sign in with Apple, cloud/api/auth.mjs), the voice API (HTTP API + Lambda)
-// and its table (DynamoDB). The API is its own token issuer: sessions are signed by a KMS key, and
+// BridgeApi: accounts (Sign in with Apple, cloud/api/auth.mjs), the voice API (HTTP API + Lambda),
+// its table (DynamoDB) and push to the app (APNs, cloud/api/push.mjs). The API is its own token issuer: sessions are signed by a KMS key, and
 // API Gateway's JWT authorizer reads the discovery document and key set the Auth function serves.
 import { Stack, Duration, RemovalPolicy, CfnOutput } from 'aws-cdk-lib';
 import * as kms from 'aws-cdk-lib/aws-kms';
@@ -7,6 +7,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as secrets from 'aws-cdk-lib/aws-secretsmanager';
 import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
@@ -14,7 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 const API_DIR = fileURLToPath(new URL('../../api', import.meta.url));
 const LOOK_MODEL = 'us.anthropic.claude-haiku-5-5';   // quick photo answers: fast and cheap
-const BUNDLE_ID = 'com.smitherman.glassesrelay';     // Apple identity tokens' audience
+const BUNDLE_ID = 'com.smitherman.glassesrelay';     // Apple identity tokens' audience, and the push topic
+const APNS_SECRET = 'bridge/apns';                   // { teamId, keyId, key }: cloud/setup/setup-apns.ps1
 
 export class ApiStack extends Stack {
   constructor(scope, id, props) {
@@ -36,10 +38,12 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(29),                 // HTTP API's limit is 30s; the inbox waits up to ~20s
       memorySize: 512,
-      environment: { TABLE: table.tableName, LOOK_MODEL },
+      environment: { TABLE: table.tableName, LOOK_MODEL, BUNDLE_ID, APNS_SECRET },
       logGroup: new logs.LogGroup(this, 'VoiceLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     table.grantReadWriteData(voice);
+    // Created outside CDK so the .p8 never passes through a template. Until it exists, push stays off.
+    secrets.Secret.fromSecretNameV2(this, 'ApnsKey', APNS_SECRET).grantRead(voice);
     // A cross-region inference profile needs the profile and the model it routes to, in every US region.
     voice.addToRolePolicy(new iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
@@ -84,6 +88,9 @@ export class ApiStack extends Stack {
       ['POST', '/api/voice/send', voiceIntegration, sessions],
       ['GET', '/api/voice/inbox', voiceIntegration, sessions],
       ['POST', '/api/voice/photo', voiceIntegration, sessions],
+      ['POST', '/api/push/register', voiceIntegration, sessions],
+      ['DELETE', '/api/push/register', voiceIntegration, sessions],
+      ['POST', '/api/push/test', voiceIntegration, sessions],
     ];
     for (const [method, path, integration, authorizer] of routes) {
       api.addRoutes({ path, methods: [apigw.HttpMethod[method]], integration, ...(authorizer ? { authorizer } : {}) });

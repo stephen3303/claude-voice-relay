@@ -30,7 +30,7 @@ jobs:
           cache-dependency-path: cloud/infra/package-lock.json
 
       - name: API tests
-        run: node --test ../api/voice.test.mjs ../api/auth.test.mjs
+        run: node --test ../api/voice.test.mjs ../api/auth.test.mjs ../api/push.test.mjs
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
