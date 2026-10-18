@@ -36,7 +36,8 @@ const page = (body) => `<!doctype html><meta charset="utf-8"><title>Bridge agent
 
 // Sets KEY=value in .env, replacing an existing line, keeping everything else as it was.
 function setEnv(text, key, value) {
-  const line = `${key}=${value}`;
+  // Single quotes: node --env-file reads them literally, so a # or a \n in a Windows path survives.
+  const line = `${key}='${value}'`;
   const re = new RegExp(`^${key}=.*$`, 'm');
   return re.test(text) ? text.replace(re, () => line) : `${text}${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`;
 }

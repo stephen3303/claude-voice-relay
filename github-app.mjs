@@ -107,7 +107,9 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     const key = keyOf(a.repoPath);
     if (!pins[key]) {
       pins[key] = slug;
-      fs.writeFileSync(pinsFile, JSON.stringify(pins, null, 2));
+      // Write then rename, so a crash mid-write can't leave a file that blocks every token.
+      fs.writeFileSync(`${pinsFile}.tmp`, JSON.stringify(pins, null, 2));
+      fs.renameSync(`${pinsFile}.tmp`, pinsFile);
       // An agent from before pinning may already have changed origin, so this pin is only as good as that config.
       log(a.ranBeforePins ? `WARNING: pinned ${a.repoPath} to ${slug} after an agent already ran there; check it's right, or fix it in ${path.basename(pinsFile)}.`
         : `Pinned ${a.repoPath} to GitHub repo ${slug}.`);
