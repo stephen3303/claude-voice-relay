@@ -44,7 +44,8 @@ subscription (originalTransactionId) belongs to one Bridge account, so a transac
 App Store Server Notifications v2 (`POST /api/appstore/notifications`) extend Pro on renewal and end it on a refund or
 revocation; a refunded transaction ID is kept, so the phone's old copy can't bring Pro back. No App Store Connect key is
 needed for any of this. The natural voice (`/api/voice/tts`) answers 402 without Pro, and the app speaks with the phone;
-photos (`/api/voice/photo`, Bedrock) answer that they need Pro. Missed refund notifications aren't caught up yet: that needs
+photos (`/api/voice/photo`, Bedrock) answer that they need Pro. Sandbox purchases count too, because App Review buys
+in the sandbox against this backend; that also gives invited TestFlight testers Pro for free, within the daily budgets. Missed refund notifications aren't caught up yet: that needs
 the App Store Server API and an App Store Connect key.
 
 ## Agents start the conversation (push)

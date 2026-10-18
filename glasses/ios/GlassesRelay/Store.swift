@@ -51,12 +51,15 @@ final class Store: ObservableObject {
     /// after signing in again) is told afresh, even if a report from before the sign-out lands late.
     private var reported: String?
     private var lastTry: (key: String, at: Date)?
+    private var inFlight: Task<Void, Never>?
 
     /// Bridge Cloud checks Apple's signature on the transaction itself before it unlocks the natural voice and photos.
     /// Until it has answered for this one (offline, a timeout), cloud voice and photo calls try again, briefly so
     /// a spoken reply isn't held up. A refusal (another account's subscription) is an answer: retrying won't change it.
     func reportIfNeeded() async {
         #if APP_STORE
+        // A reply or photo right after sign-in waits for the report already on its way, not just the next one.
+        if let inFlight { return await inFlight.value }
         guard let jws = latestTransaction, let session = Keychain.read(Account.sessionKey) else { return }
         let key = "\(session)|\(jws)"
         // At most one try every 30 s while the cloud doesn't answer, so a slow or failing cloud costs replies little.
@@ -64,12 +67,17 @@ final class Store: ObservableObject {
         guard key != reported else { return }
         if let last = lastTry, last.key == key, Date().timeIntervalSince(last.at) < 30 { return }
         lastTry = (key, Date())
-        do {
-            try await Relay.shared.cloud("POST", "api/pro", session: session, body: ["transaction": jws], timeout: 4)
-            reported = key
-        } catch Relay.Failure.http(let code) where code == 400 || code == 409 {
-            reported = key
-        } catch {}
+        let report = Task {
+            do {
+                try await Relay.shared.cloud("POST", "api/pro", session: session, body: ["transaction": jws], timeout: 4)
+                reported = key
+            } catch Relay.Failure.http(let code) where code == 400 || code == 409 {
+                reported = key
+            } catch {}
+        }
+        inFlight = report
+        await report.value
+        inFlight = nil
         #endif
     }
 
