@@ -1,6 +1,6 @@
 // claude-voice-relay
-// Telegram <-> containerized Claude Code agents, plus a localhost endpoint
-// that host-side Claude Code hooks post "needs you" notifications to.
+// Voice (Bridge app, iPhone Shortcut) <-> containerized Claude Code agents, plus a localhost
+// endpoint that host-side Claude Code hooks post "needs you" notifications to.
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -14,12 +14,11 @@ import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = path.join(ROOT, 'state.json');
+const OUTBOX_FILE = path.join(ROOT, 'outbox.json');
 const LOG_DIR = path.join(ROOT, 'logs');
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 const cfg = {
-  token: process.env.TELEGRAM_BOT_TOKEN,
-  chatId: process.env.TELEGRAM_CHAT_ID || '',
   oauth: process.env.CLAUDE_CODE_OAUTH_TOKEN,
   voicePort: Number(process.env.VOICE_PORT || 47879),
   voiceToken: process.env.VOICE_TOKEN || '',
@@ -39,10 +38,13 @@ const log = (...a) => {
   console.log(line);
   fs.appendFileSync(path.join(LOG_DIR, 'relay.log'), line + '\n');
 };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 
-if (!cfg.token) { log('TELEGRAM_BOT_TOKEN is missing from .env'); process.exit(1); }
+// The voice endpoint is the only way in and can start agents that push to GitHub, so it needs a
+// strong token. Without one the relay stays up with the voice endpoint off (exiting would only
+// make start.ps1 restart it every 10 seconds).
+const voiceOff = !cfg.voiceToken ? 'VOICE_TOKEN is missing from .env'
+  : cfg.voiceToken.length < 24 ? 'VOICE_TOKEN is shorter than 24 characters' : '';
 if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
@@ -56,31 +58,32 @@ const VOICE_PROMPT = [
   'Everything above the SPOKEN line may be as detailed as you like; the user reads it later.',
 ].join(' ');
 
-// ---------- Telegram ----------
-async function tg(method, body) {
-  const res = await fetch(`https://api.telegram.org/bot${cfg.token}/${method}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-  });
-  const json = await res.json();
-  if (!json.ok) throw new Error(`${method}: ${json.description}`);
-  return json.result;
-}
-// Everything said is also held briefly for the glasses app, which long-polls /voice/inbox
-// and reads new messages aloud. Ids restart with the relay, so replies carry BOOT too.
-const BOOT = Date.now();
-const outbox = []; // { id, at, text }
+// ---------- what the relay says ----------
+// Everything said is held for the glasses app, which long-polls /voice/inbox and reads new
+// messages aloud. It's kept in outbox.json so a restart doesn't lose what the app hasn't heard;
+// replies carry BOOT, so the app starts over if that file is lost and the ids restart.
+let BOOT = Date.now();
+let outbox = []; // { id, at, text }
 let outboxId = 0;
-const inboxWaiters = new Set();
-// `spoken` replaces what the glasses read aloud (e.g. the reply without the agent's name in front).
-async function say(text, { voice = true, spoken } = {}) {
-  if (voice) {
-    outbox.push({ id: ++outboxId, at: Date.now(), text: String(spoken ?? text) });
-    if (outbox.length > 50) outbox.shift();
-    for (const wake of [...inboxWaiters]) wake();
+try {
+  const o = JSON.parse(fs.readFileSync(OUTBOX_FILE, 'utf8'));
+  if (Number.isFinite(o.boot) && Number.isInteger(o.last) && Array.isArray(o.messages)) {
+    ({ boot: BOOT, last: outboxId, messages: outbox } = o);
   }
-  if (!cfg.chatId) return log('(no TELEGRAM_CHAT_ID yet) would send:', text);
-  try { await tg('sendMessage', { chat_id: cfg.chatId, text: String(text).slice(0, 4000) }); }
-  catch (e) { log('send failed:', e.message); }
+} catch { /* first run */ }
+const inboxWaiters = new Set();
+// `text` goes to the log; `spoken` replaces what the glasses read aloud (e.g. the reply without the agent's name in front).
+function say(text, { spoken } = {}) {
+  log('say:', text);
+  outbox.push({ id: ++outboxId, at: Date.now(), text: String(spoken ?? text) });
+  if (outbox.length > 50) outbox.shift();
+  // Write then rename, so stopping the relay mid-write can't leave a truncated file.
+  try {
+    fs.writeFileSync(OUTBOX_FILE + '.tmp', JSON.stringify({ boot: BOOT, last: outboxId, messages: outbox }));
+    fs.renameSync(OUTBOX_FILE + '.tmp', OUTBOX_FILE);
+  }
+  catch (e) { log('outbox save failed:', e.message); }
+  for (const wake of [...inboxWaiters]) wake();
 }
 
 // ---------- host values passed into agent containers ----------
@@ -94,8 +97,8 @@ const hostEnv = {
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
 function save() {
-  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, awaiting, lastFull, lastAt }) =>
-    ({ name, repoPath, container, sessionId, awaiting, lastFull, lastAt }));
+  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, awaiting, question, lastAt }) =>
+    ({ name, repoPath, container, sessionId, awaiting, question, lastAt }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
 }
 function load() {
@@ -202,16 +205,16 @@ async function turn(a, prompt, photo) {
     }
     const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt);
     a.sessionId = r.session_id || a.sessionId;
-    a.lastFull = r.result || '';
-    fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), a.lastFull);
+    fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
     const line = spoken(r.result);
     a.awaiting = line.endsWith('?');
-    await say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
+    a.question = a.awaiting ? line : ''; // "status" repeats it, in case the app missed it
+    say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
       { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line });
   } catch (e) {
     if (a.stopped) return;
     log(a.name, 'turn failed:', e.message);
-    await say(`${a.name} failed. ${e.message.slice(0, 200)}`);
+    say(`${a.name} failed. ${e.message.slice(0, 200)}`);
   } finally {
     if (photo) {
       fs.rmSync(photo, { force: true });
@@ -241,7 +244,7 @@ async function startTask(body) {
   if (a?.busy) return say(`${name} is still working. Say stop ${name} first, or wait for it.`);
   if (!a) { a = { name, repoPath: parsed.repo, container: `claude-agent-${norm(name)}`, queue: [] }; agents.set(name, a); }
   a.sessionId = null; // a new task gets fresh context
-  await say(`Starting ${name}.`);
+  say(`Starting ${name}.`);
   turn(a, parsed.task);
 }
 
@@ -265,7 +268,7 @@ async function status() {
   if (!agents.size) return say('No agents.');
   say([...agents.values()].map((a) => {
     const mins = Math.round((Date.now() - (a.lastAt || Date.now())) / 60000);
-    return `${a.name} ${a.busy ? `is working, ${mins} minutes in` : a.awaiting ? 'is waiting for your answer' : 'is idle'}.`;
+    return `${a.name} ${a.busy ? `is working, ${mins} minutes in.` : a.awaiting ? `is waiting for your answer: ${a.question || 'a yes or no question'}` : 'is idle.'}`;
   }).join(' '));
 }
 
@@ -278,27 +281,13 @@ async function stopAgent(text) {
   say(`Stopped ${a.name}.`);
 }
 
-async function full(text) {
-  const a = findAgentPrefix(text) || [...agents.values()].sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0))[0];
-  if (!a?.lastFull) return say('Nothing to show yet.');
-  say(a.lastFull, { voice: false }); // screen-only: too long to read aloud
-}
-
-async function onMessage(m) {
-  if (!m?.text) return;
-  const from = String(m.chat.id);
-  if (!cfg.chatId) return log(`Message from chat ${from}. If that's you, set TELEGRAM_CHAT_ID=${from} in .env and restart.`);
-  if (from !== cfg.chatId) return log('ignored message from chat', from);
-  return dispatch(m.text.trim());
-}
-
-// Shared by Telegram and the iPhone Shortcut endpoint.
+// Shared by the Bridge app and the iPhone Shortcut.
 async function dispatch(text) {
   if (TASK_PREFIX.test(text)) return startTask(text.replace(TASK_PREFIX, ''));
   if (/^\/?status\b/i.test(text)) return status();
   if (/^\/?(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^\/?(stop|kill)\s*/i, ''));
-  if (/^\/?full\b/i.test(text)) return full(text.replace(/^\/?full\s*/i, ''));
-  if (/^\/start\b/i.test(text)) return say('Relay online.');
+  // "full" used to show the whole reply in Telegram; keep it from reaching an agent as a prompt.
+  if (/^\/?full\b/i.test(text)) return say('The full reply is in the logs folder on your PC.');
   return reply(text);
 }
 
@@ -311,23 +300,6 @@ const confirmStep = makeConfirm({
   dispatch: (text) => (typeof text === 'string' ? dispatch(text) : startTask(text)).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); }),
   log,
 });
-
-async function poll() {
-  let offset = 0;
-  for (;;) {
-    try {
-      const updates = await tg('getUpdates', { offset, timeout: 50, allowed_updates: ['message'] });
-      for (const u of updates) {
-        offset = u.update_id + 1;
-        await onMessage(u.message).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
-      }
-    } catch (e) {
-      // fetch hides the network reason (DNS, timeout, refused) in e.cause
-      log('poll error:', e.message, e.cause ? `(${e.cause.code || e.cause.message})` : '');
-      await sleep(5000);
-    }
-  }
-}
 
 // ---------- localhost endpoint for host-side Claude Code hooks ----------
 http.createServer((req, res) => {
@@ -473,13 +445,15 @@ function tts(req, res) {
 }
 
 // ---------- voice endpoint for the iPhone Shortcut (firewalled to Tailscale) ----------
-if (cfg.voiceToken) {
-  const want = Buffer.from(`Bearer ${cfg.voiceToken}`);
+if (voiceOff) log(`${voiceOff}; voice endpoint off. Set a long random VOICE_TOKEN in .env and restart.`);
+else {
+  // Compare hashes, so neither the comparison's timing nor a length check gives the token away.
+  const sha = (v) => crypto.createHash('sha256').update(String(v)).digest();
+  const want = sha(`Bearer ${cfg.voiceToken}`);
   const server = http.createServer((req, res) => {
-    const got = Buffer.from(String(req.headers.authorization || ''));
-    const ok = got.length === want.length && crypto.timingSafeEqual(got, want);
-    const h = String(req.headers.authorization || '');
-    if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}, auth len ${h.length} (want ${want.length}), starts '${h.slice(0, 7)}', ends '${h.slice(-3)}'`); res.writeHead(401).end(); return; }
+    const ok = crypto.timingSafeEqual(sha(req.headers.authorization || ''), want);
+    // Never log any of the header: a near-miss would put part of the real token in the log.
+    if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}`); res.writeHead(401).end(); return; }
     if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
@@ -527,8 +501,7 @@ if (cfg.voiceToken) {
     log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`);
     log(cfg.openaiKey ? `natural voice on (${cfg.ttsVoice})` : 'natural voice off: no OPENAI_API_KEY, so the app speaks with the phone voice');
   });
-} else log('VOICE_TOKEN not set; voice endpoint disabled.');
+}
 
 load();
 log(`relay up. projects root: ${cfg.projectsRoot}. ${agents.size} saved agent(s).`);
-poll();

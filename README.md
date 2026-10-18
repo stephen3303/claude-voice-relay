@@ -2,16 +2,19 @@
 
 Hands-free Claude Code agents: start them with Siri, hear them in your AirPods, answer by voice.
 
-- **relay.mjs** (runs on Windows) — Telegram bot + agent manager. Each agent is its own Docker
+- **relay.mjs** (runs on Windows) — voice endpoint + agent manager. Each agent is its own Docker
   container with only its repo mounted at `/work`, running headless Claude Code; your replies
-  resume the same session.
+  resume the same session. You talk to it through the Bridge app or the iPhone Shortcut below.
 - **hooks/notify.mjs** — Claude Code Notification hook for your normal interactive sessions;
-  forwards "Claude needs you" to Telegram (notify only; answer those at a screen or via the Claude app).
+  the Bridge app reads "Claude needs you" aloud while a conversation is open. On your phone, the
+  Claude app's push notifications cover the same thing.
 
-## Voice commands (via Telegram)
+## Voice commands
 - `task: in <project>, <what to do>` — new agent (the iPhone Shortcut adds the `task:` prefix)
 - `yes` / `no` / anything else — answers the agent that's waiting (prefix with the agent name to target one)
-- `status`, `stop <agent>`, `full <agent>` (full text, for when you're at a screen)
+- `status`, `stop <agent>`
+
+An agent's full last reply (everything above its spoken summary) is in `logs/claude-agent-<name>.last.md`.
 
 Spoken project names match folder names under PROJECTS_ROOT; add nicknames to `aliases.json`,
 e.g. `{ "trading bot": "Roundtable_Trading" }`.

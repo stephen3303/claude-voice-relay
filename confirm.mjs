@@ -1,7 +1,7 @@
 // Read-back loop for the iPhone Shortcut and the glasses app (/voice/confirm).
 // Each utterance is held and read back until the user says "send it". Every reply that expects
 // another utterance contains the word "again"; the Shortcut's loop stops listening otherwise.
-// Dependencies are passed in, so tests run it without Telegram, Docker or the projects folder.
+// Dependencies are passed in, so tests run it without Docker or the projects folder.
 
 // "send it" and what dictation tends to make of it ("sent it", "send it please").
 export const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
