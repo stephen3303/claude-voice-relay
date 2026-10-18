@@ -66,6 +66,8 @@ final class Conversation: NSObject, ObservableObject {
     /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
     private var onHiFi = false
     private var micRetries = 0
+    /// Between begin and end. A photo answer (look) speaks outside a conversation, on whatever session iOS has.
+    private var conversing = false
     private var retry: Task<Void, Never>?
 
     /// Pause after you stop talking before your turn is sent.
@@ -92,7 +94,8 @@ final class Conversation: NSObject, ObservableObject {
         phase = .thinking
         self.trigger = trigger
         micRetries = 0
-        onHiFi = false   // a photo answer (look) speaks without listening after it; begin sets the session up afresh
+        onHiFi = false
+        conversing = true
         Task {
             guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; end(saying: nil); return }
             do { try configureAudioForGlasses() } catch { status = "Audio setup failed: \(error.localizedDescription)"; end(saying: nil); return }
@@ -116,6 +119,7 @@ final class Conversation: NSObject, ObservableObject {
             inboxTask?.cancel(); inboxTask = nil
             if let goodbye { await say(goodbye) }
             phase = .idle
+            conversing = false
             // In a call, CallKit deactivates the session when the call ends.
             if trigger != .call { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
             let ended = onEnded
@@ -150,7 +154,7 @@ final class Conversation: NSObject, ObservableObject {
 
     /// Playback only, so iOS routes to the glasses over A2DP. Not in an agent call: CallKit owns that session.
     private func useHiFiOutput() {
-        guard Self.hiFiSpeech, trigger != .call, !onHiFi else { return }
+        guard Self.hiFiSpeech, conversing, trigger != .call, !onHiFi else { return }
         // Only with the glasses' mic connected: without it there's nothing to switch back to, and the phone's speaker
         // or mic is already full quality.
         let session = AVAudioSession.sharedInstance()
