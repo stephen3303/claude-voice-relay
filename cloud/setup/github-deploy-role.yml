@@ -8,6 +8,10 @@ Parameters:
   Repo:
     Type: String
     Default: stephen3303/claude-voice-relay
+  RepoImmutable:
+    Type: String
+    Description: The same repo in GitHub's immutable subject format (owner@id/repo@id), which this repo uses
+    Default: stephen3303@2897814/claude-voice-relay@1422785947
 
 Resources:
   GitHubOidc:
@@ -30,7 +34,9 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${Repo}:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${RepoImmutable}:ref:refs/heads/main
+                  - !Sub repo:${Repo}:ref:refs/heads/main
       Policies:
         - PolicyName: cdk-deploy-and-bedrock-check
           PolicyDocument:
