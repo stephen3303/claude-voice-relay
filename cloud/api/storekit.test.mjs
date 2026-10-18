@@ -162,3 +162,16 @@ test('notifications without a transaction are fine, and forged ones are refused'
   assert.equal((await pro.notify('{"signedPayload":"x.y.z"}')).status, 400);
   assert.equal((await pro.notify('nope')).status, 400);
 });
+
+test('a refund that lands while the app is reporting the same transaction still ends Pro', async () => {
+  const { pro, owners, pros } = setup();
+  const t = jws(tx());
+  await pro.claim('u1', t);
+  pros.clear();
+  // The claim's check passes, then the refund arrives before its second look.
+  const o = owners.get('1000');
+  let reads = 0;
+  owners.get = function (k) { reads++; if (reads === 2) o.revoked.add('1001'); return Map.prototype.get.call(this, k); };
+  await pro.claim('u1', t);
+  assert.equal(await pro.isPro('u1'), false);
+});

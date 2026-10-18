@@ -43,7 +43,9 @@ App Store marker extensions), the bundle ID and the Pro product, then stores unt
 subscription (originalTransactionId) belongs to one Bridge account, so a transaction copied to another account is refused.
 App Store Server Notifications v2 (`POST /api/appstore/notifications`) extend Pro on renewal and end it on a refund or
 revocation; a refunded transaction ID is kept, so the phone's old copy can't bring Pro back. No App Store Connect key is
-needed for any of this. The natural voice (`/api/voice/tts`) answers 402 without Pro, and the app speaks with the phone.
+needed for any of this. The natural voice (`/api/voice/tts`) answers 402 without Pro, and the app speaks with the phone;
+photos (`/api/voice/photo`, Bedrock) answer that they need Pro. Missed refund notifications aren't caught up yet: that needs
+the App Store Server API and an App Store Connect key.
 
 ## Agents start the conversation (push)
 

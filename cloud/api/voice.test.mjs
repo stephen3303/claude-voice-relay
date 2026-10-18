@@ -252,3 +252,11 @@ test('POST /pro hands the signed transaction to the Pro check and answers what i
   assert.deepEqual(claims, [{ u: 'u1', jws: 'good' }, { u: 'u1', jws: undefined }]);
   assert.equal((await call('POST', '/pro', { body: '{}', user: null })).statusCode, 401);
 });
+
+test('photos are for Bridge Pro too: Bedrock is never called without it', async () => {
+  const { call, pros, looked, started } = setup();
+  pros.delete('u1');
+  const r = await call('POST', '/voice/photo', { body: Buffer.from('jpegjpg').toString('base64'), base64: true });
+  assert.match(r.body, /need Bridge Pro/);
+  assert.equal(looked.length + started.length, 0);
+});

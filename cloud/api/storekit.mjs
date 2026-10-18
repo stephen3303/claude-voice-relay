@@ -77,7 +77,11 @@ export function makePro(deps) {
       return { status: 409, body: { error: 'That subscription belongs to another Bridge account.' } };
     }
     // A refunded transaction stays refunded, even though the copy on the phone still says it's paid.
-    if (e.until && !revokedIn(await deps.store.owner(e.tx), e.transactionId)) await deps.store.setPro(user, e);
+    if (e.until && !revokedIn(await deps.store.owner(e.tx), e.transactionId)) {
+      await deps.store.setPro(user, e);
+      // A refund that landed between the check and the write: undo the write.
+      if (revokedIn(await deps.store.owner(e.tx), e.transactionId)) await deps.store.dropPro(user, e.transactionId);
+    }
     const pro = await isPro(user);
     return { status: 200, body: { pro } };
   }

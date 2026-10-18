@@ -112,6 +112,7 @@ export function makeHandler(deps) {
   }
 
   async function photo(user, jpeg, said) {
+    if (!await deps.pro.isPro(user)) return 'Photos need Bridge Pro. Open Bridge to start a free trial.';
     if (!jpeg?.length) return 'The photo was empty. Try again.';
     if (jpeg.length > PHOTO_MAX) return 'That photo is too large.';
     const m = said.match(SEND_TO);

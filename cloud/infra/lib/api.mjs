@@ -164,8 +164,9 @@ export class ApiStack extends Stack {
       'GET /api/oauth/authorize': { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 20 },
       // Shared by every caller: a backstop against floods. Cost is capped per account and per day in voice.mjs.
       'POST /api/voice/tts': { ThrottlingRateLimit: 20, ThrottlingBurstLimit: 40 },
-      // Open to anyone; only Apple's signed notifications get past the Lambda.
-      'POST /api/appstore/notifications': { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 20 },
+      // Open to anyone; only Apple's signed notifications get past the Lambda. High enough that junk can't crowd
+      // out Apple's retries of a refund.
+      'POST /api/appstore/notifications': { ThrottlingRateLimit: 50, ThrottlingBurstLimit: 100 },
     };
     // App Store Server Notifications v2 (cloud/api/storekit.mjs): renewals and refunds of Bridge Pro. No authorizer:
     // Apple signs every notification, and the Lambda checks that signature against Apple's root.
@@ -179,7 +180,11 @@ export class ApiStack extends Stack {
       environment: { TABLE: table.tableName, BUNDLE_ID },
       logGroup: new logs.LogGroup(this, 'AppStoreLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
-    table.grantReadWriteData(appStoreFn);
+    // Anyone can reach it, so it gets only the item calls storekit.mjs makes, not Query or Scan.
+    appStoreFn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:DeleteItem'],
+      resources: [table.tableArn],
+    }));
     for (const route of api.addRoutes({ path: '/api/appstore/notifications', methods: [apigw.HttpMethod.POST],
       integration: new HttpLambdaIntegration('AppStoreIntegration', appStoreFn) })) {
       stage.node.addDependency(route);
