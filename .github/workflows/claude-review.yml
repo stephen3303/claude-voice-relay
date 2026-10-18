@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   review:
-    # Fork PRs get no secrets, and their code shouldn't run next to one anyway.
+    # Fork PRs get no secrets, and their code shouldn't run next to one anyway (manual runs: see "Skip fork PRs").
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)
@@ -39,19 +39,32 @@ jobs:
           else echo "::notice::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret yet, so the Claude review is skipped. See .github/CICD.md."
           fi
 
-      - uses: actions/checkout@v4
+      # A manual run can name any PR, including a fork's; its code must not run next to the secrets.
+      - name: Skip fork PRs
+        id: fork
         if: steps.auth.outputs.ok
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          cross=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json isCrossRepository -q .isCrossRepository)
+          if [ "$cross" = false ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "::notice::PR $PR comes from a fork, so the Claude review is skipped."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.fork.outputs.ok
         with:
           fetch-depth: 0
           ref: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || '' }}
 
       - uses: actions/setup-node@v4
-        if: steps.auth.outputs.ok
+        if: steps.fork.outputs.ok
         with:
           node-version: 22
 
       - uses: anthropics/claude-code-action@v1
-        if: steps.auth.outputs.ok
+        if: steps.fork.outputs.ok
         env:
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
         with:

@@ -28,13 +28,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Check for a Claude credential, and that the PR isn't from a fork
+        id: gate
+        env:
+          API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ (github.event.pull_request || github.event.issue.pull_request) && (github.event.pull_request.number || github.event.issue.number) || '' }}
+        run: |
+          if [ -z "$API_KEY$OAUTH" ]; then
+            echo "::notice::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret yet, so @claude is off. See .github/CICD.md."
+            exit 0
+          fi
+          # The commenter is trusted, but a fork's code (npm ci, cdk synth, tests) must not run next to the secrets.
+          if [ -n "$PR" ] && [ "$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json isCrossRepository -q .isCrossRepository)" != false ]; then
+            echo "::notice::PR $PR comes from a fork, so @claude doesn't run on it."
+            exit 0
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.ok
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.ok
         with:
           node-version: 22
       - uses: anthropics/claude-code-action@v1
+        if: steps.gate.outputs.ok
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
