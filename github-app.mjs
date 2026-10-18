@@ -16,7 +16,7 @@ const TOKEN_PERMISSIONS = { contents: 'write', pull_requests: 'write', metadata:
 // owner/repo from a GitHub remote: https://github.com/o/r(.git), git@github.com:o/r.git, ssh://git@github.com/o/r.
 // Only GitHub's own name characters, so a crafted remote can't steer the App's API calls to another path.
 export function parseRemote(url) {
-  const m = String(url || '').trim().match(/(?:^|[/@])github\.com[:/]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i);
+  const m = String(url || '').trim().match(/^(?:https?:\/\/(?:[^@/\s]+@)?|ssh:\/\/(?:[^@/\s]+@)?|[^@/\s:]+@)github\.com[:/]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i);
   if (!m || [m[1], m[2]].some((s) => s === '.' || s === '..')) return null;
   return { owner: m[1], repo: m[2] };
 }
@@ -108,8 +108,11 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     if (!pins[key]) {
       pins[key] = slug;
       // Write then rename, so a crash mid-write can't leave a file that blocks every token.
-      fs.writeFileSync(`${pinsFile}.tmp`, JSON.stringify(pins, null, 2));
-      fs.renameSync(`${pinsFile}.tmp`, pinsFile);
+      // A failed save (a locked file) keeps the pin in memory for this run rather than failing the turn.
+      try {
+        fs.writeFileSync(`${pinsFile}.tmp`, JSON.stringify(pins, null, 2));
+        fs.renameSync(`${pinsFile}.tmp`, pinsFile);
+      } catch (e) { log(`WARNING: couldn't save ${pinsFile}: ${e.message}`); }
       // An agent from before pinning may already have changed origin, so this pin is only as good as that config.
       log(a.ranBeforePins ? `WARNING: pinned ${a.repoPath} to ${slug} after an agent already ran there; check it's right, or fix it in ${path.basename(pinsFile)}.`
         : `Pinned ${a.repoPath} to GitHub repo ${slug}.`);

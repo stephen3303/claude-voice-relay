@@ -23,6 +23,7 @@ test('parseRemote reads the GitHub remotes git uses', () => {
   assert.equal(parseRemote('https://github.com/o/r?x=1'), null);
   assert.equal(parseRemote('https://github.com/o/r#x'), null);
   assert.equal(parseRemote('https://evilgithub.com/o/r.git'), null);
+  assert.equal(parseRemote('https://evil.example/github.com/o/r'), null);
 });
 
 test('appJwt is an RS256 JWT for the App, valid for under ten minutes', () => {
@@ -148,4 +149,18 @@ test('without the App, AGENT_GH_TOKEN and the host git identity are used', async
   assert.equal(env.GH_TOKEN, 'github_pat_x');
   assert.equal(env.GIT_COMMITTER_EMAIL, 's@example.com');
   assert.equal((await agentGitHub({ ghApp: null }).gh.env(agent)).GH_TOKEN, '');
+});
+
+test('a pin that cannot be saved still holds for this run', async () => {
+  const logs = [];
+  const gh = makeAgentGitHub({
+    ghApp: { tokenFor: async () => 'ghs_x', identity: async () => null },
+    hostGit: { name: 'Stephen', email: 's@example.com' },
+    getRemote: async () => 'https://github.com/stephen3303/claude-voice-relay.git',
+    pinsFile: path.join(os.tmpdir(), 'no-such-dir-for-pins', 'github-pins.json'),
+    log: (m) => logs.push(m),
+  });
+  assert.equal((await gh.env(agent)).GH_TOKEN, 'ghs_x');
+  assert.ok(logs.some((m) => /couldn't save/.test(m)));
+  assert.ok(gh.isPinned(agent.repoPath));
 });
