@@ -85,18 +85,14 @@ test('runCloud rejects when claude is not installed', async () => {
   await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x', timeoutMs: 1000 }), /ENOENT/);
 });
 
-function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, creds = { token: 't' }, exists = true } = {}) {
-  const runs = [], said = [], spoken = [], released = [];
-  const agentGitHub = {
-    pinNow: async () => {},
-    credentials: async () => creds,
-    release: async (c) => { released.push(c); },
-  };
+function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true } = {}) {
+  const runs = [], said = [], spoken = [], checked = [];
   const cloudTurn = makeCloudTurn({
     run: async (o) => { runs.push(o); if (reply instanceof Error) throw reply; return reply; },
-    agentGitHub, exists: () => exists, say: (t, o) => said.push(o?.spoken ?? t), speakResult: (a, r) => spoken.push(r.result),
+    checkRepo: async (a) => { checked.push(a.name); return why; },
+    exists: () => exists, say: (t, o) => said.push(o?.spoken ?? t), speakResult: (a, r) => spoken.push(r.result),
   });
-  return { cloudTurn, runs, said, spoken, released };
+  return { cloudTurn, runs, said, spoken, checked };
 }
 const newAgent = () => ({ name: 'trading bot', repoPath: '/p/trading-bot', cloudNew: true });
 
@@ -105,17 +101,17 @@ test('cloudTurn starts a new task as a session after the repo check, then contin
   const a = newAgent();
   await h.cloudTurn(a, 'add a stop-loss');
   assert.deepEqual(h.runs[0], { cwd: '/p/trading-bot', sessionId: undefined, prompt: 'add a stop-loss' });
-  assert.deepEqual(h.released, [{ token: 't' }]);
+  assert.deepEqual(h.checked, ['trading bot']);
   assert.deepEqual(h.spoken, ['SPOKEN: Done.']);
   assert.equal(a.cloudId, 'cse_1');
   assert.equal(a.cloudNew, false);
   await h.cloudTurn(a, 'Yes, go ahead.');
   assert.equal(h.runs[1].sessionId, 'cse_1');
-  assert.equal(h.released.length, 1); // the check runs once per task
+  assert.equal(h.checked.length, 1); // the check runs once per task
 });
 
 test('cloudTurn starts nothing for a repo without the protection the relay requires', async () => {
-  const h = turnHarness({ creds: null });
+  const h = turnHarness({ why: "its repo isn't set up for agents yet." });
   const a = newAgent();
   await assert.rejects(h.cloudTurn(a, 'x'), /isn't set up for agents/);
   assert.equal(h.runs.length, 0);

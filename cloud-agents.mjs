@@ -75,21 +75,19 @@ export function runCloud({ spawn, claudeBin = 'claude', env, cwd, sessionId, pro
 }
 
 // One agent turn in cloud mode. `a` is the relay's agent record: a.cloudNew is set by a new task, and only
-// a new task starts a cloud session; a reply goes to a.cloudId. agentGitHub is github-app.mjs's.
-export function makeCloudTurn({ run = runCloud, agentGitHub, exists, say, speakResult, log = () => {} }) {
+// a new task starts a cloud session; a reply goes to a.cloudId. checkRepo(a) resolves to why the repo
+// can't have a cloud agent, or '' when it can.
+export function makeCloudTurn({ run = runCloud, checkRepo, exists, say, speakResult, log = () => {} }) {
   return async function cloudTurn(a, prompt) {
     if (!exists(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
     // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
     // failed after the session may have started) would start one with only that one line, next to an orphan
     // that can still push.
     if (!a.cloudId && !a.cloudNew) throw new Error(`I lost track of its cloud session; it may be in the Claude app. Start a new task for ${a.name}.`);
-    // The session pushes through the Claude GitHub app, not the relay, so the repo must have the same
-    // protected default branch the relay requires before it pushes (README: GitHub access for agents).
+    // Checked once per task, before the session exists: what it pushes later is held by the repo's rules.
     if (a.cloudNew) {
-      await agentGitHub.pinNow(a);
-      const creds = await agentGitHub.credentials(a);
-      if (!creds) throw new Error("its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.");
-      await agentGitHub.release(creds);
+      const why = await checkRepo(a);
+      if (why) throw new Error(why);
     }
     a.cloudNew = false; // from here the session may exist, so a failure means start over
     const r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt });

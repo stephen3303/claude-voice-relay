@@ -289,7 +289,18 @@ function speakResult(a, r) {
 // remote, so it shows in the Claude app. The session pushes and opens its own pull request.
 const cloudTurn = makeCloudTurn({
   run: (o) => runCloud({ spawn, claudeBin: process.env.CLAUDE_BIN || 'claude', env: process.env, ...o }),
-  agentGitHub, exists: fs.existsSync, say, speakResult, log,
+  // The session pushes through the Claude GitHub app, not the relay, so the repo must pass the check the
+  // relay's GitHub App runs before it pushes (protected default branch, CODEOWNERS; README: GitHub access
+  // for agents). AGENT_GH_TOKEN skips that check, so cloud mode needs the App.
+  async checkRepo(a) {
+    if (!ghApp) return 'cloud agents need the GitHub App set up first, as in the README. Nothing was started.';
+    await agentGitHub.pinNow(a);
+    const creds = await agentGitHub.credentials(a);
+    if (!creds) return "its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.";
+    await agentGitHub.release(creds).catch((e) => log(a.name, 'token revoke failed:', e.message));
+    return '';
+  },
+  exists: fs.existsSync, say, speakResult, log,
 });
 
 // `photo` (optional) is a host file copied into the container for this turn only, then deleted.

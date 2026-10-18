@@ -140,6 +140,7 @@ with its full transcript, and you can pick it up there. The relay still speaks t
   relay's GitHub App. The relay still only starts one for a repo that passes the same check as
   before a relay push (protected default branch, CODEOWNERS, the App installed), because those
   rules are what stop any bot, the Claude GitHub app included, from changing main on its own.
+  So cloud mode needs the GitHub App below; `AGENT_GH_TOKEN` alone isn't enough.
 - It needs Claude Code on the PC signed in with your claude.ai account: run `claude auth login` once
   (and `claude update`; older versions don't wait for a follow-up's answer, so you hear "sent" and read it in the app).
   The `CLAUDE_CODE_OAUTH_TOKEN` setup token can't start cloud sessions; the relay keeps it away from them.
