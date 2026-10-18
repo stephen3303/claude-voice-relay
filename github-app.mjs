@@ -219,9 +219,13 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     if (!ghApp && !fallbackToken) return null;
     // Pinned with AGENT_GH_TOKEN too: it may cover more repos than this one.
     const slug = `${remote.owner}/${remote.repo}`.toLowerCase();
-    const pinned = pin(a, slug);
-    if (pinned && slug !== pinned) log(`${a.name}: origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in ${path.basename(pinsFile)} if that was you.`);
-    if (slug !== pinned) return null;
+    // Only read here: pins are made before the turn (pinNow), never from what the agent left in .git/config.
+    const pinned = pins?.[keyOf(a.repoPath)];
+    if (!pinned) { log(`${a.name}'s folder isn't pinned to a GitHub repo; no GitHub token.`); return null; }
+    if (slug !== pinned) {
+      log(`${a.name}: origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in ${path.basename(pinsFile)} if that was you.`);
+      return null;
+    }
     if (!ghApp) return { token: fallbackToken, ...remote };
     const token = await ghApp.tokenFor(remote.owner, remote.repo);
     if (!token) return null;

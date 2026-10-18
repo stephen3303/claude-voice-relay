@@ -177,11 +177,13 @@ function agentGitHub({ remote = 'https://github.com/stephen3303/claude-voice-rel
 }
 const agent = { name: 'voice relay', repoPath: '/p/claude-voice-relay' };
 
-const tok = async (gh) => (await gh.credentials(agent))?.token || '';
+// A turn: pinned before the agent runs, credentials after.
+const turn = async (gh) => { await gh.pinNow(agent); return gh.credentials(agent); };
+const tok = async (gh) => (await turn(gh))?.token || '';
 
 test('an agent gets a token for its pinned repo only, and commits as the App bot', async () => {
   const { gh, minted, pinsFile } = agentGitHub();
-  assert.deepEqual(await gh.credentials(agent), { token: 'ghs_x', owner: 'stephen3303', repo: 'claude-voice-relay' });
+  assert.deepEqual(await turn(gh), { token: 'ghs_x', owner: 'stephen3303', repo: 'claude-voice-relay' });
   assert.equal((await gh.identity()).GIT_AUTHOR_NAME, 'bridge-agents[bot]');
   assert.deepEqual(minted, ['stephen3303/claude-voice-relay']);
   assert.ok(gh.isPinned(agent.repoPath));
@@ -202,6 +204,14 @@ test('a folder pinned before the turn keeps that pin when the agent changes orig
   assert.equal(off.gh.isPinned(agent.repoPath), false);
 });
 
+test('credentials never pin: a folder not pinned before the turn gets no token', async () => {
+  const { gh, minted, logs } = agentGitHub();
+  assert.equal(await gh.credentials(agent), null); // no pinNow, as if origin was set during the turn
+  assert.equal(gh.isPinned(agent.repoPath), false);
+  assert.deepEqual(minted, []);
+  assert.match(logs.at(-1), /isn't pinned/);
+});
+
 test('the identity a turn commits as never carries a token', async () => {
   const { gh } = agentGitHub();
   assert.deepEqual(Object.keys(await gh.identity()).sort(),
@@ -210,7 +220,7 @@ test('the identity a turn commits as never carries a token', async () => {
 
 test('a changed origin gets no token and is not re-pinned', async () => {
   const { gh, minted, logs, state } = agentGitHub();
-  await gh.credentials(agent);
+  await turn(gh);
   state.remote = 'https://github.com/stephen3303/other-repo.git';
   assert.equal(await gh.credentials(agent), null);
   assert.deepEqual(minted, ['stephen3303/claude-voice-relay']);
@@ -240,7 +250,7 @@ test('a folder is only pinned to the repo of its own name', async () => {
 
 test('pins survive a restart', async () => {
   const first = agentGitHub();
-  await first.gh.credentials(agent);
+  await turn(first.gh);
   const logs = [], minted = [];
   const restarted = makeAgentGitHub({
     ghApp: { tokenFor: async (o, r) => { minted.push(`${o}/${r}`); return 'ghs_y'; }, identity: async () => ({ name: 'b[bot]', email: 'b@x' }) },
@@ -248,6 +258,7 @@ test('pins survive a restart', async () => {
     getRemote: async () => 'https://github.com/stephen3303/other-repo.git',
     pinsFile: first.pinsFile, log: (m) => logs.push(m),
   });
+  await restarted.pinNow(agent); // the pin on file stands
   assert.equal(await restarted.credentials(agent), null);
   assert.deepEqual(minted, []);
   assert.match(logs[0], /origin changed from stephen3303\/claude-voice-relay/);
@@ -288,12 +299,12 @@ test('a pin that cannot be saved still holds for this run', async () => {
 
 test('an App token is revoked on release; AGENT_GH_TOKEN is left alone', async () => {
   const { gh, revoked } = agentGitHub();
-  const creds = await gh.credentials(agent);
+  const creds = await turn(gh);
   await gh.release(creds);
   await gh.release(creds); // once only
   assert.deepEqual(revoked, ['ghs_x']);
   const pat = agentGitHub({ ghApp: null, fallbackToken: 'github_pat_x' });
-  await pat.gh.release(await pat.gh.credentials(agent));
+  await pat.gh.release(await turn(pat.gh));
   await pat.gh.release(null); // nothing was issued
 });
 
