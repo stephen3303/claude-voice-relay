@@ -80,6 +80,33 @@ The phone reaches the relay over HTTPS with `tailscale serve --bg 47879`. In the
 2. `npm run build-agent`
 3. `npm run install-hook`
 4. `npm start` (or let the ClaudeVoiceRelay scheduled task start it at logon)
+5. Give agents their own GitHub access (below).
+
+## GitHub access for agents
+Agents push with their own GitHub App, never your login. Each turn the relay hands the agent's
+container a token that lasts an hour and only covers that agent's repository, with contents and
+pull request access and nothing else: agents can't edit workflows, read secrets, change settings
+or touch other repos. Their commits and pull requests show as `<app-name>[bot]`.
+
+1. On the PC, in this folder: `node setup-github-app.mjs`. The browser opens GitHub; click
+   **Create GitHub App**. The private key goes to `%USERPROFILE%\.bridge\` and `.env` gets
+   `GITHUB_APP_ID` and `GITHUB_APP_KEY_FILE`.
+2. On the install page that opens: **Only select repositories**, pick the repos agents may push to,
+   **Install**. Add more later under GitHub **Settings → Applications → Installed GitHub Apps**.
+3. `npm run build-agent` (the image now has `gh` for opening pull requests), then restart the relay.
+   Older agent containers are replaced on their next turn; their sessions are kept.
+
+Keep agents off `main` with a ruleset in each repo: **Settings → Rules → Rulesets → New ruleset →
+New branch ruleset**. Name `Protect main`, Enforcement **Active**. Under **Bypass list → Add bypass**
+pick **Repository admin** and set it to **For pull requests only** (so you can still merge your own
+pull requests). **Target branches → Add target → Include default branch.** Leave **Restrict
+deletions** and **Block force pushes** on, tick **Require a pull request before merging** with
+**Required approvals** 1, then **Create**. An agent's push to `main` is now refused, and its pull
+requests need your approval before they merge (on this repo, merging deploys to AWS).
+
+Without the App you can put a fine-grained token in `AGENT_GH_TOKEN` instead (GitHub **Settings →
+Developer settings → Fine-grained tokens**, only the agents' repos, Contents and Pull requests
+read and write, an expiry). It acts as you, so the ruleset can't tell agents apart; the App is better.
 
 Tested from my phone: the relay has been verified end to end from an iPhone.
 

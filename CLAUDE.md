@@ -23,6 +23,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   talktobridge.com, DNS at Cloudflare).
 - `site/` — the website (privacy, terms, support), on GitHub Pages now; talktobridge.com later.
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.
+- `github-app.mjs` — agents push as a GitHub App (`setup-github-app.mjs` creates it): each turn gets an hour-long
+  token for that agent's repo only, passed with `docker exec -e`. Agents never get Stephen's own GitHub login.
 
 ## Build, test, run
 - Relay: `start.ps1` runs it and restarts it if it exits, so to reload after editing `relay.mjs`,

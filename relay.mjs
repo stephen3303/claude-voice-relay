@@ -10,6 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
+import { makeGitHubApp, parseRemote } from './github-app.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +32,9 @@ const cfg = {
   ttsVoice: process.env.TTS_VOICE || 'coral',
   hookPort: Number(process.env.HOOK_PORT || 47878),
   image: process.env.AGENT_IMAGE || 'claude-voice-agent:latest',
+  githubAppId: process.env.GITHUB_APP_ID || '',
+  githubAppKeyFile: process.env.GITHUB_APP_KEY_FILE || '',
+  agentGhToken: process.env.AGENT_GH_TOKEN || '',
 };
 
 const log = (...a) => {
@@ -51,7 +55,8 @@ if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run
 const VOICE_PROMPT = [
   'You are running unattended in a Docker container with full permissions; the repository is mounted at /work.',
   'The user is away from the screen, often driving, and only hears a spoken summary through headphones.',
-  'When you finish a feature or bug fix, commit and push it.',
+  'When you finish a feature or bug fix, commit it on a branch, push the branch and open a pull request with gh',
+  '(pushes to main may be blocked); if the branch already has an open pull request, just push.',
   "End every final message with a line that starts exactly with 'SPOKEN:' followed by one or two plain sentences for text-to-speech:",
   'no code, file paths, markdown, or symbols that read badly aloud.',
   'If you need a decision, stop and make the SPOKEN line a single yes-or-no question, then continue after the user answers.',
@@ -86,13 +91,38 @@ function say(text, { spoken } = {}) {
   for (const wake of [...inboxWaiters]) wake();
 }
 
-// ---------- host values passed into agent containers ----------
+// ---------- GitHub access for agents ----------
+// Agents never get the owner's own GitHub login. Either a GitHub App (preferred: github-app.mjs,
+// set up with setup-github-app.mjs) gives each turn an hour-long token for that agent's repo only,
+// or AGENT_GH_TOKEN holds a fine-grained token. Without either, agents can commit but not push.
 async function hostValue(cmd, args) { try { return (await run(cmd, args)).stdout.trim(); } catch { return ''; } }
-const hostEnv = {
-  GH_TOKEN: await hostValue('gh', ['auth', 'token']),
-  GIT_NAME: await hostValue('git', ['config', '--global', 'user.name']),
-  GIT_EMAIL: await hostValue('git', ['config', '--global', 'user.email']),
+const hostGit = {
+  name: await hostValue('git', ['config', '--global', 'user.name']),
+  email: await hostValue('git', ['config', '--global', 'user.email']),
 };
+let ghApp = null;
+if (cfg.githubAppId && cfg.githubAppKeyFile) {
+  try { ghApp = makeGitHubApp({ appId: cfg.githubAppId, privateKey: fs.readFileSync(cfg.githubAppKeyFile), log }); }
+  catch (e) { log('GitHub App key unreadable:', e.message); }
+}
+if (!ghApp && !cfg.agentGhToken) log('WARNING: no GitHub access for agents (GITHUB_APP_ID or AGENT_GH_TOKEN); they can commit but not push.');
+
+// Passed to each turn with "docker exec -e", never baked into the container, so a token only lives as long as a turn needs it.
+const GH_ENV = ['GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'];
+async function githubEnv(a) {
+  let token = cfg.agentGhToken, who = hostGit;
+  if (ghApp) {
+    const remote = parseRemote(await hostValue('git', ['-C', a.repoPath, 'remote', 'get-url', 'origin']));
+    if (!remote) log(a.name, 'has no GitHub origin remote, so no GitHub token.');
+    token = remote ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
+    who = (await ghApp.identity()) || hostGit;
+  }
+  return {
+    GH_TOKEN: token || '',
+    GIT_AUTHOR_NAME: who.name, GIT_COMMITTER_NAME: who.name,
+    GIT_AUTHOR_EMAIL: who.email, GIT_COMMITTER_EMAIL: who.email,
+  };
+}
 
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
@@ -148,30 +178,27 @@ function parseTask(body) {
 }
 
 // ---------- containers ----------
-const PASS_ENV = ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'];
+// Containers made before GitHub credentials moved to each turn hold the owner's full token in their
+// environment; the label marks the new kind, and any container without it is replaced (sessions survive in the volume).
+const GH_LABEL = 'claude-voice-relay.gh', GH_LABEL_VALUE = 'per-turn';
 async function ensureContainer(a) {
-  const { stdout } = await run('docker', ['ps', '-a', '--filter', `name=^${a.container}$`, '--format', '{{.State}}']);
-  if (stdout.trim() === 'running') return;
-  if (stdout.trim()) await run('docker', ['rm', '-f', a.container]);
+  const { stdout } = await run('docker', ['ps', '-a', '--filter', `name=^${a.container}$`,
+    '--format', `{{.State}} {{.Label "${GH_LABEL}"}}`]);
+  const [state, gh] = stdout.trim().split(' ');
+  if (state === 'running' && gh === GH_LABEL_VALUE) return;
+  if (state) await run('docker', ['rm', '-f', a.container]);
   // Secrets go through the docker CLI's environment ("-e NAME"), not argv.
-  const env = {
-    ...process.env,
-    CLAUDE_CODE_OAUTH_TOKEN: cfg.oauth || '',
-    GH_TOKEN: hostEnv.GH_TOKEN,
-    GIT_AUTHOR_NAME: hostEnv.GIT_NAME, GIT_COMMITTER_NAME: hostEnv.GIT_NAME,
-    GIT_AUTHOR_EMAIL: hostEnv.GIT_EMAIL, GIT_COMMITTER_EMAIL: hostEnv.GIT_EMAIL,
-  };
-  await run('docker', ['run', '-d', '--name', a.container, '--label', 'claude-voice-relay=1',
+  await run('docker', ['run', '-d', '--name', a.container, '--label', 'claude-voice-relay=1', '--label', `${GH_LABEL}=${GH_LABEL_VALUE}`,
     '-v', `${a.repoPath}:/work`, '-v', `${a.container}-home:/home/node/.claude`,
-    ...PASS_ENV.flatMap((k) => ['-e', k]), cfg.image], { env });
+    '-e', 'CLAUDE_CODE_OAUTH_TOKEN', cfg.image], { env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: cfg.oauth || '' } });
 }
 
-function runClaude(a, prompt) {
+function runClaude(a, prompt, ghEnv) {
   return new Promise((resolve, reject) => {
-    const args = ['exec', '-i', '-w', '/work', a.container, 'claude', '-p', '--output-format', 'json',
-      '--dangerously-skip-permissions', '--append-system-prompt', VOICE_PROMPT];
+    const args = ['exec', '-i', '-w', '/work', ...GH_ENV.flatMap((k) => ['-e', k]), a.container,
+      'claude', '-p', '--output-format', 'json', '--dangerously-skip-permissions', '--append-system-prompt', VOICE_PROMPT];
     if (a.sessionId) args.push('--resume', a.sessionId);
-    const p = spawn('docker', args, { windowsHide: true });
+    const p = spawn('docker', args, { windowsHide: true, env: { ...process.env, ...ghEnv } });
     let out = '', err = '';
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
@@ -203,7 +230,7 @@ async function turn(a, prompt, photo) {
       await run('docker', ['cp', photo, `${a.container}:${photoIn}`]);
       fs.rmSync(photo, { force: true });
     }
-    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt);
+    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt, await githubEnv(a));
     a.sessionId = r.session_id || a.sessionId;
     fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
     const line = spoken(r.result);
