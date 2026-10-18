@@ -20,8 +20,8 @@ Spoken project names match folder names under PROJECTS_ROOT; add nicknames to `a
 e.g. `{ "trading bot": "Roundtable_Trading" }`.
 
 ## iPhone Shortcut ("Tell Claude") with read-back
-The relay reads your task back the way Siri reads back a text ("Here's your message to trading bot:
-add a stop-loss check. Ready to send it?") and waits for a yes before anything starts. `/voice` does
+The relay reads your task back the way Siri reads back a text ("Here's your message to Claude
+for trading bot, add a stop-loss check. Ready to send it?") and waits for a yes before anything starts. `/voice` does
 this by default (set `VOICE_CONFIRM=0` in `.env` to send immediately); `/voice/confirm` always does.
 Build the Shortcut so it keeps listening until the task is sent or cancelled:
 

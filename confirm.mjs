@@ -1,5 +1,6 @@
 // Read-back loop for the iPhone Shortcut and the glasses app (/voice/confirm).
-// Worded like Siri reading back a text: "Here's your message to <project>: <task>. Ready to send it?"
+// Worded like Siri reading back a text: "Here's your message to Claude for <project>, <task>. Ready to send it?"
+// Naming the project catches a misheard one before anything starts.
 // Each utterance is held until the user says "send" or "yes"; "change it" asks for new words, and
 // "cancel" or "no" drops it. Nothing is sent on silence. Every reply that expects another utterance
 // is a question (contains "?"); the Shortcut's loop stops listening otherwise.
@@ -39,8 +40,8 @@ export function makeConfirm(deps) {
     return 'Sent.';
   }
   const readBack = (task, repo) => repo
-    ? `Here's your message to ${deps.spokenName(repo)}: ${task}. Ready to send it?`
-    : `Here's your message: ${task}. Ready to send it?`;
+    ? `Here's your message to Claude for ${deps.spokenName(repo)}, ${task}. Ready to send it?`
+    : `Here's your message to Claude, ${task}. Ready to send it?`;
 
   return function confirmStep(raw) {
     raw = String(raw ?? '').trim();

@@ -53,7 +53,7 @@ export function makeHandler(deps) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 
-  // Worded like Siri reading back a text, as in confirm.mjs: "Here's your message to <project>: <task>.
+  // Worded like Siri reading back a text, as in confirm.mjs: "Here's your message to Claude for <project>, <task>.
   // Ready to send it?" "Send" or "yes" sends, "change it" asks for new words, "cancel" or "no" drops it.
   async function confirm(user, raw) {
     let held = await deps.store.getHeld(user);
@@ -85,10 +85,10 @@ export function makeHandler(deps) {
         return `I can't tell which project "${body}" is for. Start with in and the project name. ${ASK}`;
       }
       await deps.store.setHeld(user, { text: body, parsed, at: now() });
-      return `Here's your message to ${parsed.project}: ${parsed.task}. Ready to send it?`;
+      return `Here's your message to Claude for ${parsed.project}, ${parsed.task}. Ready to send it?`;
     }
     await deps.store.setHeld(user, { text: body, at: now() });
-    return `Here's your message: ${body}. Ready to send it?`;
+    return `Here's your message to Claude, ${body}. Ready to send it?`;
   }
 
   // Read-back off in the app: start the task as said.
