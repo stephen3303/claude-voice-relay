@@ -46,6 +46,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Claude connector tests
+        run: node --test ../api/connector.test.mjs
+
       - name: Deploy the API
         run: npx cdk deploy BridgeApi --require-approval never --outputs-file outputs.json
 

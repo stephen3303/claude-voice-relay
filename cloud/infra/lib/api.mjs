@@ -101,6 +101,40 @@ export class ApiStack extends Stack {
       api.addRoutes({ path, methods: [apigw.HttpMethod[method]], integration, ...(authorizer ? { authorizer } : {}) });
     }
 
+    // Claude connector (cloud/api/connector.mjs): the MCP server and the OAuth server Claude signs in
+    // through. No API Gateway authorizer: MCP clients need a 401 with a WWW-Authenticate header to
+    // find the sign-in, so the Lambda checks its own tokens. Its tokens can't pass the app's authorizer
+    // (another audience). The well-known addresses sit at the root because OAuth clients look there.
+    const SERVICES_ID = 'com.smitherman.glassesrelay.web';   // Sign in with Apple for the web (Apple Developer, Identifiers)
+    const connectorFn = new lambda.Function(this, 'Connector', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      handler: 'index.connector',
+      code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
+      timeout: Duration.seconds(15),
+      memorySize: 256,
+      environment: { TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn, SERVICES_ID },
+      logGroup: new logs.LogGroup(this, 'ConnectorLogs', { retention: logs.RetentionDays.ONE_MONTH }),
+    });
+    connectorFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['kms:Sign', 'kms:GetPublicKey'], resources: [signingKey.keyArn] }));
+    table.grantReadWriteData(connectorFn);
+    const connectorIntegration = new HttpLambdaIntegration('ConnectorIntegration', connectorFn);
+    const connectorRoutes = [
+      [['POST', 'GET', 'DELETE'], '/api/mcp'],
+      [['GET'], '/.well-known/oauth-protected-resource'],
+      [['GET'], '/.well-known/oauth-protected-resource/api/mcp'],
+      [['GET'], '/.well-known/oauth-authorization-server'],
+      [['POST'], '/api/oauth/register'],
+      [['GET'], '/api/oauth/authorize'],
+      [['POST'], '/api/oauth/apple'],
+      [['POST'], '/api/oauth/token'],
+    ];
+    for (const [methods, path] of connectorRoutes) {
+      api.addRoutes({ path, methods: methods.map((m) => apigw.HttpMethod[m]), integration: connectorIntegration });
+    }
+    new CfnOutput(this, 'ConnectorUrl', { value: `${api.apiEndpoint}/api/mcp` });
+    new CfnOutput(this, 'AppleReturnUrl', { value: `${api.apiEndpoint}/api/oauth/apple` });
+
     new CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });
   }
 }

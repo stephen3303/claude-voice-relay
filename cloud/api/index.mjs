@@ -78,30 +78,71 @@ async function deleteUser(sub) {
   }
 }
 
+async function fetchAppleKeys() {
+  if (!appleKeys || Date.now() - appleKeysAt > 3600_000) {
+    const r = await fetch('https://appleid.apple.com/auth/keys', { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) throw new Error(`Apple keys: ${r.status}`);
+    appleKeys = await r.json(); appleKeysAt = Date.now();
+  }
+  return appleKeys;
+}
+
+async function sign(bytes) {
+  const r = await kms.send(new SignCommand({ KeyId: process.env.SIGNING_KEY, MessageType: 'DIGEST',
+    Message: createHash('sha256').update(bytes).digest(), SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256' }));
+  return Buffer.from(r.Signature);
+}
+
+async function getPublicJwk() {
+  if (!publicJwk) {
+    const r = await kms.send(new GetPublicKeyCommand({ KeyId: process.env.SIGNING_KEY }));
+    const { n, e, kty } = createPublicKey({ key: Buffer.from(r.PublicKey), format: 'der', type: 'spki' }).export({ format: 'jwk' });
+    publicJwk = { kty, n, e };
+  }
+  return publicJwk;
+}
+
 const accounts = makeAuth({
   issuer: process.env.ISSUER,
   audience: process.env.BUNDLE_ID,
-  async appleKeys() {
-    if (!appleKeys || Date.now() - appleKeysAt > 3600_000) {
-      const r = await fetch('https://appleid.apple.com/auth/keys', { signal: AbortSignal.timeout(5000) });
-      if (!r.ok) throw new Error(`Apple keys: ${r.status}`);
-      appleKeys = await r.json(); appleKeysAt = Date.now();
-    }
-    return appleKeys;
-  },
-  async sign(bytes) {
-    const r = await kms.send(new SignCommand({ KeyId: process.env.SIGNING_KEY, MessageType: 'DIGEST',
-      Message: createHash('sha256').update(bytes).digest(), SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256' }));
-    return Buffer.from(r.Signature);
-  },
-  async publicJwk() {
-    if (!publicJwk) {
-      const r = await kms.send(new GetPublicKeyCommand({ KeyId: process.env.SIGNING_KEY }));
-      const { n, e, kty } = createPublicKey({ key: Buffer.from(r.PublicKey), format: 'der', type: 'spki' }).export({ format: 'jwk' });
-      publicJwk = { kty, n, e };
-    }
-    return publicJwk;
-  },
+  appleKeys: fetchAppleKeys,
+  sign,
+  publicJwk: getPublicJwk,
   deleteUser,
 });
 export const { auth, authorize } = accounts;
+
+// ---------- Claude connector (connector.mjs): MCP server and its OAuth sign-in ----------
+import { makeConnector } from './connector.mjs';
+
+// OAuth clients: pk CLIENT#<id>, sk CLIENT. Sign-ins in progress and authorization codes:
+// pk GRANT#<key>, sk GRANT, removed when used (and by TTL).
+const grants = {
+  async saveClient(id, client) {
+    await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `CLIENT#${id}`, sk: 'CLIENT', client } }));
+  },
+  async getClient(id) {
+    const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `CLIENT#${id}`, sk: 'CLIENT' } }));
+    return r.Item?.client ?? null;
+  },
+  async saveGrant(key, data, expires) {
+    await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `GRANT#${key}`, sk: 'GRANT', data, expires } }));
+  },
+  async takeGrant(key) {
+    const r = await db.send(new DeleteCommand({ TableName: TABLE, Key: { pk: `GRANT#${key}`, sk: 'GRANT' }, ReturnValues: 'ALL_OLD' }));
+    const item = r.Attributes;
+    return item && item.expires > Date.now() / 1000 ? item.data : null;   // TTL deletes lazily
+  },
+};
+
+export const connector = makeConnector({
+  issuer: process.env.ISSUER,
+  servicesId: process.env.SERVICES_ID,
+  publicUrl: process.env.PUBLIC_URL,
+  appleKeys: fetchAppleKeys,
+  sign,
+  publicJwk: getPublicJwk,
+  store: grants,
+  startTask,
+  messagesAfter: (user, after) => store.messagesAfter(user, after),
+});

@@ -7,10 +7,35 @@ import { createPublicKey, createVerify } from 'node:crypto';
 
 export const APPLE_ISSUER = 'https://appleid.apple.com';
 export const SESSION_DAYS = 30;
-const KID = 'bridge-1';
+
+export const KID = 'bridge-1';   // the KMS session key, as the kid of every token Bridge signs
 
 const b64url = (b) => Buffer.from(b).toString('base64url');
 const parse = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+
+/** An RS256 token over `claims`, signed by sign(bytes) (KMS). */
+export async function signJwt(claims, sign) {
+  const body = `${b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: KID }))}.${b64url(JSON.stringify(claims))}`;
+  return `${body}.${b64url(await sign(Buffer.from(body)))}`;
+}
+
+/** Checks an RS256 token's signature with keyFor(kid), then its issuer, audience and expiry; answers its claims. */
+export async function verifyJwt(token, keyFor, { issuer, audience, now = Date.now() }) {
+  const [h, p, s] = String(token || '').split('.');
+  if (!s) throw new Error('not a token');
+  const header = parse(h), claims = parse(p);
+  if (header.alg !== 'RS256') throw new Error('unexpected algorithm');
+  const jwk = await keyFor(header.kid);
+  if (!jwk) throw new Error('unknown key');
+  const ok = createVerify('RSA-SHA256').update(`${h}.${p}`)
+    .verify(createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(s, 'base64url'));
+  if (!ok) throw new Error('bad signature');
+  if (claims.iss !== issuer) throw new Error('wrong issuer');
+  if (claims.aud !== audience) throw new Error('wrong audience');
+  if (!(claims.exp * 1000 > now)) throw new Error('expired');
+  if (!claims.sub) throw new Error('no subject');
+  return claims;
+}
 
 /** The signed-in user, as either authorizer leaves it on the request. */
 export const userOf = (event) =>
@@ -28,23 +53,7 @@ export const userOf = (event) =>
 export function makeAuth(deps) {
   const now = deps.now ?? Date.now;
 
-  // Checks an RS256 token's signature with keyFor(kid), then its issuer, audience and expiry.
-  async function verify(token, keyFor, issuer) {
-    const [h, p, s] = String(token || '').split('.');
-    if (!s) throw new Error('not a token');
-    const header = parse(h), claims = parse(p);
-    if (header.alg !== 'RS256') throw new Error('unexpected algorithm');
-    const jwk = await keyFor(header.kid);
-    if (!jwk) throw new Error('unknown key');
-    const ok = createVerify('RSA-SHA256').update(`${h}.${p}`)
-      .verify(createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(s, 'base64url'));
-    if (!ok) throw new Error('bad signature');
-    if (claims.iss !== issuer) throw new Error('wrong issuer');
-    if (claims.aud !== deps.audience) throw new Error('wrong audience');
-    if (!(claims.exp * 1000 > now())) throw new Error('expired');
-    if (!claims.sub) throw new Error('no subject');
-    return claims;
-  }
+  const verify = (token, keyFor, issuer) => verifyJwt(token, keyFor, { issuer, audience: deps.audience, now: now() });
 
   const appleKey = async (kid) => (await deps.appleKeys()).keys.find((k) => k.kid === kid);
   const sessionKey = async (kid) => (kid === KID ? deps.publicJwk() : null);
@@ -52,11 +61,7 @@ export function makeAuth(deps) {
   async function session(sub) {
     const iat = Math.floor(now() / 1000);
     const exp = iat + SESSION_DAYS * 86400;
-    const body = `${b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: KID }))}.${b64url(JSON.stringify({
-      iss: deps.issuer, aud: deps.audience, sub, iat, exp,
-    }))}`;
-    const sig = await deps.sign(Buffer.from(body));
-    return { token: `${body}.${b64url(sig)}`, expires: exp };
+    return { token: await signJwt({ iss: deps.issuer, aud: deps.audience, sub, iat, exp }, deps.sign), expires: exp };
   }
 
   // API Gateway Lambda authorizer (payload 2.0, simple responses).
