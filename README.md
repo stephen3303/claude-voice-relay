@@ -17,27 +17,35 @@ Spoken project names match folder names under PROJECTS_ROOT; add nicknames to `a
 e.g. `{ "trading bot": "Roundtable_Trading" }`.
 
 ## iPhone Shortcut ("Tell Claude") with read-back
-The relay reads your task back and waits for **send it** before anything starts. This is on for
-`/voice` by default (set `VOICE_CONFIRM=0` in `.env` to send immediately), so the existing
-Shortcut confirms with no changes: run it once to dictate, and again to say "send it".
-To keep listening in one run instead, wrap the actions in a loop:
+The relay reads your task back and waits for **send it** before anything starts. `/voice` does
+this by default (set `VOICE_CONFIRM=0` in `.env` to send immediately); `/voice/confirm` always does.
+Build the Shortcut so it keeps listening until the task is sent or cancelled:
 
-1. **Repeat** 6 times
-2. &nbsp;&nbsp;**Dictate text**
+1. **Repeat** 8 times
+2. &nbsp;&nbsp;**Dictate text** (Stop Listening: *After Pause*)
 3. &nbsp;&nbsp;**Text**: `task: ` + Dictated Text
-4. &nbsp;&nbsp;**Get contents of** `http://<relay>:47879/voice` (POST, same Authorization header and Text body as before)
+4. &nbsp;&nbsp;**Get contents of** `https://<pc>.<tailnet>.ts.net/voice/confirm`
+   (or `http://<relay>:47879/voice/confirm`): Method **POST**, Header `Authorization` = `Bearer <VOICE_TOKEN>`,
+   Request Body **JSON** with one field, `text` = the Text from step 3
 5. &nbsp;&nbsp;**Speak** Contents of URL (leave *Wait Until Finished* on, or dictation hears the speech)
 6. &nbsp;&nbsp;**If** Contents of URL *does not contain* `again` → **Stop This Shortcut**
 7. **End Repeat**
 
 On each turn, say one of these:
-- **send it** (or "go ahead", "do it", "yes"): starts the task you just heard read back.
+- **send it** (or "go ahead", "do it", "yes"; "sent it" and "send it please" also count): starts the task you just heard read back.
 - **the task again**: replaces it, and the relay reads the new one back.
 - **cancel**: drops it.
 
-The read-back also names the project it resolved, so a misheard project gets caught before
-the agent starts. Any reply that is waiting on you contains "again"; "Sent." and "Cancelled." don't, which is what ends the loop.
-An unconfirmed task expires after 10 minutes.
+The read-back names the project it resolved, so a misheard project gets caught before the agent
+starts. If dictation stops right after the project ("in voice relay"), the relay keeps the project
+and asks for the task. Every reply that is waiting on you contains "again"; "Sent." and
+"Cancelled. Nothing sent." don't, which is what ends the loop. An unconfirmed task expires after
+10 minutes, and "send it" after that says so. With nothing waiting, a bare "yes" answers an agent
+that asked you a yes-or-no question.
+
+**Updating an older Shortcut:** change the URL in *Get contents of* to end in `/voice/confirm`,
+wrap the actions in the Repeat loop above if they aren't already, and add the *If ... again* step.
+The body can stay JSON, or be a Form with a `text` field. Nothing else changes.
 
 ## Ray-Ban Meta glasses ("Hey Meta, start Bridge")
 `glasses/ios` is an iPhone app, Bridge, built on GitHub Actions (`Glasses iOS build`) and sideloaded
