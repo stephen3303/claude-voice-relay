@@ -67,10 +67,13 @@ enum ErrorReporting {
         if let code = (error as? URLError)?.code, offline.contains(code) { return }
         let ns = error as NSError
         // Bridge's own errors describe themselves in fixed words. Others go by domain and code alone: the Meta
-        // toolkit's text can name the glasses, and some URLError texts name your PC.
-        let ownWords = error is Relay.Failure || error is GlassesController.PhotoFailure
+        // toolkit's text can name the glasses, and some URLError texts name your PC. A camera stream error carries
+        // the toolkit's text, so it gets a fixed one.
+        var words: String?
+        if case .failed? = error as? GlassesController.PhotoFailure { words = "The glasses camera stream reported an error." }
+        else if error is Relay.Failure || error is GlassesController.PhotoFailure { words = error.localizedDescription }
         let clean = NSError(domain: ns.domain, code: ns.code,
-                            userInfo: ownWords ? [NSLocalizedDescriptionKey: error.localizedDescription] : [:])
+                            userInfo: words.map { [NSLocalizedDescriptionKey: $0] } ?? [:])
         SentrySDK.capture(error: clean) { scope in scope.setTag(value: place, key: "where") }
     }
 }
