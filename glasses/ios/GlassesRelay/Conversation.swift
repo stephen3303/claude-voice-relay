@@ -63,6 +63,12 @@ final class Conversation: NSObject, ObservableObject {
         get { UserDefaults.standard.object(forKey: "hiFiSpeech") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "hiFiSpeech") }
     }
+    /// Natural voice: OpenAI text-to-speech from the PC relay (when it has a key), or Amazon Polly from Bridge Cloud
+    /// (Bridge Pro). Off by default, so replies are spoken by the phone voice and no text goes out to be spoken.
+    static var naturalVoice: Bool {
+        get { UserDefaults.standard.object(forKey: "naturalVoice") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "naturalVoice") }
+    }
     /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
     private var onHiFi = false
     private var micRetries = 0
@@ -412,9 +418,9 @@ final class Conversation: NSObject, ObservableObject {
     private func say(_ text: String) async {
         phase = .speaking
         await useHiFiOutput()
-        // Natural voice from the relay when it has a key, or from Bridge Cloud with Bridge Pro; otherwise (or on any
-        // failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
-        if !Relay.shared.isCloud || Store.shared.isPro,
+        // The natural voice when it's turned on in Settings: from the relay when it has a key, or from Bridge Cloud with
+        // Bridge Pro; otherwise (or on any failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
+        if Self.naturalVoice, !Relay.shared.isCloud || Store.shared.isPro,
            let mp3 = try? await Relay.shared.speech(text), let player = try? AVAudioPlayer(data: mp3) {
             player.delegate = self
             self.player = player
