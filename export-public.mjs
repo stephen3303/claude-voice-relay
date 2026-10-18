@@ -113,7 +113,9 @@ export function publicProject(source) {
 function transform(path, text) {
   if (path.endsWith('.swift')) return stripAppStore(text);
   if (path === 'glasses/ios/project.yml') return publicProject(text);
-  if (path === 'README.md') return publicReadme(text);
+  // The public repo is bridge-relay, so its README and voice aliases point at a clone of that.
+  if (path === 'README.md') return publicReadme(text).replaceAll('claude-voice-relay', 'bridge-relay');
+  if (path === 'aliases.json') return text.replaceAll('claude-voice-relay', 'bridge-relay');
   return text;
 }
 
