@@ -52,6 +52,26 @@ final class Conversation: NSObject, ObservableObject {
         get { UserDefaults.standard.object(forKey: "readBack") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "readBack") }
     }
+    /// The phone voice picked in Settings (an AVSpeechSynthesisVoice identifier); empty means the best installed one.
+    static var voiceID: String {
+        get { UserDefaults.standard.string(forKey: "voiceID") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceID") }
+    }
+    /// Speak over A2DP, Bluetooth's music-quality link, instead of the call-quality HFP link the glasses' mic needs.
+    /// The glasses take a moment to switch each way, so replies start and listening resumes a little later.
+    static var hiFiSpeech: Bool {
+        get { UserDefaults.standard.object(forKey: "hiFiSpeech") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "hiFiSpeech") }
+    }
+    /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
+    private var onHiFi = false
+    private var micRetries = 0
+    /// Switched back from A2DP, but the glasses' HFP link may not be up yet: don't listen on a stale route.
+    private var awaitingHFP = false
+    /// Between begin and end. A photo answer (look) speaks outside a conversation, on whatever session iOS has.
+    private var conversing = false
+    private var retry: Task<Void, Never>?
+
     /// Pause after you stop talking before your turn is sent.
     private var endOfTurn: TimeInterval { Self.readBack ? 1.4 : 2.0 }
     /// Hang up after this much silence, or the longer one while an agent is working.
@@ -65,7 +85,12 @@ final class Conversation: NSObject, ObservableObject {
         synth.delegate = self
         NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             // A route change (e.g. HFP renegotiating 8k↔16k) stops the engine; rebuild the tap on the new format.
-            Task { @MainActor in if self?.phase == .listening { self?.restartListening() } }
+            // With read-back on, what was heard so far is read back before anything is sent, so keep it rather
+            // than throw it away with a restart. Without read-back it would go out cut short, so restart.
+            Task { @MainActor in
+                guard let self, self.phase == .listening else { return }
+                if !self.heard.isEmpty && Self.readBack { self.finishTurn() } else { self.restartListening() }
+            }
         }
     }
 
@@ -75,6 +100,10 @@ final class Conversation: NSObject, ObservableObject {
         guard phase == .idle else { return }
         phase = .thinking
         self.trigger = trigger
+        micRetries = 0
+        onHiFi = false
+        awaitingHFP = false
+        conversing = true
         Task {
             guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; end(saying: nil); return }
             do { try configureAudioForGlasses() } catch { status = "Audio setup failed: \(error.localizedDescription)"; end(saying: nil); return }
@@ -98,6 +127,7 @@ final class Conversation: NSObject, ObservableObject {
             inboxTask?.cancel(); inboxTask = nil
             if let goodbye { await say(goodbye) }
             phase = .idle
+            conversing = false
             // In a call, CallKit deactivates the session when the call ends.
             if trigger != .call { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
             let ended = onEnded
@@ -111,20 +141,53 @@ final class Conversation: NSObject, ObservableObject {
 
     private func configureAudioForGlasses() throws {
         let session = AVAudioSession.sharedInstance()
-        // HFP is the only Bluetooth profile that carries the glasses' microphone.
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
         if trigger != .call { try session.setActive(true) }   // CallKit activates it for a call
+        try useGlassesMic()
+    }
+
+    /// `report` is off when switching back after a reply, so the status line keeps naming the voice.
+    private func useGlassesMic(report: Bool = true) throws {
+        let session = AVAudioSession.sharedInstance()
+        // HFP is the only Bluetooth profile that carries the glasses' microphone.
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
         if let hfp = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
             try session.setPreferredInput(hfp)
-            status = "Using \(hfp.portName)"
-        } else {
+            onHiFi = false   // only once the glasses' mic is back, so a failed switch is tried again
+            if report { status = "Using \(hfp.portName)" }
+        } else if report {
             status = "Glasses mic not found — using phone mic"
+        }
+    }
+
+    /// Playback only, so iOS routes to the glasses over A2DP. Not in an agent call: CallKit owns that session.
+    private func useHiFiOutput() async {
+        guard Self.hiFiSpeech, conversing, trigger != .call, !onHiFi else { return }
+        // Only with the glasses' mic connected: without it there's nothing to switch back to, and the phone's speaker
+        // or mic is already full quality.
+        let session = AVAudioSession.sharedInstance()
+        guard session.availableInputs?.contains(where: { $0.portType == .bluetoothHFP }) == true else { return }
+        do {
+            try session.setCategory(.playback, mode: .spokenAudio)
+            onHiFi = true
+            // setCategory returns before the A2DP stream runs; speaking now would clip a short line.
+            await Self.awaitRoute(timeout: 1.5) { route in route.outputs.contains { $0.portType == .bluetoothA2DP } }
+        } catch { status = "High-quality speech failed: \(error.localizedDescription)" }
+    }
+
+    /// Waits until the current route passes `ready`, checking every 100 ms, or until the timeout.
+    private static func awaitRoute(timeout: TimeInterval, _ ready: (AVAudioSessionRouteDescription) -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !ready(AVAudioSession.sharedInstance().currentRoute), Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
         }
     }
 
     // MARK: listening
 
     private func startListening() {
+        // A route change (the switch back from A2DP) can restart listening while a retry is queued; never run two.
+        stopListening()
         heard = ""
         phase = .listening
         let req = SFSpeechAudioBufferRecognitionRequest()
@@ -132,17 +195,51 @@ final class Conversation: NSObject, ObservableObject {
         if recognizer?.supportsOnDeviceRecognition == true { req.requiresOnDeviceRecognition = true }
         request = req
 
+        if onHiFi {
+            var failure: String?
+            do { try useGlassesMic(report: false) } catch { failure = error.localizedDescription }
+            if !onHiFi { awaitingHFP = true }
+            // Still no glasses mic after a few tries (none connected, or it keeps refusing): listen on the phone.
+            if onHiFi && micRetries >= 3 {
+                onHiFi = false
+                status = failure.map { "Glasses mic failed (\($0)) — using phone mic" } ?? "Glasses mic not found — using phone mic"
+            }
+        }
+        // The glasses are listed as an input before their HFP link is up, and until it is the engine reports the
+        // old route's format. Listening then would be restarted by the route change just as you start talking.
+        if awaitingHFP {
+            if AVAudioSession.sharedInstance().currentRoute.inputs.contains(where: { $0.portType == .bluetoothHFP }) || micRetries >= 8 {
+                awaitingHFP = false
+                micRetries = 0
+            } else {
+                micRetries += 1
+                restartSoon(after: 0.25); return
+            }
+        }
         let input = engine.inputNode
+        // Right after switching back from A2DP the glasses' mic can briefly be missing or have no format; retry soon.
+        guard !onHiFi, input.outputFormat(forBus: 0).sampleRate > 0 else {
+            micRetries += 1
+            if micRetries >= 3 { status = "Mic unavailable, still trying" }
+            restartSoon(); return
+        }
+        micRetries = 0
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { [weak req] buffer, _ in
             req?.append(buffer)
         }
         engine.prepare()
-        do { try engine.start() } catch { status = "Mic failed: \(error.localizedDescription)"; return }
+        do { try engine.start() } catch {
+            // Often a route still settling (just back from A2DP); retry like the cases above.
+            status = "Mic failed: \(error.localizedDescription)"
+            micRetries += 1
+            restartSoon(); return
+        }
 
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             Task { @MainActor in
-                guard let self, self.phase == .listening else { return }
+                // Only the current session: a cancelled one still calls back once.
+                guard let self, self.phase == .listening, self.request === req else { return }
                 if let result {
                     self.heard = result.bestTranscription.formattedString
                     self.armSilenceTimer()
@@ -160,15 +257,16 @@ final class Conversation: NSObject, ObservableObject {
         startListening()
     }
 
-    private func restartSoon() {
+    private func restartSoon(after delay: TimeInterval = 1) {
         stopListening()
-        Task {
-            try? await Task.sleep(for: .seconds(1))
-            if phase == .listening { startListening() }
+        retry = Task {
+            try? await Task.sleep(for: .seconds(delay))
+            if !Task.isCancelled, phase == .listening { startListening() }
         }
     }
 
     private func stopListening() {
+        retry?.cancel(); retry = nil   // a restart that already happened makes a queued retry stale
         silenceTimer?.invalidate()
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
@@ -313,6 +411,7 @@ final class Conversation: NSObject, ObservableObject {
 
     private func say(_ text: String) async {
         phase = .speaking
+        await useHiFiOutput()
         // Natural voice from the relay when it has a key, or from Bridge Cloud with Bridge Pro; otherwise (or on any
         // failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
         if !Relay.shared.isCloud || Store.shared.isPro,
@@ -329,8 +428,7 @@ final class Conversation: NSObject, ObservableObject {
         }
         let u = AVSpeechUtterance(string: text)
         u.voice = Self.bestVoice()
-        let q = u.voice.map { ["default", "enhanced", "premium"][min($0.quality.rawValue - 1, 2)] } ?? "none"
-        status = "Voice: \(u.voice?.name ?? "none") (\(q))"
+        status = "Voice: \(u.voice.map(Self.label) ?? "none")"
         u.rate = 0.5
         await withCheckedContinuation { c in
             speechDone = c
@@ -339,12 +437,25 @@ final class Conversation: NSObject, ObservableObject {
         }
     }
 
-    /// The default en-US voice is the robotic compact one. Prefer the best installed voice
+    /// The voice picked in Settings, else: the default en-US voice is the robotic compact one, so prefer the best installed one
     /// (Premium, then Enhanced); download more in Settings > Accessibility > Spoken Content > Voices.
-    private static func bestVoice() -> AVSpeechSynthesisVoice? {
+    static func bestVoice() -> AVSpeechSynthesisVoice? {
+        if !voiceID.isEmpty, let picked = AVSpeechSynthesisVoice(identifier: voiceID) { return picked }
         let english = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "en-US" }
         return english.max { $0.quality.rawValue < $1.quality.rawValue }
             ?? AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    /// English voices on the phone, best first, for the picker in Settings.
+    static var voices: [AVSpeechSynthesisVoice] {
+        AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
+            .sorted { ($1.quality.rawValue, $0.name) < ($0.quality.rawValue, $1.name) }
+    }
+
+    /// "Ava (premium)", with the region when it isn't US English.
+    static func label(_ v: AVSpeechSynthesisVoice) -> String {
+        let q = ["default", "enhanced", "premium"][max(0, min(v.quality.rawValue - 1, 2))]
+        return v.language == "en-US" ? "\(v.name) (\(q))" : "\(v.name) (\(q), \(v.language))"
     }
 
     fileprivate func finished(_ u: AVSpeechUtterance) {
