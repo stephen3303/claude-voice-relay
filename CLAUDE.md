@@ -21,7 +21,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   Lambda, DynamoDB, KMS session key, Sign in with Apple, APNs push in `cloud/api/push.mjs` with the key
   in Secrets Manager `bridge/apns`, set by `cloud/setup/setup-apns.ps1`) and `BridgeWeb` (S3 + CloudFront for
   talktobridge.com, DNS at Cloudflare).
-- `site/` — the website (privacy, terms, support), on GitHub Pages now; talktobridge.com later.
+- `site/` — the website (home, privacy, terms, support) for the App Store product only, live at https://talktobridge.com
+  on GitHub Pages (Cloudflare DNS only); CloudFront (`BridgeWeb`) later. The app and listing link to talktobridge.com.
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.
 - `github-app.mjs`, `publish.mjs` — agents never hold a GitHub token: they commit and write a push request, and after
   the turn the relay mints a GitHub App token (`setup-github-app.mjs` creates the App) for that agent's repo only, and
