@@ -118,6 +118,15 @@ test('unsafeMount refuses the relay, the key folder and anything above them', ()
   assert.equal(unsafeMount('/home/s/.bridge', guarded), true);
 });
 
+test('unsafeMount follows a symlink to a guarded folder', { skip: process.platform === 'win32' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mount-'));
+  const relay = path.join(dir, 'claude-voice-relay');
+  fs.mkdirSync(relay);
+  fs.symlinkSync(relay, path.join(dir, 'innocent'));
+  assert.equal(unsafeMount(path.join(dir, 'innocent'), [relay]), true);
+  assert.equal(unsafeMount(path.join(dir, 'innocent', 'sub'), [relay]), true);
+});
+
 test('identity is the App bot user, with its noreply address', async () => {
   const { app, calls } = fakeGitHub();
   const who = await app.identity();

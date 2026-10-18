@@ -21,8 +21,15 @@ export function branchProtected(rules) {
 
 // True when mounting `repoPath` into a container would expose one of `protectedPaths` (the relay's own
 // code, which runs on the host, or the folder holding the App key), because one contains the other.
+// Symlinks and junctions are followed, so a link to either is caught too.
 export function unsafeMount(repoPath, protectedPaths) {
-  const norm = (p) => path.resolve(p).toLowerCase().replace(/[\\/]+$/, '') + path.sep;
+  // The deepest part that exists is resolved, so a missing folder under a link is caught as well.
+  const real = (p) => {
+    const abs = path.resolve(p);
+    try { return fs.realpathSync.native(abs); }
+    catch { const up = path.dirname(abs); return up === abs ? abs : path.join(real(up), path.basename(abs)); }
+  };
+  const norm = (p) => real(p).toLowerCase().replace(/[\\/]+$/, '') + path.sep;
   const r = norm(repoPath);
   return protectedPaths.some((p) => { const q = norm(p); return r.startsWith(q) || q.startsWith(r); });
 }

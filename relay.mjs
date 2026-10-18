@@ -184,6 +184,8 @@ async function ensureContainer(a) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
     throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
   }
+  // Docker would mount a missing folder as a new empty one.
+  if (!fs.existsSync(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
   const [imageId, version] = await run('docker', ['image', 'inspect', '--format',
     '{{.Id}} {{index .Config.Labels "claude-voice-relay.image"}}', cfg.image]).then((r) => r.stdout.trim().split(' '), () => []);
   if (version !== AGENT_IMAGE_VERSION) throw new Error('The agent image is out of date. On the PC, run npm run build-agent.');
@@ -252,7 +254,8 @@ async function turn(a, prompt, photo) {
     log(a.name, 'turn failed:', e.message);
     say(`${a.name} failed. ${e.message.slice(0, 200)}`);
   } finally {
-    await agentGitHub.release(ghEnv);
+    // Not awaited, so a slow GitHub doesn't keep the agent busy; revoke logs its own failures.
+    agentGitHub.release(ghEnv).catch(() => {});
     if (photo) {
       fs.rmSync(photo, { force: true });
       await run('docker', ['exec', a.container, 'rm', '-f', photoIn]).catch(() => {});

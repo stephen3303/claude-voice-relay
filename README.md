@@ -95,8 +95,8 @@ The relay only hands out a token for a repo whose default branch is protected as
 lets an agent work in the relay's own folder (it could change the code your PC runs) or in a folder
 above it or above `%USERPROFILE%\.bridge`, where the App key is. To have agents work on this repo,
 clone it again into a subfolder, keeping the repo's name (a folder is only matched to the GitHub
-repo of the same name), e.g. `git clone https://github.com/<you>/claude-voice-relay agents\claude-voice-relay`
-in your projects folder, and add `"voice relay": "agents/claude-voice-relay"` to `aliases.json`.
+repo of the same name): in your projects folder, `git clone https://github.com/<you>/claude-voice-relay agents\claude-voice-relay`.
+`aliases.json` already sends "voice relay" there.
 
 **In each repo the App will be installed on, first:**
 1. Add a `.github/CODEOWNERS` file containing `* @<your-username>` (this repo has one).
