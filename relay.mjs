@@ -178,7 +178,9 @@ function load() {
 // ---------- spoken project name -> repo folder ----------
 function projectDirs() {
   return fs.readdirSync(cfg.projectsRoot, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name);
+    .filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name)
+    // The relay's own folder is never a project, so its name falls through to its alias (the agents' clone).
+    .filter((d) => !unsafeMount(path.join(cfg.projectsRoot, d), PROTECTED));
 }
 function aliases() {
   try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'aliases.json'), 'utf8').replace(/^\uFEFF/, '')); }
@@ -226,7 +228,13 @@ const AGENT_IMAGE_VERSION = '3';
 async function ensureContainer(a) {
   if (unsafeMount(a.repoPath, PROTECTED)) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
-    throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
+    // An agent saved before its name had a safe folder (the relay's own name, before aliases.json pointed
+    // it at the agents' clone) moves there; otherwise it can't run.
+    const moved = resolveRepo(a.name, false);
+    if (!moved || unsafeMount(moved, PROTECTED)) throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
+    log(`${a.name}: moved from ${a.repoPath} to ${moved}.`);
+    a.repoPath = moved;
+    save();
   }
   // Docker would mount a missing folder as a new empty one.
   if (!fs.existsSync(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
