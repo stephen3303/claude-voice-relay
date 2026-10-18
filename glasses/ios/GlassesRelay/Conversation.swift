@@ -314,7 +314,7 @@ final class Conversation: NSObject, ObservableObject {
         if let mp3 = try? await Relay.shared.speech(text), let player = try? AVAudioPlayer(data: mp3) {
             player.delegate = self
             self.player = player
-            status = "Voice: relay (cloud)"
+            status = Relay.shared.isCloud ? "Voice: Bridge Cloud (natural)" : "Voice: relay (natural)"
             await withCheckedContinuation { c in
                 speechDone = c
                 if !player.play() { speechDone?.resume(); speechDone = nil }
