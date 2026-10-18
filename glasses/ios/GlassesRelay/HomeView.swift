@@ -121,8 +121,8 @@ struct HomeView: View {
                     Spacer()
                     NavigationLink("History") { HistoryView() }.font(.subheadline)
                 }
-                ForEach(Array(conversation.transcript.indices.suffix(6).reversed()), id: \.self) { i in
-                    TranscriptLine(who: conversation.transcript[i].who, text: conversation.transcript[i].text)
+                ForEach(Array(Array(conversation.transcript.enumerated()).suffix(6).reversed()), id: \.offset) { _, line in
+                    TranscriptLine(who: line.who, text: line.text)
                 }
             }
             .padding()
@@ -169,8 +169,8 @@ struct HistoryView: View {
             if conversation.transcript.isEmpty {
                 Text("Nothing yet. Your conversations appear here.").foregroundStyle(.secondary)
             }
-            ForEach(Array(conversation.transcript.indices.reversed()), id: \.self) { i in
-                TranscriptLine(who: conversation.transcript[i].who, text: conversation.transcript[i].text)
+            ForEach(Array(Array(conversation.transcript.enumerated()).reversed()), id: \.offset) { _, line in
+                TranscriptLine(who: line.who, text: line.text)
             }
         }
         .navigationTitle("History")
