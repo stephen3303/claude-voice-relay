@@ -55,6 +55,7 @@ final class Account: ObservableObject {
     }
 
     func signOut() {
+        if let session = Keychain.read(Self.sessionKey) { Push.shared.unregister(session: session) }
         Keychain.delete(Self.sessionKey)
         UserDefaults.standard.removeObject(forKey: "appleUser")
         expires = 0
@@ -94,5 +95,6 @@ final class Account: ObservableObject {
         Keychain.write(Self.sessionKey, session.token)
         expires = session.expires
         signedIn = true
+        Push.shared.refresh()   // agents can reach this phone now
     }
 }

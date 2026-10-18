@@ -38,8 +38,9 @@ targets:
           TeamID: $(DEVELOPMENT_TEAM)
           Analytics: { OptOut: true }
           CrashReporting: { OptOut: true }
-        # bluetooth/external-accessory: links the toolkit uses; audio: keeps the conversation alive in your pocket
-        UIBackgroundModes: [audio, bluetooth-central, bluetooth-peripheral, external-accessory]
+        # bluetooth/external-accessory: links the toolkit uses; audio: keeps the conversation alive in your pocket;
+        # voip: an agent's call (PushKit + CallKit, Push.swift) reaches the app while it's in the background
+        UIBackgroundModes: [audio, bluetooth-central, bluetooth-peripheral, external-accessory, voip]
         UISupportedExternalAccessoryProtocols: [com.meta.ar.wearable]
         NSBluetoothAlwaysUsageDescription: Connects to your Meta glasses.
         NSLocalNetworkUsageDescription: Lets your phone find and connect to your glasses over Wi-Fi.
@@ -47,6 +48,12 @@ targets:
         NSMicrophoneUsageDescription: Hears you through the glasses microphone.
         NSCameraUsageDescription: Takes photos with your glasses camera when you ask, for Claude to look at.
         NSSpeechRecognitionUsageDescription: Turns what you say into text for your Claude agents.
+    entitlements:
+      path: GlassesRelay/GlassesRelay.entitlements
+      properties:
+        aps-environment: development          # the App Store export switches it to production
+        com.apple.developer.applesignin: [Default]   # Bridge Cloud accounts (Account.swift)
+        com.apple.developer.usernotifications.time-sensitive: true   # agents' notifications break through Focus
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.smitherman.glassesrelay

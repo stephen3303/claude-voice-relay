@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 import StoreKit
 
@@ -11,6 +12,8 @@ struct ContentView: View {
     @State private var showPaywall = false
     @State private var readBack = Conversation.readBack
     @ObservedObject private var store = Store.shared
+    @ObservedObject private var account = Account.shared
+    @ObservedObject private var push = Push.shared
 
     var body: some View {
         NavigationStack {
@@ -44,6 +47,7 @@ struct ContentView: View {
                     Button("Save and test") {
                         Relay.shared.baseURL = url.trimmingCharacters(in: .whitespaces)
                         Relay.shared.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                        push.refresh()
                         Task {
                             do { _ = try await Relay.shared.inbox(after: nil, wait: false); testResult = "✓ Relay reachable" }
                             catch { testResult = error.localizedDescription }
@@ -52,10 +56,37 @@ struct ContentView: View {
                     Button("Use demo (no PC needed)") {
                         url = Relay.demoAddress
                         Relay.shared.baseURL = Relay.demoAddress
+                        push.refresh()
                         testResult = "Demo on: replies are samples. Enter your PC's address to use your agents."
                     }
                     if !testResult.isEmpty { Text(testResult).font(.footnote) }
                 } header: { Text("PC relay") }
+
+                Section("Bridge Cloud") {
+                    if account.signedIn {
+                        LabeledContent("Account", value: account.name.isEmpty ? "Signed in" : account.name)
+                        if url == Relay.cloudAddress {
+                            Toggle("Agents can call me", isOn: $push.callsAllowed)
+                            Text("With glasses or headphones connected, an agent that wants you rings like a phone call. Otherwise you get a notification.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                            Button("Test call") { Task { await push.testCall() } }
+                        } else {
+                            Button("Use Bridge Cloud") {
+                                url = Relay.cloudAddress
+                                Relay.shared.baseURL = Relay.cloudAddress
+                                push.refresh()
+                            }
+                        }
+                        Button("Sign out") { account.signOut(); url = Relay.shared.baseURL }
+                    } else {
+                        SignInWithAppleButton(.signIn) { $0.requestedScopes = [.fullName] } onCompletion: { result in
+                            Task { await account.completed(result) }
+                        }
+                        .frame(height: 44)
+                    }
+                    if !push.status.isEmpty { Text(push.status).font(.footnote) }
+                    if let e = account.error { Text(e).font(.footnote).foregroundStyle(.red) }
+                }
 
                 Section("Bridge Pro") {
                     LabeledContent("Status", value: store.isPro ? "Active" : "Not subscribed")
