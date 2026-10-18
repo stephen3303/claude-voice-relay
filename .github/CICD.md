@@ -8,7 +8,7 @@
 | iOS build | `glasses-ios.yml` | push touching `glasses/ios/**` | nothing |
 | Claude review | `claude-review.yml` | PR opened, updated, reopened or marked ready (drafts skipped) | a Claude credential (below) |
 | Ask Claude | `claude.yml` | a comment containing `@claude` from you or a collaborator | a Claude credential |
-| Deploy cloud | `cloud-deploy.yml` | merge to main touching `cloud/**` or `site/**` | `AWS_DEPLOY_ROLE_ARN` variable (already set) |
+| Deploy cloud | `cloud-deploy.yml` | merge to main touching `cloud/**` or `site/**` | `AWS_DEPLOY_ROLE_ARN` variable (set) and the `aws-deploy` environment (`cloud/setup/update-deploy-role.ps1`) |
 | Website | `pages.yml` | merge to main touching `site/**` | nothing |
 | App Store | `glasses-appstore.yml`, `glasses-subscriptions.yml` | by hand | the `ASC_*`, `APPLE_TEAM_ID`, `META_*` secrets |
 
@@ -38,8 +38,9 @@ Use one by hand: in Claude Code, "use the security-reviewer on my last commit", 
 - **`@claude` (`claude.yml`):** runs code, so it only acts on comments from you or collaborators, on
   issues they opened and same-repo PRs. Pushes it makes use the workflow's token, so they don't start CI
   by themselves; push again or rerun CI.
-- **No `id-token: write`** in either, so neither can mint the GitHub OIDC token that the AWS
-  `BridgeGitHubDeploy` role trusts. Keep it that way: today the role trusts any workflow on main.
+- **No `id-token: write`** in either, so neither can mint a GitHub OIDC token at all. Separately, the
+  AWS `BridgeGitHubDeploy` role only trusts jobs in the `aws-deploy` environment, which only
+  `cloud-deploy.yml` uses and which only accepts main.
 - Actions in these jobs are pinned to commit SHAs.
 
 A workflow edited in a same-repo branch runs with the secrets on that branch's PR. That's GitHub's model:
@@ -66,6 +67,3 @@ draft while you iterate if you want fewer reviews.
   default. To get a diff on PRs, add a second read-only role trusting `pull_request` and a step running
   `npx cdk diff`; ask Claude for it when you want it.
 - **Staging stack:** worth adding before Bridge Cloud has paying users.
-- **Narrower AWS trust:** the deploy role trusts `ref:refs/heads/main`, so any future workflow on main
-  with `id-token: write` can deploy. Scoping it to a `production` environment (only `cloud-deploy.yml`
-  uses it, restricted to main) needs a stack update you run in AWS; ask Claude for it.

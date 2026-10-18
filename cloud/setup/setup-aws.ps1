@@ -20,4 +20,5 @@ $arn = aws cloudformation describe-stacks --region $region --stack-name BridgeGi
   --query "Stacks[0].Outputs[?OutputKey=='RoleArn'].OutputValue" --output text
 gh variable set AWS_DEPLOY_ROLE_ARN --repo stephen3303/claude-voice-relay --body $arn
 Write-Host "Done. Deploy role: $arn"
+Write-Host 'Then run update-deploy-role.ps1: the role only trusts the aws-deploy environment, which it creates.'
 Write-Host 'Next: delete the root access key (IAM > Security credentials) so this PC no longer holds root keys.'

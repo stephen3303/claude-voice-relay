@@ -1,5 +1,6 @@
 # Deploys Bridge Cloud (cloud/infra) with the BridgeGitHubDeploy role: short-lived credentials from
-# GitHub's OIDC token, no stored AWS keys. The role only trusts this repo's main branch.
+# GitHub's OIDC token, no stored AWS keys. The role only trusts the aws-deploy environment, which only
+# this job uses and which only accepts main (cloud/setup/update-deploy-role.ps1).
 name: Cloud deploy
 on:
   push:
@@ -16,6 +17,7 @@ concurrency: cloud-deploy
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: aws-deploy
     timeout-minutes: 120   # the first domain deploy waits for the Cloudflare validation record
     defaults:
       run:
