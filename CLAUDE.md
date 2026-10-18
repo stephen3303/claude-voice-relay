@@ -13,7 +13,9 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json` 
   Two flavours from one source: personal (sideloaded, everything unlocked, experimental Meta camera
   API) and App Store (`APP_STORE` compilation condition: StoreKit Bridge Pro, Sign in with Apple,
   Bridge Cloud, agent calls via PushKit + CallKit in `Push.swift`, `AppStore.entitlements`). Screens: `HomeView` (main), `SettingsView`, `HelpView`,
-  `HistoryView`, `WelcomeView` (App Store first launch).
+  `HistoryView`, `WelcomeView` (App Store first launch). Crash and error reports go to Sentry
+  (`ErrorReporting.swift`) when CI builds with the `SENTRY_DSN` secret (`glasses/setup-sentry-secrets.ps1`);
+  never send speech, photos, replies, the PC address or the token.
 - `cloud/` — Bridge Cloud on AWS (account 651325958035, us-east-1), CDK in `cloud/infra`, Lambda code
   in `cloud/api`. `DESIGN.md` is the architecture and build order. Stacks: `BridgeApi` (HTTP API,
   Lambda, DynamoDB, KMS session key, Sign in with Apple, APNs push in `cloud/api/push.mjs` with the key
@@ -42,6 +44,7 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
   BridgeWeb (allowed to fail while AWS has CloudFront blocked). AWS access is the
   `BridgeGitHubDeploy` role via GitHub OIDC; there are no stored AWS keys.
 - `pages.yml` — the website on GitHub Pages.
+- `impactor-check.yml` — builds Impactor (the sideloader) and checks Apple accepts its sign-in; manual, and on edits to the workflow.
 
 ## Working with Stephen
 - Be direct and say why. Keep going until he says stop. Keep replies short; if he's on voice,

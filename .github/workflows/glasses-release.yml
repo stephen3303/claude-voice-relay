@@ -35,13 +35,27 @@ jobs:
           xcodegen generate
 
       - name: Build unsigned device app
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}   # crash reports (ErrorReporting.swift); empty means off
         run: |
           set -o pipefail
           xcodebuild -project GlassesRelay.xcodeproj -scheme GlassesRelay \
             -sdk iphoneos -configuration Release -derivedDataPath build \
             -skipPackagePluginValidation -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            build | xcbeautify --renderer github-actions
+            SENTRY_DSN="$SENTRY_DSN" build | xcbeautify --renderer github-actions
+
+      # Symbols, so crash reports show function names and lines. Skipped without the token; never fails the release.
+      - name: Upload symbols to Sentry
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then echo "No SENTRY_AUTH_TOKEN secret; skipping."; exit 0; fi
+          npx --yes @sentry/cli@2.58.6 debug-files upload --include-sources build/Build/Products/Release-iphoneos
 
       - name: Package IPA
         run: |

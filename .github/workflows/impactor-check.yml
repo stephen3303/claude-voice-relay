@@ -1,0 +1,72 @@
+# Checks whether Impactor (the sideloader, github.com/claration/Impactor) can still reach Apple's
+# sign-in. Builds its command-line tool (plumesign) from a release tag and tries to log in with a
+# made-up Apple ID. If Apple answers that the account information was entered incorrectly (SRP
+# error -20xxx), the sign-in request got through and the tool works. An HTTP 503, -80045 or a
+# "Plist error" means Apple rejected the request itself, which is what a broken Impactor shows you
+# on Windows. Any other output is no verdict and fails too.
+# No real Apple ID is used, so there are no secrets. Run it from Actions > Impactor check, or push
+# a change to this file. The baseline tag is expected to fail while Apple blocks its client info.
+name: Impactor check
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Impactor release tag to test
+        default: v2.7.1
+  push:
+    paths: [".github/workflows/impactor-check.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: ${{ inputs.tag || 'v2.7.1' }}
+            baseline: false
+          - tag: v2.7.0
+            baseline: true
+    name: Impactor ${{ matrix.tag }}${{ matrix.baseline && ' (baseline)' || '' }}
+    steps:
+      - name: Get Impactor ${{ matrix.tag }}
+        env:
+          TAG: ${{ matrix.tag }}
+        run: git clone --depth 1 --branch "$TAG" https://github.com/claration/Impactor.git impactor
+
+      - name: Build plumesign
+        working-directory: impactor
+        run: cargo build --locked -p plumesign
+
+      - name: Try an Apple sign-in with a made-up Apple ID
+        working-directory: impactor
+        # The baseline's rejection is expected: keep its job green so the PR checks stay readable.
+        continue-on-error: ${{ matrix.baseline }}
+        env:
+          TAG: ${{ matrix.tag }}
+        run: |
+          export HOME="$RUNNER_TEMP/home"; mkdir -p "$HOME"
+          user="bridge-impactor-check-$RANDOM@example.com"
+          set +e
+          timeout 120 ./target/debug/plumesign account login -u "$user" -p "Not-a-real-password-1" \
+            < /dev/null > out.txt 2>&1
+          code=$?
+          set -e
+          grep -v ' DEBUG ' out.txt > result.txt || true
+          tail -20 result.txt
+          if grep -Eiq 'SRP error -20[0-9]{3}|entered incorrectly' result.txt; then
+            verdict="Apple answered the sign-in request; the made-up Apple ID was refused as expected"; ok=true
+          elif grep -Eiq 'HTTP[^0-9]*503|status[^0-9]*503|-80045|plist error|<html' result.txt; then
+            verdict="Apple rejected the sign-in request itself (exit $code)"; ok=false
+          elif grep -Eiq 'anisette error|tunnel error' result.txt || [ "$code" = 124 ]; then
+            verdict="Couldn't reach the anisette server or Apple (exit $code)"; ok=false
+          else
+            verdict="No verdict: Apple's account-refused answer never came (exit $code)"; ok=false
+          fi
+          echo "### Impactor $TAG: $verdict" >> "$GITHUB_STEP_SUMMARY"
+          echo "$verdict"
+          $ok

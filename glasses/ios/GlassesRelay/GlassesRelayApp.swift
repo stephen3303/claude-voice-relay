@@ -7,6 +7,7 @@ struct GlassesRelayApp: App {
     @StateObject private var glasses = GlassesController.shared
 
     init() {
+        ErrorReporting.start()
         // The toolkit must be configured once, before anything touches Wearables.shared.
         // If it fails (or on the simulator), Wearables.shared must never be touched: the toolkit
         // traps on access. The app still works for voice; the glasses features say why they're off.
@@ -16,6 +17,7 @@ struct GlassesRelayApp: App {
         } catch {
             print("Wearables.configure failed: \(error)")
             GlassesController.toolkitError = "\(error)"
+            ErrorReporting.report(error, "Wearables.configure")
         }
         // CI launches the simulator with -screenshots to take the App Store screenshots.
         if CommandLine.arguments.contains("-screenshots") { Self.seedScreenshots() }
@@ -57,7 +59,7 @@ struct GlassesRelayApp: App {
                     guard GlassesController.toolkitReady else { return }
                     Task {
                         do { _ = try await Wearables.shared.handleUrl(url) }
-                        catch { glasses.lastError = "Meta AI callback failed: \(error)" }
+                        catch { glasses.lastError = "Meta AI callback failed: \(error)"; ErrorReporting.report(error, "Meta AI callback") }
                     }
                 }
         }
