@@ -168,16 +168,17 @@ async function speak(text) {
   const cached = spoken.get(text);
   if (cached) return cached;
   const params = { Text: text, VoiceId: SPEECH_VOICE, OutputFormat: 'mp3', SampleRate: '24000' };
-  const synth = async (Engine) => {
-    const r = await polly.send(new SynthesizeSpeechCommand({ ...params, Engine }), { abortSignal: AbortSignal.timeout(9000) });
+  // 8 s + 6 s leaves room for the budget writes and a cold start inside the app's 20 s wait.
+  const synth = async (Engine, ms) => {
+    const r = await polly.send(new SynthesizeSpeechCommand({ ...params, Engine }), { abortSignal: AbortSignal.timeout(ms) });
     return r.AudioStream.transformToByteArray();
   };
   let mp3;
-  try { mp3 = await synth('generative'); }
+  try { mp3 = await synth('generative', 8000); }
   catch (e) {
     if (!RETRY_NEURAL.has(e.name)) throw e;
     console.warn('generative speech failed, using neural:', e.name, e.message);
-    mp3 = await synth('neural');
+    mp3 = await synth('neural', 6000);
   }
   if (text.length <= 120) {
     if (spoken.size >= 200) spoken.delete(spoken.keys().next().value);
