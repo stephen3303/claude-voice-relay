@@ -27,7 +27,17 @@ if (-not $sub.use_default -and $sub.include_claim_keys -notcontains 'environment
 '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' |
   gh api -X PUT "repos/$repo/environments/aws-deploy" --input - | Out-Null
 if ($LASTEXITCODE) { throw 'creating the aws-deploy environment failed' }
-$names = gh api "repos/$repo/environments/aws-deploy/deployment-branch-policies" --jq '.branch_policies[].name'
+$rules = gh api "repos/$repo/environments/aws-deploy/deployment-branch-policies" --jq '.branch_policies[] | "\(.id) \(.type) \(.name)"'
+if ($LASTEXITCODE) { throw 'reading the branch rules failed' }
+$names = @()
+foreach ($rule in @($rules | Where-Object { $_ })) {
+  $id, $type, $name = $rule -split ' ', 3
+  if ($type -eq 'branch' -and $name -eq 'main') { $names += $name; continue }
+  # Any other rule (a pattern like * or a tag) would let more than main deploy.
+  gh api -X DELETE "repos/$repo/environments/aws-deploy/deployment-branch-policies/$id" | Out-Null
+  if ($LASTEXITCODE) { throw "removing the branch rule '$name' failed" }
+  Write-Host "Removed branch rule '$name'"
+}
 if ($names -notcontains 'main') {
   gh api -X POST "repos/$repo/environments/aws-deploy/deployment-branch-policies" -f name=main -f type=branch | Out-Null
   if ($LASTEXITCODE) { throw 'adding the main branch rule failed' }
@@ -36,7 +46,7 @@ Write-Host 'Environment aws-deploy: main only'
 
 # 2. The role's new trust policy.
 aws cloudformation deploy --region $region --stack-name BridgeGitHubDeploy `
-  --template-file $template --capabilities CAPABILITY_NAMED_IAM
+  --template-file $template --capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset
 if ($LASTEXITCODE) { throw 'deploy role stack failed' }
 aws iam get-role --role-name BridgeGitHubDeploy `
   --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition.StringEquals' --output json
