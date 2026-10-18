@@ -16,7 +16,7 @@ const LOOK_MODEL = process.env.LOOK_MODEL || 'us.anthropic.claude-haiku-5-5';
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const bedrock = new BedrockRuntimeClient({});
 const polly = new PollyClient({});
-const SPEECH_VOICE = process.env.SPEECH_VOICE || 'Ruth';
+const SPEECH_VOICE = 'Ruth';   // Polly's en-US voice with both generative and neural engines
 const kms = new KMSClient({});
 
 // Single table. pk USER#<sub>; sk HELD (the task waiting for "send it"), SEQ (message counter),

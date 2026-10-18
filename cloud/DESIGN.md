@@ -12,6 +12,7 @@ The cloud speaks the same protocol as the relay, so the app only switches its ba
 | `POST /voice/confirm` | same | read-back step; "send it" starts a task |
 | `GET /voice/inbox` | same | agent messages, long-poll |
 | `POST /voice/photo` | same | quick answer, or "send this to <project>" |
+| `POST /voice/tts` (OpenAI, with a key) | same (Amazon Polly; 60k characters per account and 1M in total per day) | MP3 of a line; any non-200 means the phone voice |
 | bearer `VOICE_TOKEN` | Bridge session token (Sign in with Apple) | per user |
 | projects = folders on the PC | projects = GitHub repos the user installed the Bridge GitHub App on, plus a Files workspace | |
 
