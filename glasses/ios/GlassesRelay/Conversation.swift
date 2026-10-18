@@ -196,10 +196,14 @@ final class Conversation: NSObject, ObservableObject {
         request = req
 
         if onHiFi {
-            try? useGlassesMic(report: false)
+            var failure: String?
+            do { try useGlassesMic(report: false) } catch { failure = error.localizedDescription }
             if !onHiFi { awaitingHFP = true }
-            // Still no glasses mic after a few tries (none connected): listen on the phone instead.
-            if onHiFi && micRetries >= 3 { onHiFi = false; status = "Glasses mic not found — using phone mic" }
+            // Still no glasses mic after a few tries (none connected, or it keeps refusing): listen on the phone.
+            if onHiFi && micRetries >= 3 {
+                onHiFi = false
+                status = failure.map { "Glasses mic failed (\($0)) — using phone mic" } ?? "Glasses mic not found — using phone mic"
+            }
         }
         // The glasses are listed as an input before their HFP link is up, and until it is the engine reports the
         // old route's format. Listening then would be restarted by the route change just as you start talking.
