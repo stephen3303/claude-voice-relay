@@ -43,11 +43,13 @@ export const FETCH_SCRIPT = [
 ].join('\n');
 export const PUSH_SCRIPT = [
   'set -e',
+  // Only the push itself inherits the token (the shell's own copy is unavoidable).
+  'T="$GH_TOKEN"; unset GH_TOKEN',
   'cat > /tmp/branch.bundle',
   'git init -q --bare /tmp/p',
   'cd /tmp/p',
   'git fetch -q /tmp/branch.bundle "+refs/heads/$BRANCH:refs/heads/$BRANCH"',
-  `git -c credential.helper= -c credential.helper='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' push -q "https://github.com/$REPO.git" "refs/heads/$BRANCH:refs/heads/$BRANCH"`,
+  `GH_TOKEN="$T" git -c credential.helper= -c credential.helper='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' push -q "https://github.com/$REPO.git" "refs/heads/$BRANCH:refs/heads/$BRANCH"`,
 ].join('\n');
 
 /**
