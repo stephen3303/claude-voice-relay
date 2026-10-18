@@ -7,4 +7,4 @@ const app = new App();
 const env = { account: '651325958035', region: 'us-east-1' };
 
 new WebStack(app, 'BridgeWeb', { env, description: 'Bridge website: S3 + CloudFront' });
-new ApiStack(app, 'BridgeApi', { env, description: 'Bridge accounts and voice API: Cognito, HTTP API, Lambda, DynamoDB' });
+new ApiStack(app, 'BridgeApi', { env, description: 'Bridge accounts and voice API: Sign in with Apple, HTTP API, Lambda, DynamoDB' });

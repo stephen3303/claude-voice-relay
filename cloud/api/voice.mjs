@@ -1,5 +1,6 @@
 // Bridge Cloud voice API: the relay's protocol (/voice/confirm, /voice/inbox, /voice/photo)
-// for signed-in Pro users. One Lambda behind API Gateway (HTTP API, Cognito JWT authorizer).
+// for signed-in Pro users, plus /voice/send (no read-back). One Lambda behind API Gateway, whose JWT
+// authorizer checks the Bridge session (auth.mjs).
 // Dependencies are passed in, so tests run it with fakes and no AWS.
 
 const SEND = /^(?:(?:yes|yeah|ok(?:ay)?)[\s,]+)?(?:send(?: it)?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
@@ -52,6 +53,14 @@ export function makeHandler(deps) {
     return `I heard: ${body}. Say send it, or say it again.`;
   }
 
+  // Read-back off in the app: start the task as said.
+  async function send(user, raw) {
+    const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
+    if (!body) return "I didn't catch that. Say it again.";
+    const m = body.match(PROJECT);
+    return deps.startTask(user, m ? { project: m[1].trim(), task: m[2].trim() } : { project: null, task: body });
+  }
+
   async function inbox(user, query) {
     const after = Number(query?.after) || 0;
     const wait = query?.wait !== '0';
@@ -84,6 +93,11 @@ export function makeHandler(deps) {
         let said = raw.toString('utf8');
         try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
         return text(200, await confirm(user, said.trim()));
+      }
+      if (route === 'POST /voice/send') {
+        let said = raw.toString('utf8');
+        try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
+        return text(200, await send(user, said.trim()));
       }
       if (route === 'GET /voice/inbox') return json(200, await inbox(user, event.queryStringParameters));
       if (route === 'POST /voice/photo') {

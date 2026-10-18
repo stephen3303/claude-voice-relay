@@ -86,6 +86,13 @@ test('a photo gets a quick answer, or goes to a project', async () => {
   assert.equal(started[0].photo.length, 7);
 });
 
+test('send starts the task at once, with or without a project', async () => {
+  const { call, started } = setup();
+  assert.equal((await call('POST', '/voice/send', { body: JSON.stringify({ text: 'task: in trading bot, add a check.' }) })).body, 'Sent.');
+  assert.equal((await call('POST', '/voice/send', { body: 'what is the status' })).body, 'Sent.');
+  assert.deepEqual(started, [{ project: 'trading bot', task: 'add a check' }, { project: null, task: 'what is the status' }]);
+});
+
 test('unknown routes are 404', async () => {
   const { call } = setup();
   assert.equal((await call('GET', '/nope')).statusCode, 404);

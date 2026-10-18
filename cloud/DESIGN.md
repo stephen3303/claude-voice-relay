@@ -12,7 +12,7 @@ The cloud speaks the same protocol as the relay, so the app only switches its ba
 | `POST /voice/confirm` | same | read-back step; "send it" starts a task |
 | `GET /voice/inbox` | same | agent messages, long-poll |
 | `POST /voice/photo` | same | quick answer, or "send this to <project>" |
-| bearer `VOICE_TOKEN` | Cognito ID token | per user |
+| bearer `VOICE_TOKEN` | Bridge session token (Sign in with Apple) | per user |
 | projects = folders on the PC | projects = GitHub repos the user installed the Bridge GitHub App on, plus a Files workspace | |
 
 ## Architecture (all in one AWS region, us-east-1)
@@ -20,7 +20,7 @@ The cloud speaks the same protocol as the relay, so the app only switches its ba
 ```
 iPhone app ──HTTPS──> CloudFront (bridge domain)
                         ├── /            S3: website (landing, privacy, terms, support, account)
-                        └── /api/*       API Gateway (HTTP API, Cognito JWT authorizer) ──> Lambda (Node 22)
+                        └── /api/*       API Gateway (HTTP API, JWT authorizer on Bridge sessions) ──> Lambda (Node 22)
                                               │  DynamoDB: users, plans, usage, projects, tasks, inbox
                                               │  S3: photos (1-day lifecycle), Files workspaces
                                               ├──> Bedrock (Claude Haiku 5.5): read-back parsing, quick photo answers
@@ -29,7 +29,7 @@ iPhone app ──HTTPS──> CloudFront (bridge domain)
                                                      user's own Anthropic key (BYO plan)
                                                      clone repo via GitHub App token → branch → PR
                                                      posts SPOKEN line to the inbox via the API
-Cognito user pool: Sign in with Apple (required by App Store 4.8), email fallback
+Accounts: Sign in with Apple only (App Store 4.8). The app sends Apple's identity token to /api/auth/apple, which answers with a 30-day session signed by a KMS key; API Gateway checks it. No Cognito.
 App Store Server Notifications v2 ──> Lambda: subscription state per user
 GitHub App webhooks ──> Lambda: which repos each user installed it on
 ```
@@ -76,14 +76,14 @@ Two ways, for customers whose work isn't on GitHub:
 ## Infrastructure as code
 
 AWS CDK (TypeScript) in `cloud/infra`, deployed from GitHub Actions with OIDC (no stored AWS keys):
-`BridgeWeb` (S3 + CloudFront + ACM + Route 53), `BridgeAuth` (Cognito), `BridgeApi` (API Gateway,
+`BridgeWeb` (S3 + CloudFront + ACM + Route 53), `BridgeApi` (API Gateway,
 Lambdas, DynamoDB, S3), `BridgeAgents` (ECR, ECS cluster, task definition). Lambdas live in `cloud/api`;
 the agent image in `cloud/agent`.
 
 ## Build order
 
 1. Deploy role + GitHub OIDC; Bedrock access check. Domain, ACM certificate, website moved to S3/CloudFront.
-2. Cognito with Sign in with Apple; account page on the website; account deletion.
+2. Sign in with Apple and account deletion (done); account page on the website.
 3. API: `/voice/confirm`, `/voice/inbox`, `/voice/photo` (quick answer on Bedrock) with the read-back flow.
 4. GitHub App + agent container on Fargate: "in <repo>, <task>" opens a PR and speaks the result.
 5. App Store subscriptions verified server-side (App Store Server API + notifications); usage metering.

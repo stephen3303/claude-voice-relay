@@ -3,12 +3,16 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
+import { KMSClient, SignCommand, GetPublicKeyCommand } from '@aws-sdk/client-kms';
+import { createHash, createPublicKey } from 'node:crypto';
 import { makeHandler, LOOK_PROMPT, INBOX_KEEP_S } from './voice.mjs';
+import { makeAuth } from './auth.mjs';
 
 const TABLE = process.env.TABLE;
 const LOOK_MODEL = process.env.LOOK_MODEL || 'us.anthropic.claude-haiku-5-5';
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const bedrock = new BedrockRuntimeClient({});
+const kms = new KMSClient({});
 
 // Single table. pk USER#<sub>; sk HELD (the task waiting for "send it"), SEQ (message counter),
 // MSG#<000000id> (inbox, expires after a week).
@@ -61,3 +65,42 @@ async function startTask(user, { project, task }) {
 }
 
 export const handler = makeHandler({ store, look, startTask });
+
+// ---------- accounts (auth.mjs): Sign in with Apple, sessions signed by KMS ----------
+let appleKeys = null, appleKeysAt = 0, publicJwk = null;
+
+async function deleteUser(sub) {
+  for (;;) {
+    const r = await db.send(new QueryCommand({ TableName: TABLE, KeyConditionExpression: 'pk = :pk',
+      ExpressionAttributeValues: { ':pk': `USER#${sub}` }, ProjectionExpression: 'pk, sk', Limit: 100 }));
+    if (!r.Items?.length) return;
+    await Promise.all(r.Items.map((Key) => db.send(new DeleteCommand({ TableName: TABLE, Key }))));
+  }
+}
+
+export const auth = makeAuth({
+  issuer: process.env.ISSUER,
+  audience: process.env.BUNDLE_ID,
+  async appleKeys() {
+    if (!appleKeys || Date.now() - appleKeysAt > 3600_000) {
+      const r = await fetch('https://appleid.apple.com/auth/keys', { signal: AbortSignal.timeout(5000) });
+      if (!r.ok) throw new Error(`Apple keys: ${r.status}`);
+      appleKeys = await r.json(); appleKeysAt = Date.now();
+    }
+    return appleKeys;
+  },
+  async sign(bytes) {
+    const r = await kms.send(new SignCommand({ KeyId: process.env.SIGNING_KEY, MessageType: 'DIGEST',
+      Message: createHash('sha256').update(bytes).digest(), SigningAlgorithm: 'RSASSA_PKCS1_V1_5_SHA_256' }));
+    return Buffer.from(r.Signature);
+  },
+  async publicJwk() {
+    if (!publicJwk) {
+      const r = await kms.send(new GetPublicKeyCommand({ KeyId: process.env.SIGNING_KEY }));
+      const { n, e, kty } = createPublicKey({ key: Buffer.from(r.PublicKey), format: 'der', type: 'spki' }).export({ format: 'jwk' });
+      publicJwk = { kty, n, e };
+    }
+    return publicJwk;
+  },
+  deleteUser,
+});

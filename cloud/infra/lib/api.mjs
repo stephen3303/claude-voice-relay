@@ -1,8 +1,8 @@
-// BridgeApi: accounts (Cognito), the voice API (HTTP API + Lambda) and its table (DynamoDB).
-// Sign in with Apple is added to the user pool once the Apple Developer account exists
-// (it needs a Services ID and key); email sign-in works until then.
+// BridgeApi: accounts (Sign in with Apple, cloud/api/auth.mjs), the voice API (HTTP API + Lambda)
+// and its table (DynamoDB). The API is its own token issuer: sessions are signed by a KMS key, and
+// API Gateway's JWT authorizer reads the discovery document and key set the Auth function serves.
 import { Stack, Duration, RemovalPolicy, CfnOutput } from 'aws-cdk-lib';
-import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -14,29 +14,11 @@ import { fileURLToPath } from 'node:url';
 
 const API_DIR = fileURLToPath(new URL('../../api', import.meta.url));
 const LOOK_MODEL = 'us.anthropic.claude-haiku-5-5';   // quick photo answers: fast and cheap
+const BUNDLE_ID = 'com.smitherman.glassesrelay';     // Apple identity tokens' audience
 
 export class ApiStack extends Stack {
   constructor(scope, id, props) {
     super(scope, id, props);
-
-    const users = new cognito.UserPool(this, 'Users', {
-      userPoolName: 'bridge-users',
-      selfSignUpEnabled: true,
-      signInAliases: { email: true },
-      autoVerify: { email: true },
-      passwordPolicy: { minLength: 10 },
-      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-      removalPolicy: RemovalPolicy.RETAIN,
-    });
-    const appClient = users.addClient('IosApp', {
-      userPoolClientName: 'bridge-ios',
-      generateSecret: false,                        // a phone app can't keep a secret
-      authFlows: { userSrp: true },
-      preventUserExistenceErrors: true,
-      accessTokenValidity: Duration.hours(1),
-      idTokenValidity: Duration.hours(1),
-      refreshTokenValidity: Duration.days(90),
-    });
 
     const table = new dynamodb.TableV2(this, 'Data', {
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
@@ -67,19 +49,46 @@ export class ApiStack extends Stack {
       ],
     }));
 
-    const api = new apigw.HttpApi(this, 'Http', {
-      apiName: 'bridge-api',
-      defaultAuthorizer: new HttpJwtAuthorizer('Cognito',
-        `https://cognito-idp.${this.region}.amazonaws.com/${users.userPoolId}`,
-        { jwtAudience: [appClient.userPoolClientId] }),
+    const api = new apigw.HttpApi(this, 'Http', { apiName: 'bridge-api' });
+
+    // Session signing key: RSA in KMS, so the private half can't be read or leaked.
+    const signingKey = new kms.Key(this, 'SessionKey', {
+      description: 'Signs Bridge Cloud session tokens',
+      keySpec: kms.KeySpec.RSA_2048,
+      keyUsage: kms.KeyUsage.SIGN_VERIFY,
+      removalPolicy: RemovalPolicy.RETAIN,   // deleting it signs everyone out
     });
-    const integration = new HttpLambdaIntegration('VoiceIntegration', voice);
-    for (const [method, path] of [['POST', '/api/voice/confirm'], ['GET', '/api/voice/inbox'], ['POST', '/api/voice/photo']]) {
-      api.addRoutes({ path, methods: [apigw.HttpMethod[method]], integration });
+    const authFn = new lambda.Function(this, 'Auth', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      handler: 'index.auth',
+      code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
+      timeout: Duration.seconds(10),
+      memorySize: 256,
+      environment: { TABLE: table.tableName, ISSUER: api.apiEndpoint, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn },
+      logGroup: new logs.LogGroup(this, 'AuthLogs', { retention: logs.RetentionDays.ONE_MONTH }),
+    });
+    authFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['kms:Sign', 'kms:GetPublicKey'], resources: [signingKey.keyArn] }));
+    table.grantReadWriteData(authFn);   // deleting an account removes its data
+
+    const sessions = new HttpJwtAuthorizer('Session', api.apiEndpoint, { jwtAudience: [BUNDLE_ID] });
+    const authIntegration = new HttpLambdaIntegration('AuthIntegration', authFn);
+    const voiceIntegration = new HttpLambdaIntegration('VoiceIntegration', voice);
+    const routes = [
+      ['GET', '/.well-known/openid-configuration', authIntegration, null],
+      ['GET', '/.well-known/jwks.json', authIntegration, null],
+      ['POST', '/api/auth/apple', authIntegration, null],
+      ['POST', '/api/auth/refresh', authIntegration, sessions],
+      ['DELETE', '/api/account', authIntegration, sessions],
+      ['POST', '/api/voice/confirm', voiceIntegration, sessions],
+      ['POST', '/api/voice/send', voiceIntegration, sessions],
+      ['GET', '/api/voice/inbox', voiceIntegration, sessions],
+      ['POST', '/api/voice/photo', voiceIntegration, sessions],
+    ];
+    for (const [method, path, integration, authorizer] of routes) {
+      api.addRoutes({ path, methods: [apigw.HttpMethod[method]], integration, ...(authorizer ? { authorizer } : {}) });
     }
 
     new CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });
-    new CfnOutput(this, 'UserPoolId', { value: users.userPoolId });
-    new CfnOutput(this, 'AppClientId', { value: appClient.userPoolClientId });
   }
 }
