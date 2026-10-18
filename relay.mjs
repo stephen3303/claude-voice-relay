@@ -260,8 +260,8 @@ async function turn(a, prompt, photo) {
   try {
     await ensureContainer(a);
     // A request left by a turn that failed or was stopped belongs to that turn, not this one.
-    // The folder is made here so the agent only has to write the file.
-    await run('docker', ['exec', a.container, 'sh', '-c', 'rm -f "$1"; mkdir -p "$(dirname "$1")" 2>/dev/null || true', 'sh', REQUEST_FILE]);
+    // The folder is made here (in a git repo only) so the agent only has to write the file.
+    await run('docker', ['exec', a.container, 'sh', '-c', 'rm -f "$1"; [ -d /work/.git ] && mkdir -p "$(dirname "$1")" 2>/dev/null; true', 'sh', REQUEST_FILE]);
     if (photo) {
       await run('docker', ['cp', photo, `${a.container}:${photoIn}`]);
       fs.rmSync(photo, { force: true });
