@@ -7,7 +7,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
 ## Layout
 - `relay.mjs` — the PC relay (Node, no deps). Docker agents (one container per repo,
   headless `claude -p`), and the voice endpoint on :47879 behind `tailscale serve`
-  (https://powerspec.taila78b6c.ts.net). Voice routes: `/voice/confirm` (read-back), `/voice/send`
+  (https://powerspec.taila78b6c.ts.net). `AGENT_MODE=cloud` runs tasks as claude.ai cloud sessions instead
+  (`cloud-agents.mjs`, host `claude -p --cloud`), so they show in the Claude app. Voice routes: `/voice/confirm` (read-back), `/voice/send`
   (no read-back), `/voice/inbox` (long-poll), `/voice/photo`, `/voice/tts`.
 - `glasses/ios` — the Bridge iPhone app (SwiftUI, XcodeGen `project.yml`, Meta Wearables DAT 1.0.1).
   Two flavours from one source: personal (sideloaded, everything unlocked, experimental "Hey Meta"

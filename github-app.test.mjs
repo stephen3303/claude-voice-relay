@@ -312,3 +312,22 @@ test('without the bot identity, commits never go out as the owner', async () => 
   const { gh } = agentGitHub({ noIdentity: true });
   assert.notEqual((await gh.identity()).GIT_AUTHOR_NAME, 'Stephen');
 });
+
+test('tokenFor with checkOnly runs the same checks and mints no write token', async () => {
+  const { app, calls } = fakeGitHub();
+  assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay', { checkOnly: true }), true);
+  assert.equal(mints(calls).length, 1); // the read-only probe only
+  assert.deepEqual(revokes(calls), ['Bearer ghs_1']);
+});
+
+test('credentials checkOnly answers for the pinned repo without a token, and never with AGENT_GH_TOKEN', async () => {
+  const { gh, minted } = agentGitHub({
+    ghApp: undefined,
+  });
+  await gh.pinNow(agent);
+  assert.deepEqual(await gh.credentials(agent, { checkOnly: true }), { owner: 'stephen3303', repo: 'claude-voice-relay' });
+  assert.deepEqual(minted, ['stephen3303/claude-voice-relay']); // the fake counts the check
+  const fallback = agentGitHub({ ghApp: null, fallbackToken: 'github_pat_x' });
+  await fallback.gh.pinNow(agent);
+  assert.equal(await fallback.gh.credentials(agent, { checkOnly: true }), null);
+});
