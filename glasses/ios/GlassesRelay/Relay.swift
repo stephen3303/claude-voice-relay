@@ -10,19 +10,40 @@ final class Relay {
         get { UserDefaults.standard.string(forKey: "relayURL") ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: "relayURL") }
     }
+    /// The relay's VOICE_TOKEN, in the Keychain. A re-signed sideloaded build can be refused Keychain access
+    /// (errSecMissingEntitlement), so it then falls back to app storage rather than losing the token.
     var token: String {
-        get { Keychain.read("relayToken") ?? "" }
-        set { Keychain.write("relayToken", newValue) }
+        get { Keychain.read("relayToken") ?? UserDefaults.standard.string(forKey: "relayTokenFallback") ?? "" }
+        set {
+            if Keychain.write("relayToken", newValue) {
+                UserDefaults.standard.removeObject(forKey: "relayTokenFallback")
+            } else {
+                UserDefaults.standard.set(newValue, forKey: "relayTokenFallback")
+            }
+        }
+    }
+
+    /// What the user typed as the PC's address, made usable: trimmed, https:// added when there's no scheme,
+    /// trailing slash dropped. "" when nothing was typed.
+    static func normalized(_ address: String) -> String {
+        var a = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        if a.isEmpty || a == demoAddress || a == cloudAddress { return a }
+        if !a.contains("://") { a = "https://" + a }
+        while a.hasSuffix("/") { a.removeLast() }
+        return a
     }
 
     struct Inbox: Decodable { let boot: Double; let last: Int; let messages: [Message] }
     struct Message: Decodable { let id: Int; let text: String; let age: Int }
 
     enum Failure: LocalizedError {
-        case notConfigured, http(Int)
+        case notConfigured, noAddress, badAddress, noToken, http(Int)
         var errorDescription: String? {
             switch self {
             case .notConfigured: return "Open Bridge settings and choose how to connect."
+            case .noAddress: return "Enter your PC's address in Bridge settings."
+            case .badAddress: return "That PC address isn't a web address. It should look like https://your-pc.your-tailnet.ts.net."
+            case .noToken: return "Enter the relay's VOICE_TOKEN in Bridge settings."
             case .http(401): return "The relay rejected the token."
             case .http(let code): return "The relay answered with error \(code)."
             }
@@ -130,11 +151,14 @@ final class Relay {
             // Same protocol under /api, with the Bridge session instead of the relay's token.
             base = Account.cloudURL + "/api"
             bearer = Keychain.read(Account.sessionKey) ?? ""
+            guard !bearer.isEmpty else { throw Failure.notConfigured }
         } else {
-            base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+            base = Self.normalized(baseURL)
             bearer = token
+            guard !base.isEmpty else { throw Failure.noAddress }
+            guard !bearer.isEmpty else { throw Failure.noToken }
         }
-        guard !base.isEmpty, !bearer.isEmpty, let url = URL(string: "\(base)/\(path)") else { throw Failure.notConfigured }
+        guard let url = URL(string: "\(base)/\(path)"), url.host != nil else { throw Failure.badAddress }
         var req = URLRequest(url: url)
         req.timeoutInterval = timeout
         req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
@@ -150,13 +174,15 @@ final class Relay {
 }
 
 enum Keychain {
-    static func write(_ key: String, _ value: String) {
+    /// False when the Keychain refused the item (for example a re-signed build without a keychain group).
+    @discardableResult
+    static func write(_ key: String, _ value: String) -> Bool {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key]
         SecItemDelete(q as CFDictionary)
         var add = q
         add[kSecValueData as String] = Data(value.utf8)
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock  // readable while the phone is locked in your pocket
-        SecItemAdd(add as CFDictionary, nil)
+        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
     static func delete(_ key: String) {
         SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key] as CFDictionary)

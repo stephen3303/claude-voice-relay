@@ -32,7 +32,7 @@ struct SettingsView: View {
             switch m {
             case .cloud: relayURL = Relay.cloudAddress
             case .demo: relayURL = Relay.demoAddress
-            case .pc: relayURL = url.trimmingCharacters(in: .whitespaces)
+            case .pc: relayURL = Relay.normalized(url)
             }
             testResult = ""
             push.refresh()   // the cloud learns whether it can reach this phone
@@ -130,8 +130,11 @@ struct SettingsView: View {
                     .textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled()
                 SecureField("VOICE_TOKEN from the relay's .env", text: $token)
                 Button("Save and test") {
-                    relayURL = url.trimmingCharacters(in: .whitespaces)
-                    Relay.shared.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                    url = Relay.normalized(url)
+                    token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+                    relayURL = url
+                    Relay.shared.baseURL = url   // the test reads this now, not after @AppStorage catches up
+                    Relay.shared.token = token
                     test()
                 }
             case .cloud:
