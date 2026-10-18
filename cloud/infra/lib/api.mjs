@@ -1,6 +1,6 @@
 // BridgeApi: accounts (Sign in with Apple, cloud/api/auth.mjs), the voice API (HTTP API + Lambda),
-// its table (DynamoDB) and push to the app (APNs, cloud/api/push.mjs). The API is its own token issuer: sessions are signed by a KMS key, and
-// API Gateway's JWT authorizer reads the discovery document and key set the Auth function serves.
+// its table (DynamoDB) and push to the app (APNs, cloud/api/push.mjs). Sessions are signed by a
+// KMS key; a Lambda authorizer checks them.
 import { Stack, Duration, RemovalPolicy, CfnOutput } from 'aws-cdk-lib';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
@@ -10,12 +10,13 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secrets from 'aws-cdk-lib/aws-secretsmanager';
 import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { HttpJwtAuthorizer } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import { HttpLambdaAuthorizer, HttpLambdaResponseType } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
 import { fileURLToPath } from 'node:url';
 
 const API_DIR = fileURLToPath(new URL('../../api', import.meta.url));
 const LOOK_MODEL = 'us.anthropic.claude-haiku-5-5';   // quick photo answers: fast and cheap
 const BUNDLE_ID = 'com.smitherman.glassesrelay';     // Apple identity tokens' audience, and the push topic
+const ISSUER = 'https://talktobridge.com';           // Bridge session tokens' issuer
 const APNS_SECRET = 'bridge/apns';                   // { teamId, keyId, key }: cloud/setup/setup-apns.ps1
 
 export class ApiStack extends Stack {
@@ -69,18 +70,30 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(10),
       memorySize: 256,
-      environment: { TABLE: table.tableName, ISSUER: api.apiEndpoint, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn },
+      environment: { TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn },
       logGroup: new logs.LogGroup(this, 'AuthLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     authFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['kms:Sign', 'kms:GetPublicKey'], resources: [signingKey.keyArn] }));
     table.grantReadWriteData(authFn);   // deleting an account removes its data
 
-    const sessions = new HttpJwtAuthorizer('Session', api.apiEndpoint, { jwtAudience: [BUNDLE_ID] });
+    const authorizerFn = new lambda.Function(this, 'Authorizer', {
+      runtime: lambda.Runtime.NODEJS_22_X,
+      architecture: lambda.Architecture.ARM_64,
+      handler: 'index.authorize',
+      code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
+      timeout: Duration.seconds(5),
+      memorySize: 256,
+      environment: { TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn },
+      logGroup: new logs.LogGroup(this, 'AuthorizerLogs', { retention: logs.RetentionDays.ONE_MONTH }),
+    });
+    authorizerFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['kms:GetPublicKey'], resources: [signingKey.keyArn] }));
+    const sessions = new HttpLambdaAuthorizer('Session', authorizerFn, {
+      responseTypes: [HttpLambdaResponseType.SIMPLE],
+      resultsCacheTtl: Duration.minutes(5),   // per Authorization header
+    });
     const authIntegration = new HttpLambdaIntegration('AuthIntegration', authFn);
     const voiceIntegration = new HttpLambdaIntegration('VoiceIntegration', voice);
     const routes = [
-      ['GET', '/.well-known/openid-configuration', authIntegration, null],
-      ['GET', '/.well-known/jwks.json', authIntegration, null],
       ['POST', '/api/auth/apple', authIntegration, null],
       ['POST', '/api/auth/refresh', authIntegration, sessions],
       ['DELETE', '/api/account', authIntegration, sessions],

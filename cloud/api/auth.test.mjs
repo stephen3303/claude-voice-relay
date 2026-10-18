@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, createSign, createVerify, createPublicKey } from 'node:crypto';
-import { makeAuth, APPLE_ISSUER } from './auth.mjs';
+import { generateKeyPairSync, createSign } from 'node:crypto';
+import { makeAuth, APPLE_ISSUER, userOf } from './auth.mjs';
 
 const AUD = 'com.smitherman.glassesrelay';
 const ISSUER = 'https://api.example.com';
@@ -18,38 +18,41 @@ const appleToken = (over = {}) => jwt({ iss: APPLE_ISSUER, aud: AUD, sub: '001.a
 
 function setup() {
   const deleted = [];
-  const auth = makeAuth({
-    issuer: ISSUER, audience: AUD, now: () => NOW,
+  let clock = NOW;
+  const { auth, authorize } = makeAuth({
+    issuer: ISSUER, audience: AUD, now: () => clock,
     appleKeys: async () => ({ keys: [{ ...apple.publicKey.export({ format: 'jwk' }), kid: 'apple-1' }] }),
     sign: async (bytes) => createSign('RSA-SHA256').update(bytes).sign(bridge.privateKey),
     publicJwk: async () => bridge.publicKey.export({ format: 'jwk' }),
     deleteUser: async (sub) => deleted.push(sub),
   });
   const call = (method, rawPath, { body, sub } = {}) => auth({
-    requestContext: { http: { method }, authorizer: sub ? { jwt: { claims: { sub } } } : undefined },
+    requestContext: { http: { method }, authorizer: sub ? { lambda: { sub } } : undefined },
     rawPath, body: body && JSON.stringify(body),
   });
-  return { call, deleted };
+  const signIn = async () => JSON.parse((await call('POST', '/api/auth/apple', { body: { identityToken: appleToken() } })).body);
+  return { call, authorize, signIn, deleted, advance: (ms) => (clock += ms) };
 }
 
-test('an Apple token becomes a Bridge session the published key verifies', async () => {
-  const { call } = setup();
-  const r = await call('POST', '/api/auth/apple', { body: { identityToken: appleToken() } });
-  assert.equal(r.statusCode, 200);
-  const { token, expires } = JSON.parse(r.body);
-  const [h, p, s] = token.split('.');
-  const claims = JSON.parse(Buffer.from(p, 'base64url'));
+test('an Apple token becomes a Bridge session the authorizer accepts', async () => {
+  const { authorize, signIn } = setup();
+  const { token, expires } = await signIn();
+  const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url'));
   assert.deepEqual([claims.iss, claims.aud, claims.sub], [ISSUER, AUD, 'apple.001.abc']);
   assert.equal(expires, claims.exp);
+  assert.deepEqual(await authorize({ headers: { authorization: `Bearer ${token}` } }),
+    { isAuthorized: true, context: { sub: 'apple.001.abc' } });
+});
 
-  const jwks = JSON.parse((await call('GET', '/.well-known/jwks.json')).body);
-  const key = createPublicKey({ key: jwks.keys[0], format: 'jwk' });
-  assert.ok(createVerify('RSA-SHA256').update(`${h}.${p}`).verify(key, Buffer.from(s, 'base64url')));
-  assert.equal(JSON.parse(Buffer.from(h, 'base64url')).kid, jwks.keys[0].kid);
-
-  const discovery = JSON.parse((await call('GET', '/.well-known/openid-configuration')).body);
-  assert.equal(discovery.issuer, ISSUER);
-  assert.equal(discovery.jwks_uri, `${ISSUER}/.well-known/jwks.json`);
+test('the authorizer refuses missing, forged, Apple and expired tokens', async () => {
+  const { authorize, signIn, advance } = setup();
+  const { token } = await signIn();
+  const forged = token.slice(0, token.lastIndexOf('.')) + '.' + Buffer.from('nope').toString('base64url');
+  for (const authorization of [undefined, 'Bearer junk', `Bearer ${forged}`, `Bearer ${appleToken()}`]) {
+    assert.equal((await authorize({ headers: { authorization } })).isAuthorized, false, String(authorization));
+  }
+  advance(31 * 86400_000);
+  assert.equal((await authorize({ headers: { authorization: `Bearer ${token}` } })).isAuthorized, false);
 });
 
 test('bad Apple tokens are refused', async () => {
@@ -73,4 +76,10 @@ test('refresh and delete need a session', async () => {
   assert.equal((await call('POST', '/api/auth/refresh', { sub: 'apple.1' })).statusCode, 200);
   assert.equal((await call('DELETE', '/api/account', { sub: 'apple.1' })).statusCode, 200);
   assert.deepEqual(deleted, ['apple.1']);
+});
+
+test('userOf reads either authorizer', () => {
+  assert.equal(userOf({ requestContext: { authorizer: { lambda: { sub: 'a' } } } }), 'a');
+  assert.equal(userOf({ requestContext: { authorizer: { jwt: { claims: { sub: 'b' } } } } }), 'b');
+  assert.equal(userOf({ requestContext: {} }), undefined);
 });

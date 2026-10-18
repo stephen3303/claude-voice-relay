@@ -1,7 +1,7 @@
 // Bridge Cloud accounts: Sign in with Apple. The app sends Apple's identity token; this checks it
 // against Apple's keys and answers with a Bridge session token (RS256, 30 days), signed by a KMS
-// key that never leaves AWS. API Gateway's JWT authorizer checks sessions through the OpenID
-// discovery document and key set served here, so the voice routes see `sub` as before.
+// key that never leaves AWS. `authorize` is API Gateway's Lambda authorizer: it checks sessions
+// with the key's public half and hands the routes `sub`.
 // Dependencies are passed in, so tests run with fakes and no network.
 import { createPublicKey, createVerify } from 'node:crypto';
 
@@ -12,8 +12,12 @@ const KID = 'bridge-1';
 const b64url = (b) => Buffer.from(b).toString('base64url');
 const parse = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
 
+/** The signed-in user, as either authorizer leaves it on the request. */
+export const userOf = (event) =>
+  event.requestContext?.authorizer?.lambda?.sub ?? event.requestContext?.authorizer?.jwt?.claims?.sub;
+
 /**
- * deps.issuer: this API's base URL (the session tokens' iss)
+ * deps.issuer: the session tokens' iss
  * deps.audience: the app's bundle ID (Apple tokens' aud; also the sessions' aud)
  * deps.appleKeys() -> Apple's JWK set { keys: [...] }
  * deps.sign(bytes) -> RS256 signature bytes (KMS)
@@ -24,21 +28,26 @@ const parse = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8
 export function makeAuth(deps) {
   const now = deps.now ?? Date.now;
 
-  async function verifyApple(token) {
+  // Checks an RS256 token's signature with keyFor(kid), then its issuer, audience and expiry.
+  async function verify(token, keyFor, issuer) {
     const [h, p, s] = String(token || '').split('.');
     if (!s) throw new Error('not a token');
     const header = parse(h), claims = parse(p);
     if (header.alg !== 'RS256') throw new Error('unexpected algorithm');
-    const jwk = (await deps.appleKeys()).keys.find((k) => k.kid === header.kid);
-    if (!jwk) throw new Error('unknown Apple key');
-    const ok = createVerify('RSA-SHA256').update(`${h}.${p}`).verify(createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(s, 'base64url'));
+    const jwk = await keyFor(header.kid);
+    if (!jwk) throw new Error('unknown key');
+    const ok = createVerify('RSA-SHA256').update(`${h}.${p}`)
+      .verify(createPublicKey({ key: jwk, format: 'jwk' }), Buffer.from(s, 'base64url'));
     if (!ok) throw new Error('bad signature');
-    if (claims.iss !== APPLE_ISSUER) throw new Error('wrong issuer');
+    if (claims.iss !== issuer) throw new Error('wrong issuer');
     if (claims.aud !== deps.audience) throw new Error('wrong audience');
-    if (claims.exp * 1000 < now()) throw new Error('expired');
+    if (!(claims.exp * 1000 > now())) throw new Error('expired');
     if (!claims.sub) throw new Error('no subject');
     return claims;
   }
+
+  const appleKey = async (kid) => (await deps.appleKeys()).keys.find((k) => k.kid === kid);
+  const sessionKey = async (kid) => (kid === KID ? deps.publicJwk() : null);
 
   async function session(sub) {
     const iat = Math.floor(now() / 1000);
@@ -50,28 +59,31 @@ export function makeAuth(deps) {
     return { token: `${body}.${b64url(sig)}`, expires: exp };
   }
 
-  return async function auth(event) {
+  // API Gateway Lambda authorizer (payload 2.0, simple responses).
+  async function authorize(event) {
+    const header = event.headers?.authorization ?? event.identitySource?.[0] ?? '';
+    try {
+      const claims = await verify(header.replace(/^Bearer\s+/i, ''), sessionKey, deps.issuer);
+      return { isAuthorized: true, context: { sub: claims.sub } };
+    } catch {
+      return { isAuthorized: false };
+    }
+  }
+
+  async function auth(event) {
     const route = `${event.requestContext.http.method} ${event.rawPath}`;
     try {
-      if (route === 'GET /.well-known/openid-configuration') {
-        return json(200, { issuer: deps.issuer, jwks_uri: `${deps.issuer}/.well-known/jwks.json`,
-          id_token_signing_alg_values_supported: ['RS256'], response_types_supported: ['id_token'],
-          subject_types_supported: ['public'] }, 3600);
-      }
-      if (route === 'GET /.well-known/jwks.json') {
-        return json(200, { keys: [{ ...(await deps.publicJwk()), kid: KID, alg: 'RS256', use: 'sig' }] }, 3600);
-      }
       if (route === 'POST /api/auth/apple') {
         let body = {};
         try { body = JSON.parse(Buffer.from(event.body || '', event.isBase64Encoded ? 'base64' : 'utf8').toString('utf8')); } catch { /* empty */ }
         let claims;
-        try { claims = await verifyApple(body.identityToken); }
+        try { claims = await verify(body.identityToken, appleKey, APPLE_ISSUER); }
         catch (e) { return json(401, { error: `Sign in with Apple failed: ${e.message}` }); }
         // Apple's sub is stable per developer team; prefix it so other sign-in kinds can't collide.
         return json(200, await session(`apple.${claims.sub}`));
       }
-      // The routes below sit behind the JWT authorizer: a valid session got this far.
-      const sub = event.requestContext.authorizer?.jwt?.claims?.sub;
+      // The routes below sit behind the authorizer: a valid session got this far.
+      const sub = userOf(event);
       if (!sub) return json(401, { error: 'Sign in to Bridge first.' });
       if (route === 'POST /api/auth/refresh') return json(200, await session(sub));
       if (route === 'DELETE /api/account') { await deps.deleteUser(sub); return json(200, { deleted: true }); }
@@ -80,11 +92,9 @@ export function makeAuth(deps) {
       console.error(route, e);
       return json(500, { error: 'Bridge Cloud hit an error. Try again in a moment.' });
     }
-  };
+  }
+
+  return { auth, authorize };
 }
 
-const json = (statusCode, body, maxAge) => ({
-  statusCode,
-  headers: { 'content-type': 'application/json', ...(maxAge ? { 'cache-control': `public, max-age=${maxAge}` } : {}) },
-  body: JSON.stringify(body),
-});
+const json = (statusCode, body) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
