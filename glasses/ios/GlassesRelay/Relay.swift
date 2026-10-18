@@ -114,8 +114,8 @@ final class Relay {
             demoHeld = nil
             return "Sent. In demo mode no agent runs; with your PC connected, its answer is read to you here."
         }
-        if ["cancel", "no"].contains(lower) { demoHeld = nil; return "OK, I won't send it." }
-        if ["change it", "change"].contains(lower) { demoHeld = nil; return "OK. What do you want to send?" }
+        if lower == "cancel" || (demoHeld != nil && lower == "no") { demoHeld = nil; return "OK, I won't send it." }
+        if demoHeld != nil, ["change it", "change"].contains(lower) { demoHeld = nil; return "OK. What do you want to send?" }
         if lower == "status" { return "Demo mode. Connect your PC's relay to hear your agents' status." }
         demoHeld = body
         return "Here's your message: \(body). Ready to send it?"

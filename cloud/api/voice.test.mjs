@@ -91,6 +91,23 @@ test('"change it" keeps the project for the new words, and "no" drops the messag
   assert.equal(started.length, 1);
 });
 
+test('cloud: every reply that waits is a question, and change it with no project asks for new words', async () => {
+  const { call, started } = setup();
+  const say = async (body) => (await call('POST', '/voice/confirm', { body })).body;
+  for (const r of [await say(''), await say('send it'), await say('task: fix the bug'), await say('task: in app, fix login'),
+    await say('change it'), await say('yes')]) {
+    assert.match(r, /\?/);
+  }
+  assert.equal(await say('fix the signup page'), "Here's your message to app: fix the signup page. Ready to send it?");
+  assert.equal(await say('nope'), "OK, I won't send it.");
+  await say('hello there');
+  assert.equal(await say('Change that.'), 'OK. What do you want to send?');
+  assert.equal(await say('send it'), "There's nothing to send yet. What do you want to send?");
+  assert.equal(await say('change it'), "Here's your message: change it. Ready to send it?", 'with nothing held it is a message');
+  assert.doesNotMatch(await say('cancel it'), /\?/);
+  assert.equal(started.length, 0);
+});
+
 test('users are kept apart', async () => {
   const { call } = setup();
   await call('POST', '/voice/confirm', { body: 'task: in app, fix login', user: 'a' });

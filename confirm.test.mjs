@@ -211,3 +211,21 @@ test('the request body can be JSON, a form, or plain text', () => {
   assert.equal(utterance('send it\n', 'text/plain'), 'send it');
   assert.equal(utterance('{"other":1}'), '{"other":1}');
 });
+
+test('dictation variants of cancel, no and change it', async () => {
+  for (const said of ['Cancel it.', 'never mind', 'forget it', 'nope', "Don't send it", 'no.']) {
+    const { say, sent } = setup();
+    await say('task: in trading bot, add a stop loss');
+    assert.equal(await say(`task: ${said}`), "OK, I won't send it.", said);
+    assert.deepEqual(sent, [], said);
+  }
+  for (const said of ['change', 'Change that.', 'no, change it', 'change the message', 'edit it']) {
+    const { say } = setup();
+    await say('task: in trading bot, add a stop loss');
+    assert.equal(await say(`task: ${said}`), 'OK. What do you want to tell Roundtable Trading?', said);
+  }
+  const held = setup();
+  await held.say('task: in voice relay');
+  assert.equal(await held.say('no'), "OK, I won't send it.", 'no also drops a held project');
+  assert.match(await held.say('fix it'), /^Here's your message: fix it\./, 'the project is gone');
+});
