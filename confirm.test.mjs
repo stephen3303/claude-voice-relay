@@ -30,10 +30,10 @@ function setup({ awaiting = false } = {}) {
   return { say, sent, advance: (ms) => (clock += ms) };
 }
 
-test('a task is read back, then "send it" starts it', async () => {
+test('a task is read back with its project, then "send it" starts it', async () => {
   const { say, sent } = setup();
   assert.equal(await say('task: in trading bot, add a stop-loss check'),
-    "Here's your message to Claude: add a stop-loss check. Ready to send it?");
+    "Here's your message to Claude for Roundtable Trading, add a stop-loss check. Ready to send it?");
   assert.deepEqual(sent, []);
   assert.equal(await say('task: Send it'), 'Sent.');
   assert.deepEqual(sent, [{ repo: '/p/Roundtable_Trading', task: 'add a stop-loss check' }]);
@@ -53,7 +53,7 @@ test('dictation variants of "send it" all confirm', async () => {
 test('saying the task again replaces it', async () => {
   const { say, sent } = setup();
   await say('task: in trading bot, add a stop loss');
-  assert.match(await say('task: in voice relay, change the voice'), /message to Claude: change the voice/);
+  assert.match(await say('task: in voice relay, change the voice'), /message to Claude for claude voice relay, change the voice/);
   await say('send it');
   assert.deepEqual(sent, [{ repo: '/p/claude-voice-relay', task: 'change the voice' }]);
 });
@@ -88,7 +88,7 @@ test('dictation that stops after the project name keeps the project and asks for
   assert.equal(await say('task: In voice relay'), 'What do you want to tell claude voice relay?');
   assert.equal(await say('send it'), 'What do you want to tell claude voice relay?');
   assert.equal(await say('task: send me a Telegram if you get this'),
-    "Here's your message to Claude: send me a Telegram if you get this. Ready to send it?");
+    "Here's your message to Claude for claude voice relay, send me a Telegram if you get this. Ready to send it?");
   assert.equal(await say('send it'), 'Sent.');
   assert.deepEqual(sent, [{ repo: '/p/claude-voice-relay', task: 'send me a Telegram if you get this' }]);
 });
@@ -97,7 +97,7 @@ test('the task after a project named on its own can come without the task prefix
   const { say, sent } = setup();
   await say('task: in voice relay');
   assert.equal(await say('change the voice'),
-    "Here's your message to Claude: change the voice. Ready to send it?");
+    "Here's your message to Claude for claude voice relay, change the voice. Ready to send it?");
   assert.equal(await say('send it'), 'Sent.');
   assert.deepEqual(sent, [{ repo: '/p/claude-voice-relay', task: 'change the voice' }]);
 });
@@ -105,9 +105,9 @@ test('the task after a project named on its own can come without the task prefix
 test('a held project is kept unless an exact project name replaces it', async () => {
   const { say, sent } = setup();
   await say('task: in voice relay');
-  assert.match(await say('task: for the README, fix typos'), /Here's your message to Claude: for the README, fix typos\./);
+  assert.match(await say('task: for the README, fix typos'), /Here's your message to Claude for claude voice relay, for the README, fix typos\./);
   await say('task: in voice relay');
-  assert.match(await say('task: in trading bot, add a stop loss'), /message to Claude: add a stop loss/);
+  assert.match(await say('task: in trading bot, add a stop loss'), /message to Claude for Roundtable Trading, add a stop loss/);
   await say('send it');
   assert.deepEqual(sent, [{ repo: '/p/Roundtable_Trading', task: 'add a stop loss' }]);
 });
@@ -122,7 +122,7 @@ test('a task with no project is not held', async () => {
 
 test('without the task prefix, anything said is held as an answer to the agent', async () => {
   const { say, sent } = setup();
-  assert.equal(await say('The voice has not changed.'), "Here's your message to Claude: The voice has not changed. Ready to send it?");
+  assert.equal(await say('The voice has not changed.'), "Here's your message to Claude, The voice has not changed. Ready to send it?");
   await say('send it');
   assert.deepEqual(sent, ['The voice has not changed.']);
 });
@@ -164,19 +164,19 @@ test('"change it" asks for new words and keeps the project, like Siri', async ()
   await say('task: in trading bot, add a stop loss');
   assert.equal(await say('task: Change it.'), 'OK. What do you want to tell Roundtable Trading?');
   assert.match(await say('send it'), /What do you want to tell Roundtable Trading\?/, 'nothing held to send');
-  assert.equal(await say('task: add a trailing stop'), "Here's your message to Claude: add a trailing stop. Ready to send it?");
+  assert.equal(await say('task: add a trailing stop'), "Here's your message to Claude for Roundtable Trading, add a trailing stop. Ready to send it?");
   await say('send');
   assert.deepEqual(sent, [{ repo: '/p/Roundtable_Trading', task: 'add a trailing stop' }]);
 
   const plain = setup();
   await plain.say('The voice has not changed');
   assert.equal(await plain.say('no, change it'), 'OK. What do you want to send?');
-  assert.equal(await plain.say('It changed now'), "Here's your message to Claude: It changed now. Ready to send it?");
+  assert.equal(await plain.say('It changed now'), "Here's your message to Claude, It changed now. Ready to send it?");
   await plain.say('yes');
   assert.deepEqual(plain.sent, ['It changed now']);
 
   const idle = setup();
-  assert.equal(await idle.say('change it'), "Here's your message to Claude: change it. Ready to send it?", 'with nothing held it is a message');
+  assert.equal(await idle.say('change it'), "Here's your message to Claude, change it. Ready to send it?", 'with nothing held it is a message');
 });
 
 test('"no" to the read-back drops it, but with nothing held it is a message', async () => {
@@ -184,7 +184,7 @@ test('"no" to the read-back drops it, but with nothing held it is a message', as
   await say('task: in trading bot, add a stop loss');
   assert.equal(await say('task: No.'), "OK, I won't send it.");
   assert.match(await say('send it'), /nothing to send/);
-  assert.equal(await say('no'), "Here's your message to Claude: no. Ready to send it?");
+  assert.equal(await say('no'), "Here's your message to Claude, no. Ready to send it?");
   await say('yes');
   assert.deepEqual(sent, ['no']);
 });
@@ -227,7 +227,7 @@ test('dictation variants of cancel, no and change it', async () => {
   const held = setup();
   await held.say('task: in voice relay');
   assert.equal(await held.say('no'), "OK, I won't send it.", 'no also drops a held project');
-  assert.match(await held.say('fix it'), /^Here's your message to Claude: fix it\./, 'the project is gone');
+  assert.match(await held.say('fix it'), /^Here's your message to Claude, fix it\./, 'the project is gone');
 });
 
 test('a bare "go" never sends: it is easily misheard from "no"', async () => {
@@ -236,6 +236,6 @@ test('a bare "go" never sends: it is easily misheard from "no"', async () => {
   assert.match(await say('task: go'), /\?$/);
   assert.match(await say('send it'), /nothing to send/, 'the misheard reply was not taken as a yes');
   await say('Here is a note');
-  assert.match(await say('go'), /^Here's your message to Claude: go\./);
+  assert.match(await say('go'), /^Here's your message to Claude, go\./);
   assert.deepEqual(sent, []);
 });
