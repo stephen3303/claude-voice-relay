@@ -177,50 +177,56 @@ function agentGitHub({ remote = 'https://github.com/stephen3303/claude-voice-rel
 }
 const agent = { name: 'voice relay', repoPath: '/p/claude-voice-relay' };
 
-test('an agent gets a token for its pinned repo and commits as the App bot', async () => {
+const tok = async (gh) => (await gh.credentials(agent))?.token || '';
+
+test('an agent gets a token for its pinned repo only, and commits as the App bot', async () => {
   const { gh, minted, pinsFile } = agentGitHub();
-  const env = await gh.env(agent);
-  assert.equal(env.GH_TOKEN, 'ghs_x');
-  assert.equal(env.GIT_AUTHOR_NAME, 'bridge-agents[bot]');
+  assert.deepEqual(await gh.credentials(agent), { token: 'ghs_x', owner: 'stephen3303', repo: 'claude-voice-relay' });
+  assert.equal((await gh.identity()).GIT_AUTHOR_NAME, 'bridge-agents[bot]');
   assert.deepEqual(minted, ['stephen3303/claude-voice-relay']);
   assert.ok(gh.isPinned(agent.repoPath));
   assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(pinsFile, 'utf8'))), ['stephen3303/claude-voice-relay']);
 });
 
+test('the identity a turn commits as never carries a token', async () => {
+  const { gh } = agentGitHub();
+  assert.deepEqual(Object.keys(await gh.identity()).sort(),
+    ['GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_NAME']);
+});
+
 test('a changed origin gets no token and is not re-pinned', async () => {
   const { gh, minted, logs, state } = agentGitHub();
-  await gh.env(agent);
+  await gh.credentials(agent);
   state.remote = 'https://github.com/stephen3303/other-repo.git';
-  const env = await gh.env(agent);
-  assert.equal(env.GH_TOKEN, '');
+  assert.equal(await gh.credentials(agent), null);
   assert.deepEqual(minted, ['stephen3303/claude-voice-relay']);
   assert.match(logs.at(-1), /origin changed/);
 });
 
 test('no GitHub origin, or an unreadable pins file, gets no token', async () => {
   const none = agentGitHub({ remote: '' });
-  assert.equal((await none.gh.env(agent)).GH_TOKEN, '');
+  assert.equal(await tok(none.gh), '');
   assert.deepEqual(none.minted, []);
   const broken = agentGitHub({ pinsJson: '{not json' });
-  assert.equal((await broken.gh.env(agent)).GH_TOKEN, '');
+  assert.equal(await tok(broken.gh), '');
   assert.deepEqual(broken.minted, []);
   assert.equal(fs.readFileSync(broken.pinsFile, 'utf8'), '{not json'); // not rebuilt from live config
 });
 
 test('a folder is only pinned to the repo of its own name', async () => {
   const other = agentGitHub({ remote: 'https://github.com/stephen3303/trading-bot.git' });
-  assert.equal((await other.gh.env(agent)).GH_TOKEN, '');
+  assert.equal(await tok(other.gh), '');
   assert.deepEqual(other.minted, []);
   assert.equal(other.gh.isPinned(agent.repoPath), false);
   assert.match(other.logs[0], /doesn't match its folder name/);
   // Case and separators don't matter.
   const same = agentGitHub({ remote: 'git@github.com:stephen3303/Claude_Voice_Relay.git' });
-  assert.equal((await same.gh.env(agent)).GH_TOKEN, 'ghs_x');
+  assert.equal(await tok(same.gh), 'ghs_x');
 });
 
 test('pins survive a restart', async () => {
   const first = agentGitHub();
-  await first.gh.env(agent);
+  await first.gh.credentials(agent);
   const logs = [], minted = [];
   const restarted = makeAgentGitHub({
     ghApp: { tokenFor: async (o, r) => { minted.push(`${o}/${r}`); return 'ghs_y'; }, identity: async () => ({ name: 'b[bot]', email: 'b@x' }) },
@@ -228,17 +234,16 @@ test('pins survive a restart', async () => {
     getRemote: async () => 'https://github.com/stephen3303/other-repo.git',
     pinsFile: first.pinsFile, log: (m) => logs.push(m),
   });
-  assert.equal((await restarted.env(agent)).GH_TOKEN, '');
+  assert.equal(await restarted.credentials(agent), null);
   assert.deepEqual(minted, []);
   assert.match(logs[0], /origin changed from stephen3303\/claude-voice-relay/);
 });
 
 test('without the App, AGENT_GH_TOKEN and the host git identity are used', async () => {
   const { gh } = agentGitHub({ ghApp: null, fallbackToken: 'github_pat_x' });
-  const env = await gh.env(agent);
-  assert.equal(env.GH_TOKEN, 'github_pat_x');
-  assert.equal(env.GIT_COMMITTER_EMAIL, 's@example.com');
-  assert.equal((await agentGitHub({ ghApp: null }).gh.env(agent)).GH_TOKEN, '');
+  assert.equal(await tok(gh), 'github_pat_x');
+  assert.equal((await gh.identity()).GIT_COMMITTER_EMAIL, 's@example.com');
+  assert.equal(await tok(agentGitHub({ ghApp: null }).gh), '');
 });
 
 test('a pin that cannot be saved still holds for this run', async () => {
@@ -252,26 +257,23 @@ test('a pin that cannot be saved still holds for this run', async () => {
     pinsFile,
     log: (m) => logs.push(m),
   });
-  assert.equal((await gh.env(agent)).GH_TOKEN, 'ghs_x');
+  assert.equal(await tok(gh), 'ghs_x');
   assert.ok(logs.some((m) => /couldn't save/.test(m)));
   assert.ok(gh.isPinned(agent.repoPath));
 });
 
-test('an App token is revoked when the turn ends; AGENT_GH_TOKEN is left alone', async () => {
+test('an App token is revoked on release; AGENT_GH_TOKEN is left alone', async () => {
   const { gh, revoked } = agentGitHub();
-  const vars = await gh.env(agent);
-  await gh.release(vars);
-  await gh.release(vars); // once only
+  const creds = await gh.credentials(agent);
+  await gh.release(creds);
+  await gh.release(creds); // once only
   assert.deepEqual(revoked, ['ghs_x']);
   const pat = agentGitHub({ ghApp: null, fallbackToken: 'github_pat_x' });
-  await pat.gh.release(await pat.gh.env(agent));
-  await pat.gh.release(undefined); // a turn that failed before getting one
+  await pat.gh.release(await pat.gh.credentials(agent));
+  await pat.gh.release(null); // nothing was issued
 });
 
-test('without the bot identity, a turn gets no token and never commits as the owner', async () => {
-  const { gh, minted } = agentGitHub({ noIdentity: true });
-  const vars = await gh.env(agent);
-  assert.equal(vars.GH_TOKEN, '');
-  assert.deepEqual(minted, []);
-  assert.notEqual(vars.GIT_AUTHOR_NAME, 'Stephen');
+test('without the bot identity, commits never go out as the owner', async () => {
+  const { gh } = agentGitHub({ noIdentity: true });
+  assert.notEqual((await gh.identity()).GIT_AUTHOR_NAME, 'Stephen');
 });

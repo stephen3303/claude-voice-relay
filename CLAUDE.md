@@ -23,9 +23,10 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   talktobridge.com, DNS at Cloudflare).
 - `site/` — the website (privacy, terms, support), on GitHub Pages now; talktobridge.com later.
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.
-- `github-app.mjs` — agents push as a GitHub App (`setup-github-app.mjs` creates it): each turn gets a fresh token
-  for that agent's repo only (passed with `docker exec -e`, revoked when the turn ends), and only if the repo's default
-  branch has the README's rulesets. Agents never get Stephen's own GitHub login. The App key and each folder's pinned
+- `github-app.mjs`, `publish.mjs` — agents never hold a GitHub token: they commit and write a push request, and after
+  the turn the relay mints a GitHub App token (`setup-github-app.mjs` creates the App) for that agent's repo only, and
+  only if its default branch has the README's rulesets. A throwaway container pushes the branch with it (never running
+  the agent repo's hooks or config), the relay opens the PR, and the token is revoked. The App key and each folder's pinned
   repo (`github-pins.json`) live in `%USERPROFILE%\.bridge`. The relay refuses to mount its own folder, `.bridge` or
   anything above them, so agents work on this repo from a second clone.
 
