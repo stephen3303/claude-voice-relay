@@ -49,7 +49,7 @@
 
     <h2>What Bridge Cloud stores, and for how long</h2>
     <ul>
-      <li><strong>Tasks you send.</strong> The text of a task is held while Bridge reads it back and waits for you to say "send it". It is removed when you send or cancel it, and a task left unconfirmed for 10 minutes is dropped the next time you talk to Bridge.</li>
+      <li><strong>Tasks you send.</strong> The text of a task is held while Bridge reads it back and waits for you to say "send it". It is removed when you send or cancel it, and a task left unconfirmed for 10 minutes is dropped the next time you talk to Bridge; otherwise it stays until then or until you delete your account.</li>
       <li><strong>Your agents' messages.</strong> What your agents say to you is kept in your inbox for 7 days, so you hear it even if you weren't listening when it arrived, then expires and is deleted automatically, usually within a day or two.</li>
       <li><strong>Push tokens.</strong> To let agents call you or send a notification, the app registers your iPhone's push tokens, whether a headset is connected, and whether you allow calls. They are replaced whenever they change and removed when you sign out. A call or notification carries the project's name and the start of the agent's message (up to 180 characters) through Apple's push service, and shows it on your iPhone, including the lock screen.</li>
       <li><strong>Bridge Pro status.</strong> When you subscribe, the app sends Apple's signed record of the purchase to Bridge Cloud, which checks it with Apple and stores the subscription's transaction IDs, the product and when it ends. When the account is deleted, the link between it and the subscription is removed, but the subscription's original transaction ID, and the IDs of any refunded transactions, are kept, so one subscription can't unlock Bridge Pro for more than one account or after a refund.</li>
@@ -92,7 +92,7 @@
     <p>This website has no cookies, analytics or scripts. It is hosted by GitHub Pages, which keeps its own server logs under GitHub's privacy statement.</p>
 
     <h2>Deleting your data</h2>
-    <p>In the app's Settings, under Account, tap Delete account. That deletes your account and everything Bridge Cloud stores for it straight away: tasks, inbox messages, push tokens, Bridge Pro status and connector sign-ins. The only things that remain are the daily usage counts until they expire, service logs until they expire, and the subscription transaction IDs, no longer linked to you, as described above. Deleting your account doesn't cancel a Bridge Pro subscription; cancel that in iPhone Settings. You can also ask for deletion, or a copy of your data, by email.</p>
+    <p>In the app's Settings, under Account, tap Delete account. That deletes your account and everything Bridge Cloud stores for it straight away: tasks, inbox messages, push tokens, Bridge Pro status and connector sign-ins. The only things that remain are the daily usage counts until they expire, service logs until they expire, and the subscription transaction IDs, no longer linked to you, as described above. Copies in Bridge Cloud's database backups are overwritten within 35 days. Deleting your account doesn't cancel a Bridge Pro subscription; cancel that in iPhone Settings. You can also ask for deletion, or a copy of your data, by email.</p>
 
     <h2>Children</h2>
     <p>Bridge is not directed at children under 13 and does not knowingly collect their information.</p>
