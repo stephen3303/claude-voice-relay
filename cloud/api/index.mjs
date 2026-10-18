@@ -129,7 +129,7 @@ async function deleteUser(sub) {
   }
 }
 
-export const auth = makeAuth({
+const accounts = makeAuth({
   issuer: process.env.ISSUER,
   audience: process.env.BUNDLE_ID,
   async appleKeys() {
@@ -155,3 +155,4 @@ export const auth = makeAuth({
   },
   deleteUser,
 });
+export const { auth, authorize } = accounts;

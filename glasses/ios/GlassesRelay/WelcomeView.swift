@@ -1,0 +1,59 @@
+import SwiftUI
+import AuthenticationServices
+
+/// First launch of the App Store build: what Bridge does, and Sign in with Apple. An account is
+/// only needed for Bridge Cloud, so "Continue without an account" goes on to My PC or Demo.
+struct WelcomeView: View {
+    var done: () -> Void
+    @ObservedObject private var account = Account.shared
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(spacing: 28) {
+            Spacer()
+            Image("LaunchLogo")
+                .resizable().scaledToFit().frame(width: 96, height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 22))
+                .accessibilityHidden(true)
+            VStack(spacing: 8) {
+                Text("Welcome to Bridge").font(.largeTitle.bold())
+                Text("Talk to your Claude agents through your Ray-Ban Meta glasses.")
+                    .multilineTextAlignment(.center).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 16) {
+                Feature(symbol: "waveform", title: "Hands-free", text: "Say \"Hey Meta, start Bridge\" and speak your task.")
+                Feature(symbol: "bubble.left.and.text.bubble.right", title: "Answers out loud", text: "Your agents' replies are read to you as they arrive.")
+                Feature(symbol: "camera", title: "Show, don't tell", text: "Ask about what you're looking at, or send a photo to an agent.")
+            }
+            Spacer()
+            VStack(spacing: 12) {
+                SignInWithAppleButton(.continue) { $0.requestedScopes = [.fullName] } onCompletion: { result in
+                    Task {
+                        await account.completed(result)
+                        if account.signedIn { Relay.shared.baseURL = Relay.cloudAddress; done() }
+                    }
+                }
+                .signInWithAppleButtonStyle(scheme == .dark ? .white : .black)
+                .frame(height: 50)
+                if let e = account.error { Text(e).font(.footnote).foregroundStyle(.red) }
+                Button("Continue without an account", action: done)
+                    .font(.subheadline)
+            }
+        }
+        .padding(28)
+    }
+}
+
+private struct Feature: View {
+    let symbol: String, title: String, text: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol).font(.title2).foregroundStyle(Color.accentColor).frame(width: 32)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(text).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
