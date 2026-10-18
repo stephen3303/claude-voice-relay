@@ -88,6 +88,9 @@ container a token that lasts an hour and only covers that agent's repository, wi
 pull request access and nothing else: agents can't edit workflows, read secrets, change settings
 or touch other repos. Their commits and pull requests show as `<app-name>[bot]`.
 
+Set up the `main` ruleset (below) first: until it exists an agent's token can push straight to
+`main`, and on this repo that deploys to AWS.
+
 1. On the PC, in this folder: `node setup-github-app.mjs`. The browser opens GitHub; click
    **Create GitHub App**. The private key goes to `%USERPROFILE%\.bridge\` and `.env` gets
    `GITHUB_APP_ID` and `GITHUB_APP_KEY_FILE`.
@@ -96,7 +99,7 @@ or touch other repos. Their commits and pull requests show as `<app-name>[bot]`.
 3. `npm run build-agent` (the image now has `gh` for opening pull requests), then restart the relay.
    Older agent containers are replaced on their next turn; their sessions are kept.
 
-Keep agents off `main` with a ruleset in each repo: **Settings → Rules → Rulesets → New ruleset →
+Keep agents off `main` with a ruleset in each repo the App is installed on: **Settings → Rules → Rulesets → New ruleset →
 New branch ruleset**. Name `Protect main`, Enforcement **Active**. Under **Bypass list → Add bypass**
 pick **Repository admin** and set it to **For pull requests only** (so you can still merge your own
 pull requests). **Target branches → Add target → Include default branch.** Leave **Restrict
