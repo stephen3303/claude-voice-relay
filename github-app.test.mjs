@@ -152,15 +152,14 @@ test('without the App, AGENT_GH_TOKEN and the host git identity are used', async
 });
 
 test('a pin that cannot be saved still holds for this run', async () => {
-  const notADir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pins-')), 'file');
-  fs.writeFileSync(notADir, '');
+  const pinsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pins-')), 'github-pins.json');
+  fs.mkdirSync(`${pinsFile}.tmp`); // a folder where the temp file goes, so the save fails
   const logs = [];
   const gh = makeAgentGitHub({
     ghApp: { tokenFor: async () => 'ghs_x', identity: async () => null },
     hostGit: { name: 'Stephen', email: 's@example.com' },
     getRemote: async () => 'https://github.com/stephen3303/claude-voice-relay.git',
-    // Its folder is a file, so the save fails.
-    pinsFile: path.join(notADir, 'github-pins.json'),
+    pinsFile,
     log: (m) => logs.push(m),
   });
   assert.equal((await gh.env(agent)).GH_TOKEN, 'ghs_x');
