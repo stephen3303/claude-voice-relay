@@ -63,6 +63,9 @@ test('a token from the other environment is retried there; dead tokens come back
   assert.equal((await otherApp.apns(TOKEN, 'production', 'alert', {})).result, 'gone');
   assert.equal(otherApp.sent.length, 1);
 
+  const noPush = setupApns(() => ({ status: 400, reason: 'TopicDisallowed' }));
+  assert.equal((await noPush.apns(TOKEN, 'production', 'alert', {})).result, 'error');
+
   const down = setupApns(() => ({ status: 500, reason: 'InternalServerError' }));
   assert.equal((await down.apns(TOKEN, 'production', 'alert', {})).result, 'error');
 });
