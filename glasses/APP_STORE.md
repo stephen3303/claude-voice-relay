@@ -7,7 +7,7 @@ Two builds come from the same code:
 | Built by | `Glasses iOS build` (artifact) | `Glasses App Store upload` (signed, uploaded) |
 | "Hey Meta, start Bridge" | yes | no: Meta marks voice invocation experimental, and experimental features "cannot be published yet" |
 | Start a conversation | Hey Meta, Siri, Shortcuts, app | Siri ("Talk to Bridge"), Action Button, Shortcuts, app |
-| Photos | standalone photo capture (experimental) | still from the camera stream (not experimental) |
+| Photos | still from the camera stream | still from the camera stream |
 | Bridge Pro | everything unlocked | photos + Ask/Look Shortcuts need the subscription |
 
 When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` in
