@@ -1,3 +1,5 @@
+// App Store build only: Bridge Cloud accounts are part of the paid product (not in the public relay repo).
+#if APP_STORE
 import AuthenticationServices
 import Security
 import Foundation
@@ -101,3 +103,4 @@ final class Account: ObservableObject {
         Task { await Store.shared.refresh() }   // and Bridge Cloud learns about Bridge Pro
     }
 }
+#endif

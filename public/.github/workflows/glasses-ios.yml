@@ -1,0 +1,54 @@
+# Builds the glasses iPhone app on a GitHub-hosted Mac, so no Mac is needed.
+# personal: unsigned GlassesRelay.ipa artifact (with "Hey Meta"); sign and install it with Sideloadly.
+name: Glasses iOS build
+on:
+  push:
+    paths: ["glasses/ios/**", ".github/workflows/glasses-ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [personal]
+    defaults:
+      run:
+        working-directory: glasses/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use newest Xcode (toolkit needs 26.4+)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen xcbeautify
+          xcodegen generate
+
+      - name: Build unsigned device app
+        run: |
+          set -o pipefail
+          xcodebuild -project GlassesRelay.xcodeproj -scheme GlassesRelay \
+            -sdk iphoneos -configuration Release -derivedDataPath build \
+            -skipPackagePluginValidation -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            build | xcbeautify --renderer github-actions
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/GlassesRelay.app Payload/
+          zip -qry GlassesRelay.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GlassesRelay-ipa
+          path: glasses/ios/GlassesRelay.ipa

@@ -1,4 +1,8 @@
+import Combine
+import Foundation
+#if APP_STORE
 import StoreKit
+#endif
 
 /// Bridge Pro: photos, Bridge Cloud's natural voice and the Ask/Look Shortcuts actions. Voice conversations stay free.
 /// The personal (sideloaded) build has everything unlocked; only the App Store build sells Pro.
@@ -6,18 +10,21 @@ import StoreKit
 final class Store: ObservableObject {
     static let shared = Store()
 
+    #if APP_STORE
     /// Must match the auto-renewable subscriptions in App Store Connect (one subscription group).
     static let productIDs = ["com.talktobridge.bridge.pro.monthly", "com.talktobridge.bridge.pro.yearly"]
     static let privacyURL = URL(string: "https://talktobridge.com/privacy.html")!
     static let termsURL = URL(string: "https://talktobridge.com/terms.html")!
 
-    #if APP_STORE
     @Published private(set) var isPro = false
+    private var updates: Task<Void, Never>?
     #else
+    /// The self-hosted app's privacy notes and licence, in the public relay repo.
+    static let privacyURL = URL(string: "https://github.com/stephen3303/bridge-relay#privacy")!
+    static let termsURL = URL(string: "https://github.com/stephen3303/bridge-relay/blob/main/LICENSE")!
+
     @Published private(set) var isPro = true
     #endif
-
-    private var updates: Task<Void, Never>?
 
     private init() {
         #if APP_STORE
@@ -46,12 +53,14 @@ final class Store: ObservableObject {
         #endif
     }
 
+    #if APP_STORE
     private var latestTransaction: String?
     /// The session and transaction Bridge Cloud last answered for. Keyed by session, so another account (or this one
     /// after signing in again) is told afresh, even if a report from before the sign-out lands late.
     private var reported: String?
     private var lastTry: (key: String, at: Date)?
     private var inFlight: Task<Void, Never>?
+    #endif
 
     /// Bridge Cloud checks Apple's signature on the transaction itself before it unlocks the natural voice and photos.
     /// Until it has answered for this one (offline, a timeout), cloud voice and photo calls try again, briefly so

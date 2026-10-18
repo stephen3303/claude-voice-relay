@@ -49,7 +49,7 @@ struct HelpView: View {
                     #if APP_STORE
                     Link("More help on the website", destination: URL(string: "https://talktobridge.com/support.html")!)
                     #else
-                    Link("More help on GitHub", destination: URL(string: "https://github.com/stephen3303/claude-voice-relay#readme")!)
+                    Link("More help on GitHub", destination: URL(string: "https://github.com/stephen3303/bridge-relay#readme")!)
                     #endif
                 }
             }
