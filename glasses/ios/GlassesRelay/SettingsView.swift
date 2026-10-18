@@ -2,6 +2,7 @@ import SwiftUI
 import StoreKit
 import AuthenticationServices
 import Security
+import AVFoundation
 
 /// Settings, opened from the main screen's gear: account, connection, glasses, voice, Bridge Pro, about.
 struct SettingsView: View {
@@ -17,6 +18,9 @@ struct SettingsView: View {
     @State private var testResult = ""
     @State private var photoResult = ""
     @State private var readBack = Conversation.readBack
+    @State private var voiceID = Conversation.voiceID
+    @State private var hiFi = Conversation.hiFiSpeech
+    @State private var previewer = AVSpeechSynthesizer()
     @State private var showPaywall = false
     @State private var showManage = false
     @State private var confirmDelete = false
@@ -51,10 +55,22 @@ struct SettingsView: View {
                 Section {
                     Toggle("Read back what I said", isOn: $readBack)
                         .onChange(of: readBack) { _, on in Conversation.readBack = on }
+                    Picker("Phone voice", selection: $voiceID) {
+                        Text("Best installed").tag("")
+                        ForEach(Conversation.voices, id: \.identifier) { Text(Conversation.label($0)).tag($0.identifier) }
+                    }
+                    .onChange(of: voiceID) { _, id in
+                        Conversation.voiceID = id
+                        preview()
+                    }
+                    Toggle("High-quality speech", isOn: $hiFi)
+                        .onChange(of: hiFi) { _, on in Conversation.hiFiSpeech = on }
                 } header: { Text("Voice") } footer: {
-                    Text(readBack
-                         ? "Bridge repeats what it heard and waits for \"send it\"."
-                         : "Bridge sends what you say after a 2-second pause, without repeating it.")
+                    Text((readBack
+                          ? "Bridge repeats what it heard and waits for \"send it\"."
+                          : "Bridge sends what you say after a 2-second pause, without repeating it.")
+                         + " The phone voice speaks when the natural voice isn't available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
+                         + " High-quality speech plays replies over the glasses' music link, which sounds much better, but each reply starts and listening resumes about a second later.")
                 }
                 #if APP_STORE
                 if account.signedIn && mode.wrappedValue == .cloud { callsSection }
@@ -162,6 +178,14 @@ struct SettingsView: View {
             do { _ = try await Relay.shared.inbox(after: nil, wait: false); testResult = "✓ Connected" }
             catch { testResult = error.localizedDescription }
         }
+    }
+
+    private func preview() {
+        previewer.stopSpeaking(at: .immediate)
+        let u = AVSpeechUtterance(string: "This is how Bridge will sound.")
+        u.voice = Conversation.bestVoice()
+        u.rate = 0.5
+        previewer.speak(u)
     }
 
     // MARK: glasses

@@ -52,6 +52,20 @@ final class Conversation: NSObject, ObservableObject {
         get { UserDefaults.standard.object(forKey: "readBack") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "readBack") }
     }
+    /// The phone voice picked in Settings (an AVSpeechSynthesisVoice identifier); empty means the best installed one.
+    static var voiceID: String {
+        get { UserDefaults.standard.string(forKey: "voiceID") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceID") }
+    }
+    /// Speak over A2DP, Bluetooth's music-quality link, instead of the call-quality HFP link the glasses' mic needs.
+    /// The glasses take a moment to switch each way, so replies start and listening resumes a little later.
+    static var hiFiSpeech: Bool {
+        get { UserDefaults.standard.object(forKey: "hiFiSpeech") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "hiFiSpeech") }
+    }
+    /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
+    private var onHiFi = false
+
     /// Pause after you stop talking before your turn is sent.
     private var endOfTurn: TimeInterval { Self.readBack ? 1.4 : 2.0 }
     /// Hang up after this much silence, or the longer one while an agent is working.
@@ -111,15 +125,32 @@ final class Conversation: NSObject, ObservableObject {
 
     private func configureAudioForGlasses() throws {
         let session = AVAudioSession.sharedInstance()
-        // HFP is the only Bluetooth profile that carries the glasses' microphone.
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
         if trigger != .call { try session.setActive(true) }   // CallKit activates it for a call
+        try useGlassesMic()
+    }
+
+    /// `report` is off when switching back after a reply, so the status line keeps naming the voice.
+    private func useGlassesMic(report: Bool = true) throws {
+        let session = AVAudioSession.sharedInstance()
+        onHiFi = false
+        // HFP is the only Bluetooth profile that carries the glasses' microphone.
+        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
         if let hfp = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
             try session.setPreferredInput(hfp)
-            status = "Using \(hfp.portName)"
-        } else {
+            if report { status = "Using \(hfp.portName)" }
+        } else if report {
             status = "Glasses mic not found — using phone mic"
         }
+    }
+
+    /// Playback only, so iOS routes to the glasses over A2DP. Not in an agent call: CallKit owns that session.
+    private func useHiFiOutput() {
+        guard Self.hiFiSpeech, trigger != .call, !onHiFi else { return }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+            onHiFi = true
+        } catch { status = "High-quality speech failed: \(error.localizedDescription)" }
     }
 
     // MARK: listening
@@ -132,7 +163,10 @@ final class Conversation: NSObject, ObservableObject {
         if recognizer?.supportsOnDeviceRecognition == true { req.requiresOnDeviceRecognition = true }
         request = req
 
+        if onHiFi { try? useGlassesMic(report: false) }
         let input = engine.inputNode
+        // Right after switching back from A2DP the mic can briefly have no format; try again in a moment.
+        guard input.outputFormat(forBus: 0).sampleRate > 0 else { restartSoon(); return }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { [weak req] buffer, _ in
             req?.append(buffer)
@@ -313,6 +347,7 @@ final class Conversation: NSObject, ObservableObject {
 
     private func say(_ text: String) async {
         phase = .speaking
+        useHiFiOutput()
         // Natural voice from the relay when it has a key, or from Bridge Cloud with Bridge Pro; otherwise (or on any
         // failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
         if !Relay.shared.isCloud || Store.shared.isPro,
@@ -329,8 +364,7 @@ final class Conversation: NSObject, ObservableObject {
         }
         let u = AVSpeechUtterance(string: text)
         u.voice = Self.bestVoice()
-        let q = u.voice.map { ["default", "enhanced", "premium"][min($0.quality.rawValue - 1, 2)] } ?? "none"
-        status = "Voice: \(u.voice?.name ?? "none") (\(q))"
+        status = "Voice: \(u.voice.map(Self.label) ?? "none")"
         u.rate = 0.5
         await withCheckedContinuation { c in
             speechDone = c
@@ -339,12 +373,25 @@ final class Conversation: NSObject, ObservableObject {
         }
     }
 
-    /// The default en-US voice is the robotic compact one. Prefer the best installed voice
+    /// The voice picked in Settings, else: the default en-US voice is the robotic compact one, so prefer the best installed one
     /// (Premium, then Enhanced); download more in Settings > Accessibility > Spoken Content > Voices.
-    private static func bestVoice() -> AVSpeechSynthesisVoice? {
+    static func bestVoice() -> AVSpeechSynthesisVoice? {
+        if !voiceID.isEmpty, let picked = AVSpeechSynthesisVoice(identifier: voiceID) { return picked }
         let english = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "en-US" }
         return english.max { $0.quality.rawValue < $1.quality.rawValue }
             ?? AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    /// English voices on the phone, best first, for the picker in Settings.
+    static var voices: [AVSpeechSynthesisVoice] {
+        AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
+            .sorted { ($1.quality.rawValue, $0.name) < ($0.quality.rawValue, $1.name) }
+    }
+
+    /// "Ava (premium)", with the region when it isn't US English.
+    static func label(_ v: AVSpeechSynthesisVoice) -> String {
+        let q = ["default", "enhanced", "premium"][max(0, min(v.quality.rawValue - 1, 2))]
+        return v.language == "en-US" ? "\(v.name) (\(q))" : "\(v.name) (\(q), \(v.language))"
     }
 
     fileprivate func finished(_ u: AVSpeechUtterance) {
