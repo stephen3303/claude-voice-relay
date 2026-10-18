@@ -14,6 +14,7 @@ import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = path.join(ROOT, 'state.json');
+const OUTBOX_FILE = path.join(ROOT, 'outbox.json');
 const LOG_DIR = path.join(ROOT, 'logs');
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
@@ -39,8 +40,11 @@ const log = (...a) => {
 };
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 
-// The voice endpoint is the only way to talk to the relay, so it can't run without its token.
-if (!cfg.voiceToken) { log('VOICE_TOKEN is missing from .env'); process.exit(1); }
+// The voice endpoint is the only way in and can start agents that push to GitHub, so it needs a
+// strong token. Without one the relay stays up with the voice endpoint off (exiting would only
+// make start.ps1 restart it every 10 seconds).
+const voiceOff = !cfg.voiceToken ? 'VOICE_TOKEN is missing from .env'
+  : cfg.voiceToken.length < 24 ? 'VOICE_TOKEN is shorter than 24 characters' : '';
 if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
@@ -55,17 +59,26 @@ const VOICE_PROMPT = [
 ].join(' ');
 
 // ---------- what the relay says ----------
-// Everything said is held briefly for the glasses app, which long-polls /voice/inbox
-// and reads new messages aloud. Ids restart with the relay, so replies carry BOOT too.
-const BOOT = Date.now();
-const outbox = []; // { id, at, text }
+// Everything said is held for the glasses app, which long-polls /voice/inbox and reads new
+// messages aloud. It's kept in outbox.json so a restart doesn't lose what the app hasn't heard;
+// replies carry BOOT, so the app starts over if that file is lost and the ids restart.
+let BOOT = Date.now();
+let outbox = []; // { id, at, text }
 let outboxId = 0;
+try {
+  const o = JSON.parse(fs.readFileSync(OUTBOX_FILE, 'utf8'));
+  if (Number.isFinite(o.boot) && Number.isInteger(o.last) && Array.isArray(o.messages)) {
+    ({ boot: BOOT, last: outboxId, messages: outbox } = o);
+  }
+} catch { /* first run */ }
 const inboxWaiters = new Set();
 // `text` goes to the log; `spoken` replaces what the glasses read aloud (e.g. the reply without the agent's name in front).
 function say(text, { spoken } = {}) {
   log('say:', text);
   outbox.push({ id: ++outboxId, at: Date.now(), text: String(spoken ?? text) });
   if (outbox.length > 50) outbox.shift();
+  try { fs.writeFileSync(OUTBOX_FILE, JSON.stringify({ boot: BOOT, last: outboxId, messages: outbox })); }
+  catch (e) { log('outbox save failed:', e.message); }
   for (const wake of [...inboxWaiters]) wake();
 }
 
@@ -80,8 +93,8 @@ const hostEnv = {
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
 function save() {
-  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, awaiting, lastFull, lastAt }) =>
-    ({ name, repoPath, container, sessionId, awaiting, lastFull, lastAt }));
+  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, awaiting, question, lastAt }) =>
+    ({ name, repoPath, container, sessionId, awaiting, question, lastAt }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
 }
 function load() {
@@ -188,16 +201,16 @@ async function turn(a, prompt, photo) {
     }
     const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt);
     a.sessionId = r.session_id || a.sessionId;
-    a.lastFull = r.result || '';
-    fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), a.lastFull);
+    fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
     const line = spoken(r.result);
     a.awaiting = line.endsWith('?');
-    await say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
+    a.question = a.awaiting ? line : ''; // "status" repeats it, in case the app missed it
+    say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
       { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line });
   } catch (e) {
     if (a.stopped) return;
     log(a.name, 'turn failed:', e.message);
-    await say(`${a.name} failed. ${e.message.slice(0, 200)}`);
+    say(`${a.name} failed. ${e.message.slice(0, 200)}`);
   } finally {
     if (photo) {
       fs.rmSync(photo, { force: true });
@@ -227,7 +240,7 @@ async function startTask(body) {
   if (a?.busy) return say(`${name} is still working. Say stop ${name} first, or wait for it.`);
   if (!a) { a = { name, repoPath: parsed.repo, container: `claude-agent-${norm(name)}`, queue: [] }; agents.set(name, a); }
   a.sessionId = null; // a new task gets fresh context
-  await say(`Starting ${name}.`);
+  say(`Starting ${name}.`);
   turn(a, parsed.task);
 }
 
@@ -251,7 +264,7 @@ async function status() {
   if (!agents.size) return say('No agents.');
   say([...agents.values()].map((a) => {
     const mins = Math.round((Date.now() - (a.lastAt || Date.now())) / 60000);
-    return `${a.name} ${a.busy ? `is working, ${mins} minutes in` : a.awaiting ? 'is waiting for your answer' : 'is idle'}.`;
+    return `${a.name} ${a.busy ? `is working, ${mins} minutes in.` : a.awaiting ? `is waiting for your answer: ${a.question || 'a yes or no question'}` : 'is idle.'}`;
   }).join(' '));
 }
 
@@ -267,8 +280,8 @@ async function stopAgent(text) {
 // Shared by the Bridge app and the iPhone Shortcut.
 async function dispatch(text) {
   if (TASK_PREFIX.test(text)) return startTask(text.replace(TASK_PREFIX, ''));
-  if (/^\/?status\b/i.test(text)) return status();
-  if (/^\/?(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^\/?(stop|kill)\s*/i, ''));
+  if (/^status\b/i.test(text)) return status();
+  if (/^(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^(stop|kill)\s*/i, ''));
   return reply(text);
 }
 
@@ -426,59 +439,63 @@ function tts(req, res) {
 }
 
 // ---------- voice endpoint for the iPhone Shortcut (firewalled to Tailscale) ----------
-const want = Buffer.from(`Bearer ${cfg.voiceToken}`);
-const server = http.createServer((req, res) => {
-  const got = Buffer.from(String(req.headers.authorization || ''));
-  const ok = got.length === want.length && crypto.timingSafeEqual(got, want);
-  const h = String(req.headers.authorization || '');
-  if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}, auth len ${h.length} (want ${want.length}), starts '${h.slice(0, 7)}', ends '${h.slice(-3)}'`); res.writeHead(401).end(); return; }
-  if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
-  if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
-  if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
-  if (req.method !== 'POST' || !['/voice', '/voice/confirm', '/voice/send'].includes(req.url)) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
-  let body = '', tooBig = false;
-  req.setEncoding('utf8'); // a character split across chunks stays whole
-  req.on('data', (c) => {
-    if (tooBig) return;
-    body += c;
-    if (body.length <= 20000) return;
-    // Answer in words at once (a dropped connection is all the Shortcut could say otherwise),
-    // then close the connection instead of reading the rest.
-    tooBig = true;
-    res.writeHead(413, { 'content-type': 'text/plain', connection: 'close' })
-      .end('That was too long. Say it again, shorter.', () => req.destroy());
+if (voiceOff) log(`${voiceOff}; voice endpoint off. Set a long random VOICE_TOKEN in .env and restart.`);
+else {
+  // Compare hashes, so neither the comparison's timing nor a length check gives the token away.
+  const sha = (v) => crypto.createHash('sha256').update(String(v)).digest();
+  const want = sha(`Bearer ${cfg.voiceToken}`);
+  const server = http.createServer((req, res) => {
+    const ok = crypto.timingSafeEqual(sha(req.headers.authorization || ''), want);
+    // Never log any of the header: a near-miss would put part of the real token in the log.
+    if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}`); res.writeHead(401).end(); return; }
+    if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
+    if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
+    if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
+    if (req.method !== 'POST' || !['/voice', '/voice/confirm', '/voice/send'].includes(req.url)) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
+    let body = '', tooBig = false;
+    req.setEncoding('utf8'); // a character split across chunks stays whole
+    req.on('data', (c) => {
+      if (tooBig) return;
+      body += c;
+      if (body.length <= 20000) return;
+      // Answer in words at once (a dropped connection is all the Shortcut could say otherwise),
+      // then close the connection instead of reading the rest.
+      tooBig = true;
+      res.writeHead(413, { 'content-type': 'text/plain', connection: 'close' })
+        .end('That was too long. Say it again, shorter.', () => req.destroy());
+    });
+    req.on('end', () => {
+      if (tooBig) return;
+      const text = utterance(body, req.headers['content-type']);
+      // /voice/send skips the read-back: the app's "Read back what I said" setting is off.
+      if (req.url === '/voice/confirm' || (cfg.voiceConfirm && req.url !== '/voice/send')) {
+        log('voice confirm:', text);
+        res.writeHead(200, { 'content-type': 'text/plain' }).end(confirmStep(text));
+        return;
+      }
+      if (!text) log(`voice empty body, content-type ${req.headers['content-type']}, raw: ${body.slice(0, 200)}`);
+      if (!text) { res.writeHead(400, { 'content-type': 'text/plain' }).end('Nothing heard.'); return; }
+      log('voice:', text);
+      res.writeHead(200, { 'content-type': 'text/plain' }).end('Sent.');
+      dispatch(text).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
+    });
+  }).on('clientError', (err, socket) => {
+    // Malformed requests (e.g. a hidden character in a header) never reach the handler above.
+    const raw = String(err.rawPacket || '').slice(0, 400).replace(/(authorization\s*:)[^\r\n]*/gi, '$1 ****');
+    log(`voice clientError ${err.code}: ${err.message}; raw: ${JSON.stringify(raw)}`);
+    try { socket.end('HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nBad request. Check the Authorization header for extra characters.'); } catch { /* socket gone */ }
   });
-  req.on('end', () => {
-    if (tooBig) return;
-    const text = utterance(body, req.headers['content-type']);
-    // /voice/send skips the read-back: the app's "Read back what I said" setting is off.
-    if (req.url === '/voice/confirm' || (cfg.voiceConfirm && req.url !== '/voice/send')) {
-      log('voice confirm:', text);
-      res.writeHead(200, { 'content-type': 'text/plain' }).end(confirmStep(text));
-      return;
-    }
-    if (!text) log(`voice empty body, content-type ${req.headers['content-type']}, raw: ${body.slice(0, 200)}`);
-    if (!text) { res.writeHead(400, { 'content-type': 'text/plain' }).end('Nothing heard.'); return; }
-    log('voice:', text);
-    res.writeHead(200, { 'content-type': 'text/plain' }).end('Sent.');
-    dispatch(text).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
+  // The Shortcut's loop reuses its connection after speaking the read-back and dictating the next
+  // answer, often 10-30 seconds later. Node closes idle connections after 5 seconds by default, and
+  // a POST sent on one that was just closed fails on the phone ("network connection was lost" or a
+  // timeout) instead of being retried. Keep idle connections open longer than a turn takes.
+  server.keepAliveTimeout = 120_000;
+  server.headersTimeout = 125_000;
+  server.listen(cfg.voicePort, '0.0.0.0', () => {
+    log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`);
+    log(cfg.openaiKey ? `natural voice on (${cfg.ttsVoice})` : 'natural voice off: no OPENAI_API_KEY, so the app speaks with the phone voice');
   });
-}).on('clientError', (err, socket) => {
-  // Malformed requests (e.g. a hidden character in a header) never reach the handler above.
-  const raw = String(err.rawPacket || '').slice(0, 400).replace(/(authorization\s*:)[^\r\n]*/gi, '$1 ****');
-  log(`voice clientError ${err.code}: ${err.message}; raw: ${JSON.stringify(raw)}`);
-  try { socket.end('HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nBad request. Check the Authorization header for extra characters.'); } catch { /* socket gone */ }
-});
-// The Shortcut's loop reuses its connection after speaking the read-back and dictating the next
-// answer, often 10-30 seconds later. Node closes idle connections after 5 seconds by default, and
-// a POST sent on one that was just closed fails on the phone ("network connection was lost" or a
-// timeout) instead of being retried. Keep idle connections open longer than a turn takes.
-server.keepAliveTimeout = 120_000;
-server.headersTimeout = 125_000;
-server.listen(cfg.voicePort, '0.0.0.0', () => {
-  log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`);
-  log(cfg.openaiKey ? `natural voice on (${cfg.ttsVoice})` : 'natural voice off: no OPENAI_API_KEY, so the app speaks with the phone voice');
-});
+}
 
 load();
 log(`relay up. projects root: ${cfg.projectsRoot}. ${agents.size} saved agent(s).`);

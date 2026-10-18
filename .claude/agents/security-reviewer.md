@@ -9,8 +9,8 @@ committed is published.
 
 Get the change with `git diff origin/main...HEAD` (or the diff you were handed) and check:
 
-1. Secrets in the diff: tokens, API keys, `.p8` contents, Telegram bot tokens, `VOICE_TOKEN` values, AWS keys,
-   Tailscale auth keys, Meta client tokens, `.env`, `state.json`, anything under `logs/`. Also personal data
+1. Secrets in the diff: tokens, API keys, `.p8` contents, `VOICE_TOKEN` values, AWS keys,
+   Tailscale auth keys, Meta client tokens, `.env`, `state.json`, `outbox.json`, anything under `logs/`. Also personal data
    in logs or fixtures. Any hit is the top finding: say it must be removed AND rotated, since history keeps it.
 2. Auth (cloud/api/auth.mjs and the authorizer in index.mjs): Apple identity tokens must be verified for
    signature, `iss` = https://appleid.apple.com, `aud` = the app's bundle ID, and `exp`. Sessions are signed
