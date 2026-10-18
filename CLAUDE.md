@@ -10,8 +10,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json` 
   (https://powerspec.taila78b6c.ts.net). Voice routes: `/voice/confirm` (read-back), `/voice/send`
   (no read-back), `/voice/inbox` (long-poll), `/voice/photo`, `/voice/tts`.
 - `glasses/ios` — the Bridge iPhone app (SwiftUI, XcodeGen `project.yml`, Meta Wearables DAT 1.0.1).
-  Two flavours from one source: personal (sideloaded, everything unlocked, experimental Meta camera
-  API) and App Store (`APP_STORE` compilation condition: StoreKit Bridge Pro, Sign in with Apple,
+  Two flavours from one source: personal (sideloaded, everything unlocked, experimental "Hey Meta"
+  voice invocation) and App Store (`APP_STORE` compilation condition: StoreKit Bridge Pro, Sign in with Apple,
   Bridge Cloud, agent calls via PushKit + CallKit in `Push.swift`, `AppStore.entitlements`). Screens: `HomeView` (main), `SettingsView`, `HelpView`,
   `HistoryView`, `WelcomeView` (App Store first launch).
 - `cloud/` — Bridge Cloud on AWS (account 651325958035, us-east-1), CDK in `cloud/infra`, Lambda code
