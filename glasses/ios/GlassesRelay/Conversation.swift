@@ -247,13 +247,21 @@ final class Conversation: NSObject, ObservableObject {
     private func say(_ text: String) async {
         phase = .speaking
         let u = AVSpeechUtterance(string: text)
-        u.voice = AVSpeechSynthesisVoice(language: "en-US")
-        u.rate = 0.52
+        u.voice = Self.bestVoice()
+        u.rate = 0.5
         await withCheckedContinuation { c in
             speechDone = c
             awaitedUtterance = u
             synth.speak(u)
         }
+    }
+
+    /// The default en-US voice is the robotic compact one. Prefer the best installed voice
+    /// (Premium, then Enhanced); download more in Settings > Accessibility > Spoken Content > Voices.
+    private static func bestVoice() -> AVSpeechSynthesisVoice? {
+        let english = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "en-US" }
+        return english.max { $0.quality.rawValue < $1.quality.rawValue }
+            ?? AVSpeechSynthesisVoice(language: "en-US")
     }
 
     fileprivate func finished(_ u: AVSpeechUtterance) {
