@@ -50,10 +50,10 @@
     <h2>What Bridge Cloud stores, and for how long</h2>
     <ul>
       <li><strong>Tasks you send.</strong> The text of a task is held while Bridge reads it back and waits for you to say "send it". It is removed when you send or cancel it, and a task left unconfirmed for 10 minutes is dropped the next time you talk to Bridge.</li>
-      <li><strong>Your agents' messages.</strong> What your agents say to you is kept in your inbox for 7 days, so you hear it even if you weren't listening when it arrived, then deleted automatically.</li>
+      <li><strong>Your agents' messages.</strong> What your agents say to you is kept in your inbox for 7 days, so you hear it even if you weren't listening when it arrived, then expires and is deleted automatically, usually within a day or two.</li>
       <li><strong>Push tokens.</strong> To let agents call you or send a notification, the app registers your iPhone's push tokens, whether a headset is connected, and whether you allow calls. They are replaced whenever they change and removed when you sign out. A call or notification carries the project's name and the start of the agent's message (up to 180 characters) through Apple's push service, and shows it on your iPhone, including the lock screen.</li>
       <li><strong>Bridge Pro status.</strong> When you subscribe, the app sends Apple's signed record of the purchase to Bridge Cloud, which checks it with Apple and stores the subscription's transaction IDs, the product and when it ends. A refunded transaction's ID is kept after the account is deleted, so it can't be used to unlock Bridge Pro again.</li>
-      <li><strong>Daily usage counts.</strong> For the natural voice and photo answers, Bridge Cloud counts how many characters and photos you used each day, to keep within daily limits. Each count is deleted after 3 days.</li>
+      <li><strong>Daily usage counts.</strong> For the natural voice and photo answers, Bridge Cloud counts how many characters and photos you used each day, to keep within daily limits. Each count expires after 3 days and is deleted automatically soon after.</li>
       <li><strong>Connector sign-ins.</strong> If you connect Claude to Bridge, Bridge Cloud keeps the connection's sign-in record for up to 30 days after you last sign in, so Claude stays connected.</li>
       <li><strong>Service logs.</strong> Bridge Cloud's logs record errors and events (such as whether a push was delivered) so problems can be fixed. They are deleted after 30 days.</li>
     </ul>
