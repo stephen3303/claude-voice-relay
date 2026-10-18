@@ -15,14 +15,31 @@ final class Relay {
         set { Keychain.write("relayToken", newValue) }
     }
 
+    /// The PC address as typed, made usable: trimmed, https:// added when no scheme was typed, trailing
+    /// slashes dropped. "" when nothing was typed; nil when it isn't an https address with a host.
+    static func pcAddress(_ typed: String) -> String? {
+        var a = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if a.isEmpty { return "" }
+        if a.range(of: "^[a-z][a-z0-9+.-]*:/", options: [.regularExpression, .caseInsensitive]) == nil { a = "https://" + a }
+        while a.hasSuffix("/") { a.removeLast() }
+        guard let c = URLComponents(string: a), c.scheme?.lowercased() == "https", let host = c.host, !host.isEmpty
+        else { return nil }
+        return a
+    }
+
     struct Inbox: Decodable { let boot: Double; let last: Int; let messages: [Message] }
     struct Message: Decodable { let id: Int; let text: String; let age: Int }
 
     enum Failure: LocalizedError {
-        case notConfigured, http(Int)
+        case notConfigured, noAddress, badAddress, noToken, locked, keychain(OSStatus), http(Int)
         var errorDescription: String? {
             switch self {
             case .notConfigured: return "Open Bridge settings and choose how to connect."
+            case .noAddress: return "Enter your PC's address in Bridge settings."
+            case .badAddress: return "That PC address isn't a web address. It should look like https://your-pc.your-tailnet.ts.net."
+            case .noToken: return "Enter the relay's VOICE_TOKEN in Bridge settings."
+            case .locked: return "Unlock your phone once, then try again."
+            case .keychain(let status): return "The iPhone Keychain refused the token (error \(status))."
             case .http(401): return "The relay rejected the token."
             case .http(let code): return "The relay answered with error \(code)."
             }
@@ -130,11 +147,19 @@ final class Relay {
             // Same protocol under /api, with the Bridge session instead of the relay's token.
             base = Account.cloudURL + "/api"
             bearer = Keychain.read(Account.sessionKey) ?? ""
+            guard !bearer.isEmpty else { throw Failure.notConfigured }
         } else {
-            base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
-            bearer = token
+            guard let address = Self.pcAddress(baseURL) else { throw Failure.badAddress }   // also tidies older saved values
+            guard !address.isEmpty else { throw Failure.noAddress }
+            base = address
+            switch Keychain.lookup("relayToken") {
+            case .found(let value): bearer = value
+            case .missing: throw Failure.noToken
+            case .locked: throw Failure.locked
+            case .failed(let status): throw Failure.keychain(status)
+            }
         }
-        guard !base.isEmpty, !bearer.isEmpty, let url = URL(string: "\(base)/\(path)") else { throw Failure.notConfigured }
+        guard let url = URL(string: "\(base)/\(path)") else { throw Failure.badAddress }
         var req = URLRequest(url: url)
         req.timeoutInterval = timeout
         req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
@@ -150,22 +175,39 @@ final class Relay {
 }
 
 enum Keychain {
-    static func write(_ key: String, _ value: String) {
+    enum Lookup { case found(String), missing, locked, failed(OSStatus) }
+
+    /// Saves `value`, replacing what's there, and returns the Keychain's status (errSecSuccess when saved).
+    /// The old value is only removed once the new one is in, so a failed save keeps the previous token.
+    @discardableResult
+    static func write(_ key: String, _ value: String) -> OSStatus {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key]
-        SecItemDelete(q as CFDictionary)
-        var add = q
-        add[kSecValueData as String] = Data(value.utf8)
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock  // readable while the phone is locked in your pocket
-        SecItemAdd(add as CFDictionary, nil)
+        let attrs: [String: Any] = [kSecValueData as String: Data(value.utf8),
+                                    kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]  // readable while the phone is locked in your pocket
+        let status = SecItemUpdate(q as CFDictionary, attrs as CFDictionary)
+        guard status == errSecItemNotFound else { return status }
+        return SecItemAdd(q.merging(attrs) { $1 } as CFDictionary, nil)
     }
     static func delete(_ key: String) {
         SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key] as CFDictionary)
     }
     static func read(_ key: String) -> String? {
+        if case .found(let value) = lookup(key) { return value }
+        return nil
+    }
+    /// Like `read`, but says why nothing came back: no item, the phone not unlocked since it started, or another error.
+    static func lookup(_ key: String) -> Lookup {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key,
                                 kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
         var out: AnyObject?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
-        return String(data: d, encoding: .utf8)
+        let status = SecItemCopyMatching(q as CFDictionary, &out)
+        switch status {
+        case errSecSuccess:
+            guard let d = out as? Data, let value = String(data: d, encoding: .utf8), !value.isEmpty else { return .missing }
+            return .found(value)
+        case errSecItemNotFound: return .missing
+        case errSecInteractionNotAllowed: return .locked
+        default: return .failed(status)
+        }
     }
 }
