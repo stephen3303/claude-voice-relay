@@ -9,6 +9,9 @@ packages:
   MWDAT:
     url: https://github.com/facebook/meta-wearables-dat-ios
     exactVersion: "1.0.1"
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa
+    exactVersion: "9.30.2"
 targets:
   GlassesRelay:
     type: application
@@ -19,6 +22,8 @@ targets:
         product: MWDATCore
       - package: MWDAT
         product: MWDATCamera
+      - package: Sentry
+        product: Sentry
     info:
       path: GlassesRelay/Info.plist
       properties:
@@ -40,6 +45,7 @@ targets:
           TeamID: $(DEVELOPMENT_TEAM)
           Analytics: { OptOut: true }
           CrashReporting: { OptOut: true }
+        SentryDSN: $(SENTRY_DSN)            # empty unless CI sets it from the SENTRY_DSN secret (ErrorReporting.swift)
         # bluetooth/external-accessory: links the toolkit uses; audio: keeps the conversation alive in your pocket;
         # voip: an agent's call (PushKit + CallKit, Push.swift) reaches the app while it's in the background
         UIBackgroundModes: [audio, bluetooth-central, bluetooth-peripheral, external-accessory, voip]
@@ -63,6 +69,7 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         META_APP_ID: "0"
         CLIENT_TOKEN: "0"
+        SENTRY_DSN: ""
         # The App Store flavour (no experimental Meta features, Pro sold via StoreKit) is selected with
         # SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) APP_STORE" on the xcodebuild command line,
         # and signed with CODE_SIGN_ENTITLEMENTS=AppStore.entitlements (Sign in with Apple, push, time-sensitive).

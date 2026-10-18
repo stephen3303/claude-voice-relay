@@ -33,6 +33,8 @@ jobs:
           xcodegen generate
 
       - name: Build unsigned device app
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}   # crash reports (ErrorReporting.swift); empty means off
         run: |
           set -o pipefail
           FLAGS=()
@@ -41,7 +43,7 @@ jobs:
             -sdk iphoneos -configuration Release -derivedDataPath build \
             -skipPackagePluginValidation -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            "${FLAGS[@]}" build | xcbeautify --renderer github-actions
+            SENTRY_DSN="$SENTRY_DSN" "${FLAGS[@]}" build | xcbeautify --renderer github-actions
 
       - name: Package IPA
         if: matrix.flavor == 'personal'

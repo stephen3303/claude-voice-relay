@@ -36,7 +36,7 @@
 
   <article class="prose">
     <h2>In short</h2>
-    <p>With your own relay, Bridge has no account, no analytics, no ads and no tracking. Bridge never sends your audio anywhere; see Your voice for Apple's speech recognition. What you say and the photos you take go only to the relay on your own PC, over your own Tailscale network. The developer never receives them.</p>
+    <p>With your own relay, Bridge has no account, no analytics, no ads and no tracking. Bridge never sends your audio anywhere; see Your voice for Apple's speech recognition. What you say and the photos you take go only to the relay on your own PC, over your own Tailscale network. The developer never receives them. When the app crashes or something fails, it sends a crash or error report so it can be fixed; see Crash and error reports.</p>
 
     <h2>Who this policy covers</h2>
     <p>This policy covers the Bridge iPhone app when it is connected to your own relay, and the open-source relay itself, published by Stephen Smitherman ("I", "me"). It does not cover Bridge Cloud, the Bridge account (Sign in with Apple) or the Bridge connector for Claude; this policy will be updated to cover them before they are offered.</p>
@@ -44,7 +44,7 @@
     <h2>What Bridge does not collect</h2>
     <ul>
       <li>No account: you never sign up or sign in to Bridge.</li>
-      <li>No analytics, no ads and no tracking, in the app or on this website. This website has no cookies or scripts; it is hosted by GitHub Pages, which handles its own server logs under GitHub's privacy statement.</li>
+      <li>No analytics, no ads and no tracking, in the app or on this website. Crash and error reports, below, are not analytics and are not linked to you. This website has no cookies or scripts; it is hosted by GitHub Pages, which handles its own server logs under GitHub's privacy statement.</li>
       <li>I never receive your audio, the text of what you say, your photos, or the answers you hear.</li>
     </ul>
 
@@ -58,6 +58,9 @@
     <p>On your PC, the relay runs Claude Code, which sends your prompts and photos to Anthropic under your own Claude account. That processing is governed by Anthropic's terms and privacy policy, not by me.</p>
     <h2>Optional natural voice (OpenAI)</h2>
     <p>If you add your own OpenAI API key to the relay on your PC, the relay sends the text of each answer to OpenAI to turn it into speech, under your own OpenAI account and OpenAI's terms and privacy policy. Without a key, answers are spoken by your iPhone and nothing goes to OpenAI.</p>
+
+    <h2>Crash and error reports</h2>
+    <p>When the app crashes, freezes, or a step fails (for example the glasses camera or a call to your relay), it sends a report to Sentry, a crash reporting service, under Sentry's privacy policy. A report holds the error, where in the app it happened, the app version, and the iPhone's model, iOS version and state (such as free memory and battery). It holds no name, account, IP address, audio, text of what you say, photos, answers, PC address or relay token, and it is not linked to you. Reports are used only to fix Bridge.</p>
 
     <h2>Ray-Ban Meta glasses</h2>
     <p>The Meta AI app connects the glasses to your iPhone, under Meta's terms. Bridge opts out of the analytics and crash reporting in the Meta Wearables toolkit it uses.</p>

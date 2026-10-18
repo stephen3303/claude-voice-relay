@@ -146,6 +146,7 @@ final class Push: NSObject, ObservableObject {
                 } catch {
                     // Left as it was, so the next change or launch tries again.
                     status = "Couldn't reach Bridge Cloud for calls: \(error.localizedDescription)"
+                    ErrorReporting.report(error, "push register")
                     return
                 }
             }
@@ -167,7 +168,7 @@ final class Push: NSObject, ObservableObject {
             ? "Calling in 10 seconds. Lock your phone if you like."
             : "Sending a notification in 10 seconds. Connect glasses or headphones to get a call instead."
         do { try await Self.cloud("POST", "api/push/test", session: session, body: ["delay": 10], timeout: 30) }
-        catch { status = "Test call failed: \(error.localizedDescription)" }
+        catch { status = "Test call failed: \(error.localizedDescription)"; ErrorReporting.report(error, "test call") }
     }
 
     private static func cloud(_ method: String, _ path: String, session: String, body: [String: Any]? = nil, timeout: TimeInterval = 15) async throws {

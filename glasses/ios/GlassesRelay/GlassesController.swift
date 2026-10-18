@@ -13,7 +13,9 @@ final class GlassesController: ObservableObject {
     @Published var registration = "Unknown"
     @Published var deviceCount = 0
     @Published var cameraAllowed = false
-    @Published var lastError: String?
+    @Published var lastError: String? {
+        didSet { if let lastError { ErrorReporting.report(message: lastError, "glasses") } }
+    }
 
     let conversation = Conversation()
 

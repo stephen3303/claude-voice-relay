@@ -6,6 +6,8 @@
 #   ASC_KEY_P8_BASE64           that key's .p8 file, base64-encoded
 #   APPLE_TEAM_ID               paid Apple Developer Program team ID
 #   META_APP_ID, META_CLIENT_TOKEN   from the app in the Wearables Developer Center
+# Optional, for crash reports (glasses/setup-sentry-secrets.ps1):
+#   SENTRY_DSN, SENTRY_AUTH_TOKEN secrets; SENTRY_ORG, SENTRY_PROJECT variables
 name: Glasses App Store upload
 on:
   workflow_dispatch:
@@ -44,6 +46,7 @@ jobs:
           TEAM: ${{ secrets.APPLE_TEAM_ID }}
           META_APP_ID: ${{ secrets.META_APP_ID }}
           META_CLIENT_TOKEN: ${{ secrets.META_CLIENT_TOKEN }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
           set -o pipefail
           xcodebuild -project GlassesRelay.xcodeproj -scheme GlassesRelay -configuration Release \
@@ -54,9 +57,20 @@ jobs:
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic CODE_SIGN_ENTITLEMENTS=AppStore.entitlements \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            META_APP_ID="$META_APP_ID" CLIENT_TOKEN="$META_CLIENT_TOKEN" \
+            META_APP_ID="$META_APP_ID" CLIENT_TOKEN="$META_CLIENT_TOKEN" SENTRY_DSN="$SENTRY_DSN" \
             'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) APP_STORE' \
             archive | xcbeautify --renderer github-actions
+
+      # Symbols, so crash reports show function names and lines. Skipped without the token; never blocks the upload.
+      - name: Upload symbols to Sentry
+        continue-on-error: true
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then echo "No SENTRY_AUTH_TOKEN secret; skipping."; exit 0; fi
+          npx --yes @sentry/cli@2.58.6 debug-files upload --include-sources "$RUNNER_TEMP/Bridge.xcarchive/dSYMs"
 
       - name: Export and upload to App Store Connect
         env:
