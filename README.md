@@ -48,6 +48,9 @@ whatever your agents say. Say "in <project>, <task>" to start a task, "send it" 
 "yes" to answer an agent, and "goodbye" to hang up. After "Sent." it stays on the line for up to
 15 minutes so you hear the agent's answer.
 
+**Natural voice:** set `OPENAI_API_KEY` in `.env` (optionally `TTS_VOICE`, `TTS_MODEL`) and restart the relay;
+the app then speaks through `POST /voice/tts` and falls back to the iPhone voice if that fails.
+
 **Photos:** say "look at this, ..." / "what am I looking at" for a quick answer (`POST /voice/photo`
 runs `claude -p` on the photo), or "send this to <project>, ..." to hand it to that agent. The photo is
 copied into the agent's container `/tmp` (never the repo, so it can't be committed) and deleted

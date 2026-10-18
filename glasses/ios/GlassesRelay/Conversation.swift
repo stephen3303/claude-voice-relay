@@ -26,6 +26,7 @@ final class Conversation: NSObject, ObservableObject {
     private var heard = ""
     private var speechDone: CheckedContinuation<Void, Never>?
     private var awaitedUtterance: AVSpeechUtterance?
+    private var player: AVAudioPlayer?
     private var announcements: [String] = []
     private var lastActivity = Date()
     /// Set after "Sent.": an agent is working, so stay on the line for its answer.
@@ -265,6 +266,18 @@ final class Conversation: NSObject, ObservableObject {
 
     private func say(_ text: String) async {
         phase = .speaking
+        // Natural cloud voice from the relay when it has a key; otherwise (or on any failure) the phone's voice.
+        if let mp3 = try? await Relay.shared.speech(text), let player = try? AVAudioPlayer(data: mp3) {
+            player.delegate = self
+            self.player = player
+            status = "Voice: relay (cloud)"
+            await withCheckedContinuation { c in
+                speechDone = c
+                if !player.play() { speechDone?.resume(); speechDone = nil }
+            }
+            self.player = nil
+            return
+        }
         let u = AVSpeechUtterance(string: text)
         u.voice = Self.bestVoice()
         let q = u.voice.map { ["default", "enhanced", "premium"][min($0.quality.rawValue - 1, 2)] } ?? "none"
@@ -306,5 +319,14 @@ extension Conversation: AVSpeechSynthesizerDelegate {
     }
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
         Task { @MainActor in self.finished(u) }
+    }
+}
+
+extension Conversation: AVAudioPlayerDelegate {
+    nonisolated func audioPlayerDidFinishPlaying(_ p: AVAudioPlayer, successfully ok: Bool) {
+        Task { @MainActor in self.speechDone?.resume(); self.speechDone = nil }
+    }
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ p: AVAudioPlayer, error: Error?) {
+        Task { @MainActor in self.speechDone?.resume(); self.speechDone = nil }
     }
 }

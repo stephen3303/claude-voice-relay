@@ -25,6 +25,10 @@ const cfg = {
   // Read every Shortcut task back and wait for "send it"; VOICE_CONFIRM=0 sends immediately.
   voiceConfirm: process.env.VOICE_CONFIRM !== '0',
   projectsRoot: process.env.PROJECTS_ROOT || path.resolve(ROOT, '..'),
+  // Natural-sounding speech for the glasses app: set OPENAI_API_KEY to enable POST /voice/tts.
+  openaiKey: process.env.OPENAI_API_KEY || '',
+  ttsModel: process.env.TTS_MODEL || 'gpt-4o-mini-tts',
+  ttsVoice: process.env.TTS_VOICE || 'coral',
   hookPort: Number(process.env.HOOK_PORT || 47878),
   image: process.env.AGENT_IMAGE || 'claude-voice-agent:latest',
 };
@@ -469,6 +473,35 @@ function inbox(req, res) {
   res.on('close', () => { clearTimeout(timer); inboxWaiters.delete(answer); });
 }
 
+// POST /voice/tts: body is the text (or {"text":...}); answers with MP3 audio. 503 when no key is set,
+// so the app falls back to the phone's own voice.
+function tts(req, res) {
+  if (!cfg.openaiKey) { res.writeHead(503, { 'content-type': 'text/plain' }).end('TTS not configured.'); return; }
+  let body = '';
+  req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });
+  req.on('end', async () => {
+    let text = body;
+    try { const j = JSON.parse(body); if (j && typeof j.text === 'string') text = j.text; } catch { /* plain-text body */ }
+    text = String(text).trim().slice(0, 4000);
+    if (!text) { res.writeHead(400).end(); return; }
+    try {
+      const r = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${cfg.openaiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: cfg.ttsModel, voice: cfg.ttsVoice, input: text, response_format: 'mp3',
+          instructions: 'Speak naturally and warmly, at a relaxed conversational pace.' }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      const audio = Buffer.from(await r.arrayBuffer());
+      res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': audio.length }).end(audio);
+    } catch (e) {
+      log('tts error:', e.message);
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' }).end('TTS failed.');
+    }
+  });
+}
+
 // ---------- voice endpoint for the iPhone Shortcut (firewalled to Tailscale) ----------
 if (cfg.voiceToken) {
   const want = Buffer.from(`Bearer ${cfg.voiceToken}`);
@@ -478,6 +511,7 @@ if (cfg.voiceToken) {
     const h = String(req.headers.authorization || '');
     if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}, auth len ${h.length} (want ${want.length}), starts '${h.slice(0, 7)}', ends '${h.slice(-3)}'`); res.writeHead(401).end(); return; }
     if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
+    if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
     if (req.method !== 'POST' || (req.url !== '/voice' && req.url !== '/voice/confirm')) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
     let body = '';

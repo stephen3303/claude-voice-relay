@@ -45,6 +45,16 @@ final class Relay {
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// MP3 of `text` in the relay's cloud voice. Throws when the relay has no TTS key or the call fails.
+    func speech(_ text: String) async throws -> Data {
+        if isDemo { throw Failure.http(503) }
+        var req = try request("voice/tts", timeout: 20)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(["text": text])
+        return try await fetch(req)
+    }
+
     /// A glasses photo plus what was said with it. Returns the line to speak.
     func photo(_ jpeg: Data, said: String) async throws -> String {
         if isDemo { return "Demo mode: on your PC, Claude would look at this photo and answer. The photo was \(jpeg.count / 1024) kilobytes." }
