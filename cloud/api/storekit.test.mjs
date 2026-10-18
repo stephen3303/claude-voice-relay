@@ -83,7 +83,7 @@ test('certificates are checked as of when Apple signed', () => {
   assert.ok(verifyAppleJws(jws(tx()), { root: ROOT, now: Date.UTC(2041, 0, 1) }), 'an old transaction outlives its certificate');
 });
 
-function setup() {
+function setup({ sandbox } = {}) {
   let clock = NOW;
   const owners = new Map(), pros = new Map();
   const store = {
@@ -102,7 +102,7 @@ function setup() {
     setPro: async (u, e) => { if (!(pros.get(u)?.until >= e.until)) pros.set(u, e); },
     dropPro: async (u, id) => { if (pros.get(u)?.transactionId === id) pros.delete(u); },
   };
-  const pro = makePro({ store, bundleId: 'com.smitherman.glassesrelay', now: () => clock, verify: (t, o) => verifyAppleJws(t, { ...o, root: ROOT }) });
+  const pro = makePro({ store, bundleId: 'com.smitherman.glassesrelay', sandbox, now: () => clock, verify: (t, o) => verifyAppleJws(t, { ...o, root: ROOT }) });
   const notice = (type, t) => JSON.stringify({ signedPayload: jws({ notificationType: type, signedDate: clock, data: { signedTransactionInfo: jws(t) } }) });
   return { pro, owners, pros, notice, advance: (ms) => (clock += ms) };
 }
@@ -127,6 +127,21 @@ test("a purchase can't be lent: another account, another app or another product 
   assert.equal((await pro.claim('u2', jws(tx({ originalTransactionId: '2000', environment: 'Xcode' })))).status, 400);
   assert.equal((await pro.claim('u2', 'junk')).status, 400);
   assert.equal((await pro.claim('u2', jws(tx({ originalTransactionId: '2000', environment: 'Sandbox' })))).status, 200, 'App Review buys in the sandbox');
+});
+
+test('with sandbox off, test purchases are refused and Pro they granted ends', async () => {
+  const sandboxTx = jws(tx({ environment: 'Sandbox' }));
+  const before = setup();
+  await before.pro.claim('u1', sandboxTx);
+  assert.equal(await before.pro.isPro('u1'), true, 'on for App Review');
+  // The same records, read once SANDBOX_PRO is false.
+  const after = setup({ sandbox: false });
+  for (const [k, v] of before.pros) after.pros.set(k, v);
+  assert.equal(await after.pro.isPro('u1'), false);
+  assert.equal((await after.pro.claim('u2', jws(tx({ originalTransactionId: '3000', environment: 'Sandbox' })))).status, 400);
+  assert.equal((await after.pro.notify(after.notice('DID_RENEW', tx({ environment: 'Sandbox' })))).status, 200, 'answered, so Apple stops retrying');
+  assert.equal((await after.pro.claim('u3', jws(tx({ originalTransactionId: '4000' })))).status, 200, 'paid purchases still count');
+  assert.equal(await after.pro.isPro('u3'), true);
 });
 
 test('a renewal notification extends Pro without the app', async () => {

@@ -15,6 +15,9 @@ import { fileURLToPath } from 'node:url';
 
 const API_DIR = fileURLToPath(new URL('../../api', import.meta.url));
 const LOOK_MODEL = 'us.anthropic.claude-haiku-5-5';   // quick photo answers: fast and cheap
+// Sandbox (free test) purchases count as Bridge Pro while Apple's App Review tests the app. Set to false once Apple
+// approves it: from then on only paid purchases do, and Pro granted by a sandbox purchase ends (cloud/api/storekit.mjs).
+const SANDBOX_PRO = true;
 const BUNDLE_ID = 'com.smitherman.glassesrelay';     // Apple identity tokens' audience, and the push topic
 const ISSUER = 'https://talktobridge.com';           // Bridge session tokens' issuer
 const APNS_SECRET = 'bridge/apns';                   // { teamId, keyId, key }: cloud/setup/setup-apns.ps1
@@ -39,7 +42,7 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(29),                 // HTTP API's limit is 30s; the inbox waits up to ~20s
       memorySize: 512,
-      environment: { TABLE: table.tableName, LOOK_MODEL, BUNDLE_ID, APNS_SECRET },
+      environment: { TABLE: table.tableName, LOOK_MODEL, BUNDLE_ID, APNS_SECRET, SANDBOX_PRO: String(SANDBOX_PRO) },
       logGroup: new logs.LogGroup(this, 'VoiceLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     table.grantReadWriteData(voice);
@@ -177,7 +180,7 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(10),
       memorySize: 256,
-      environment: { TABLE: table.tableName, BUNDLE_ID },
+      environment: { TABLE: table.tableName, BUNDLE_ID, SANDBOX_PRO: String(SANDBOX_PRO) },
       logGroup: new logs.LogGroup(this, 'AppStoreLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     // Anyone can reach it, so it gets only the item calls storekit.mjs makes, not Query or Scan.

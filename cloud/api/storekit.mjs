@@ -11,7 +11,6 @@ export const APPLE_ROOT_CA_G3 = '63:34:3A:BF:B8:9A:6A:03:EB:B5:7E:9B:3F:5F:A7:BE
 export const LEAF_OID = Buffer.from('060a2a864886f76364060b01', 'hex');
 export const INTERMEDIATE_OID = Buffer.from('060a2a864886f76364060201', 'hex');
 const PRO_PRODUCT = /^com\.smitherman\.glassesrelay\.pro\./;
-const ENVIRONMENTS = new Set(['Production', 'Sandbox']);   // App Review and TestFlight buy in the sandbox
 
 const parse = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
 
@@ -50,15 +49,17 @@ export function verifyAppleJws(jws, { root = APPLE_ROOT_CA_G3, now = Date.now() 
  *   dropPro(user, transactionId)   (only while that transaction is the stored one)
  * }
  * deps.verify(jws, { now }) -> payload (verifyAppleJws), deps.now() -> ms
+ * deps.sandbox: false once App Review is done, so free test purchases (App Review, TestFlight) stop counting
  */
 export function makePro(deps) {
   const now = deps.now ?? Date.now;
   const verify = deps.verify ?? verifyAppleJws;
+  const environments = new Set(deps.sandbox === false ? ['Production'] : ['Production', 'Sandbox']);
 
   function entitlement(t) {
     if (t.bundleId !== deps.bundleId) throw new Error('another app');
     if (!PRO_PRODUCT.test(t.productId ?? '')) throw new Error('not Bridge Pro');
-    if (!ENVIRONMENTS.has(t.environment)) throw new Error('unexpected environment');
+    if (!environments.has(t.environment)) throw new Error(`${t.environment} purchases don't count`);
     if (!t.originalTransactionId || !t.transactionId) throw new Error('no transaction ID');
     return {
       tx: String(t.originalTransactionId), transactionId: String(t.transactionId), product: t.productId,
@@ -117,7 +118,8 @@ export function makePro(deps) {
 
   async function isPro(user) {
     const p = await deps.store.getPro(user);
-    return Boolean(p && p.until > now());
+    // Pro a sandbox purchase granted ends when sandbox purchases stop counting.
+    return Boolean(p && p.until > now() && environments.has(p.env));
   }
 
   return { claim, notify, isPro };
