@@ -147,6 +147,7 @@ const publisher = makePublisher({
       '-e', 'GH_TOKEN', '-e', 'BRANCH', '-e', 'REPO', cfg.image, 'sh', '-c', PUSH_SCRIPT],
     { windowsHide: true, env: { ...process.env, GH_TOKEN: token, BRANCH: branch, REPO: repo }, stdio: ['pipe', 'ignore', 'pipe'] });
     pusher.stdin.on('error', () => {}); // the pusher failing first closes the pipe
+    pusher.on('close', (code) => { if (code !== 0) fetcher.kill(); }); // which would leave the fetcher stalled
     fetcher.stdout.pipe(pusher.stdin);
     let err = '';
     for (const p of [fetcher, pusher]) p.stderr.on('data', (d) => { err = (err + d).slice(-400); });
