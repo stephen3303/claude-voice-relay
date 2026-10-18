@@ -1,0 +1,65 @@
+# App Store screenshots of the App Store flavour, taken in the 6.9" iPhone simulator with the app's
+# -screenshots demo state. Run by hand; download the "screenshots" artifact and upload to App Store Connect.
+name: Glasses App Store screenshots
+on:
+  workflow_dispatch:
+
+jobs:
+  shots:
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: glasses/ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen xcbeautify
+          xcodegen generate
+
+      - name: Pick the largest iPhone simulator (6.9")
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devs = [d for rt, ds in json.load(sys.stdin)["devices"].items() if "iOS" in rt for d in ds]
+          pick = [d for d in devs if "Pro Max" in d["name"]] or [d for d in devs if "Plus" in d["name"]]
+          print(pick[-1]["udid"])')
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project GlassesRelay.xcodeproj -scheme GlassesRelay -configuration Release \
+            -destination "id=$UDID" -derivedDataPath build \
+            -skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=NO \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) APP_STORE' build | xcbeautify --renderer github-actions
+
+      - name: Take screenshots
+        run: |
+          APP=$(find build/Build/Products -name GlassesRelay.app -path '*iphonesimulator*' | head -1)
+          mkdir -p shots
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
+            --cellularMode active --cellularBars 4 --wifiBars 3
+          xcrun simctl install "$UDID" "$APP"
+          for look in light dark; do
+            xcrun simctl ui "$UDID" appearance $look
+            xcrun simctl terminate "$UDID" com.smitherman.glassesrelay || true
+            xcrun simctl launch "$UDID" com.smitherman.glassesrelay -screenshots
+            sleep 8
+            xcrun simctl io "$UDID" screenshot "shots/bridge-$look.png"
+          done
+          sips -g pixelWidth -g pixelHeight shots/*.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: glasses/ios/shots/*.png
