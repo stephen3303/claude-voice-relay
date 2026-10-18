@@ -77,3 +77,35 @@ The phone reaches the relay over HTTPS with `tailscale serve --bg 47879`. In the
 4. `npm start` (or let the ClaudeVoiceRelay scheduled task start it at logon)
 
 Tested from my phone: the relay has been verified end to end from an iPhone.
+
+## Use Bridge from Claude (custom connector)
+Bridge Cloud is also a remote MCP server, so Claude (claude.ai, the Claude apps, Claude Code) can
+start tasks for your agents and read what they said. It has two tools: **send_task** (a project and
+a task, or just an answer for the agent that asked something) and **read_inbox**. You sign in with
+the same Apple ID as the Bridge app, so it's the same account and the same inbox.
+
+One-time setup in Apple Developer (only the account holder can do this):
+1. **Certificates, Identifiers & Profiles → Identifiers → +** → **Services IDs**. Description
+   `Bridge web`, identifier `com.smitherman.glassesrelay.web` (it must be exactly this; it's
+   `SERVICES_ID` in `cloud/infra/lib/api.mjs`).
+2. Open it, tick **Sign in with Apple**, **Configure**: Primary App ID = the Bridge app
+   (`com.smitherman.glassesrelay`, so you get the same account as in the app). Domain: the host of
+   the `AppleReturnUrl` output of the Cloud deploy run (`<id>.execute-api.us-east-1.amazonaws.com`).
+   Return URL: the `AppleReturnUrl` itself (`https://<id>.execute-api.us-east-1.amazonaws.com/api/oauth/apple`).
+   Save, then Continue, then Save.
+
+Add it to Claude:
+1. claude.ai → **Settings → Connectors → Add custom connector**.
+2. Name `Bridge`; URL: the `ConnectorUrl` output (`https://<id>.execute-api.us-east-1.amazonaws.com/api/mcp`).
+   Leave the advanced OAuth fields empty: Claude registers itself.
+3. **Connect**, then **Sign in with Apple**. The connector then works in the Claude iPhone app too.
+
+For Claude Code: `claude mcp add --transport http bridge <ConnectorUrl>`, then `/mcp` to sign in.
+
+How it works: `cloud/api/connector.mjs`. The MCP endpoint is stateless streamable HTTP (JSON
+responses). Sign-in is OAuth 2.1 with dynamic client registration and PKCE; only Claude's and
+localhost redirect addresses can register. Access tokens last an hour; a sign-in lasts 30 days.
+Refresh tokens are kept with the account, work once each, and deleting the account disconnects
+Claude. Access tokens are signed by the same KMS key as app sessions but for another audience, so
+neither works in place of the other. Until cloud agents are built (cloud/DESIGN.md step 4), send_task answers that
+they aren't switched on yet, the same as the app does in Cloud mode.
