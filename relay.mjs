@@ -289,16 +289,19 @@ function speakResult(a, r) {
 // remote, so it shows in the Claude app. The session pushes and opens its own pull request.
 async function cloudTurn(a, prompt) {
   if (!fs.existsSync(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
-  // A reply to a conversation from before cloud mode would start a cloud session with only that one line.
-  if (!a.cloudId && a.sessionId) throw new Error(`its conversation was on the PC, before cloud mode. Start a new task for ${a.name}.`);
+  // Only a new task starts a cloud session. A reply with no session to go to (its conversation ran on the PC
+  // before cloud mode, or the first turn failed after the session may have started) would start one with only
+  // that one line, next to an orphan that can still push.
+  if (!a.cloudId && !a.cloudNew) throw new Error(`I lost track of its cloud session; it may be in the Claude app. Start a new task for ${a.name}.`);
   // The session pushes through the Claude GitHub app, not the relay, so the repo must have the same
   // protected default branch the relay requires before it pushes (README: GitHub access for agents).
-  if (!a.cloudId) {
+  if (a.cloudNew) {
     await agentGitHub.pinNow(a);
     const creds = await agentGitHub.credentials(a);
     if (!creds) throw new Error(`its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.`);
     await agentGitHub.release(creds);
   }
+  a.cloudNew = false; // from here the session may exist, so a failure means start over
   const r = await runCloud({ spawn, claudeBin: process.env.CLAUDE_BIN || 'claude', env: process.env,
     cwd: a.repoPath, sessionId: a.cloudId, prompt });
   if (a.stopped) return;
@@ -370,7 +373,8 @@ async function startTask(body) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
     a.repoPath = parsed.repo;
   }
-  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; // a new task gets fresh context (a new cloud session)
+  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; // a new task gets fresh context
+  a.cloudNew = true; // and, in cloud mode, a new cloud session
   say(`Starting ${name}.`);
   turn(a, parsed.task);
 }
