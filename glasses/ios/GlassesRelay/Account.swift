@@ -1,4 +1,5 @@
 import AuthenticationServices
+import Security
 import Foundation
 
 /// Bridge Cloud account (App Store build): Sign in with Apple, traded at /api/auth/apple for a
@@ -92,7 +93,8 @@ final class Account: ObservableObject {
         if code == 401 && bearer != nil { signOut(); return }
         guard code == 200 else { throw Relay.Failure.http(code) }
         let session = try JSONDecoder().decode(Session.self, from: data)
-        Keychain.write(Self.sessionKey, session.token)
+        let saved = Keychain.write(Self.sessionKey, session.token)
+        guard saved == errSecSuccess else { throw Relay.Failure.keychain(saved) }
         expires = session.expires
         signedIn = true
         Push.shared.refresh()   // agents can reach this phone now

@@ -1,6 +1,7 @@
 import SwiftUI
 import StoreKit
 import AuthenticationServices
+import Security
 
 /// Settings, opened from the main screen's gear: account, connection, glasses, voice, Bridge Pro, about.
 struct SettingsView: View {
@@ -32,7 +33,7 @@ struct SettingsView: View {
             switch m {
             case .cloud: relayURL = Relay.cloudAddress
             case .demo: relayURL = Relay.demoAddress
-            case .pc: relayURL = Relay.normalized(url)
+            case .pc: relayURL = Relay.pcAddress(url) ?? ""
             }
             testResult = ""
             push.refresh()   // the cloud learns whether it can reach this phone
@@ -129,14 +130,7 @@ struct SettingsView: View {
                 TextField("https://your-pc.your-tailnet.ts.net", text: $url)
                     .textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled()
                 SecureField("VOICE_TOKEN from the relay's .env", text: $token)
-                Button("Save and test") {
-                    url = Relay.normalized(url)
-                    token = token.trimmingCharacters(in: .whitespacesAndNewlines)
-                    relayURL = url
-                    Relay.shared.baseURL = url   // the test reads this now, not after @AppStorage catches up
-                    Relay.shared.token = token
-                    test()
-                }
+                Button("Save and test") { saveAndTest() }
             case .cloud:
                 Button("Test") { test() }
             case .demo:
@@ -150,6 +144,16 @@ struct SettingsView: View {
             case .demo: Text("Sample replies, so you can try Bridge without a PC.")
             }
         }
+    }
+
+    private func saveAndTest() {
+        guard let address = Relay.pcAddress(url) else { testResult = Relay.Failure.badAddress.localizedDescription; return }
+        url = address
+        relayURL = address
+        token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        let status = Keychain.write("relayToken", token)
+        guard status == errSecSuccess else { testResult = Relay.Failure.keychain(status).localizedDescription; return }
+        test()
     }
 
     private func test() {
