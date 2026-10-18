@@ -5,8 +5,8 @@ import { makeConnector, ACCESS_S, REDIRECTS } from './connector.mjs';
 import { makeAuth, APPLE_ISSUER } from './auth.mjs';
 
 const ISSUER = 'https://talktobridge.com';
-const SERVICES_ID = 'com.smitherman.glassesrelay.web';
-const BUNDLE_ID = 'com.smitherman.glassesrelay';
+const SERVICES_ID = 'com.talktobridge.bridge.web';
+const BUNDLE_ID = 'com.talktobridge.bridge';
 const HOST = 'abc.execute-api.us-east-1.amazonaws.com';
 const BASE = `https://${HOST}`;
 const CALLBACK = 'https://claude.ai/api/mcp/auth_callback';
