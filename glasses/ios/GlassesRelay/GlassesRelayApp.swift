@@ -22,8 +22,16 @@ struct GlassesRelayApp: App {
 
     /// A believable demo screen: demo relay, and a finished exchange in the transcript.
     @MainActor private static func seedScreenshots() {
-        Relay.shared.baseURL = Relay.demoAddress
-        GlassesController.shared.conversation.transcript = [
+        // The simulator has no glasses or toolkit, so show the state a set-up user sees.
+        GlassesController.screenshotMode = true
+        Relay.shared.baseURL = "https://my-pc.tail1234.ts.net"
+        Relay.shared.token = "screenshot-token"
+        let glasses = GlassesController.shared
+        glasses.registration = "Registered"
+        glasses.deviceCount = 1
+        glasses.cameraAllowed = true
+        glasses.conversation.phase = .listening
+        glasses.conversation.transcript = [
             ("You", "In trading bot, add a stop-loss check to the order router"),
             ("Relay", "I heard: add a stop-loss check to the order router. That goes to trading bot. Say send it, or say the task again."),
             ("You", "Send it"),

@@ -32,9 +32,11 @@ final class GlassesController: ObservableObject {
     /// Set at launch by GlassesRelayApp. False means Wearables.configure() failed, and nothing may touch Wearables.shared.
     nonisolated(unsafe) static var toolkitReady = false
     nonisolated(unsafe) static var toolkitError: String?
+    /// App Store screenshots in CI: the seeded state is shown as is, and nothing is started.
+    nonisolated(unsafe) static var screenshotMode = false
 
     func start() async {
-        guard !started else { return }
+        guard !started, !Self.screenshotMode else { return }
         started = true
         guard Self.toolkitReady else {
             registration = "Unavailable"

@@ -13,6 +13,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             Form {
                 Section("Glasses") {
                     LabeledContent("Meta AI registration", value: glasses.registration)
@@ -84,8 +85,15 @@ struct ContentView: View {
                         }
                     }
                 }
+                .id("conversation")
             }
             .navigationTitle("Bridge")
+            // CI's App Store screenshot of the conversation.
+            .task {
+                guard CommandLine.arguments.contains("-scroll-conversation") else { return }
+                try? await Task.sleep(for: .milliseconds(500))
+                proxy.scrollTo("conversation", anchor: .top)
+            }
             .sheet(isPresented: $showPaywall) {
                 SubscriptionStoreView(productIDs: Store.productIDs) {
                     VStack(spacing: 8) {
@@ -101,6 +109,7 @@ struct ContentView: View {
                     await store.refresh()
                     if store.isPro { showPaywall = false }
                 }
+            }
             }
         }
     }
