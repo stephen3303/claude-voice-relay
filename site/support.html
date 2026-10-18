@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support · Bridge</title>
+<meta name="description" content="Set up Bridge, fix common problems, and get help.">
+<meta name="theme-color" content="#0E1730">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="256x256" href="icon-256.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="icon-256.png" alt="" width="36" height="36">Bridge</a>
+    <nav class="site-nav" aria-label="Main">
+      <ul>
+        <li><a href="support.html" aria-current="page">Support</a></li>
+        <li><a href="privacy.html">Privacy</a></li>
+        <li><a href="terms.html">Terms</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="page-head">
+    <div class="wrap">
+      <h1>Support</h1>
+      <p>Set up Bridge, fix common problems, and get help.</p>
+    </div>
+  </div>
+
+  <article class="prose">
+    <h2>Setting up</h2>
+    <p>Bridge talks to the relay running on your own Windows PC. In outline:</p>
+    <ol>
+      <li>On your PC, install Docker and Tailscale, and sign in to Claude Code with your own Claude subscription.</li>
+      <li>Install and start the relay. The steps are in the <a href="https://github.com/stephen3303/claude-voice-relay#readme">README on GitHub</a>.</li>
+      <li>On your iPhone, turn on Tailscale and join the same network as your PC.</li>
+      <li>In Bridge, under PC relay, enter your relay's address and token, then tap <strong>Save and test</strong>.</li>
+      <li>For the camera features, tap <strong>Connect to Meta AI</strong>, then <strong>Allow camera</strong>.</li>
+    </ol>
+
+    <h2>Troubleshooting</h2>
+    <h3>Bridge can't reach my PC</h3>
+    <ul>
+      <li>Check that Tailscale is on, on both your iPhone and your PC.</li>
+      <li>Check that the relay is running on your PC.</li>
+      <li>In Bridge, tap <strong>Save and test</strong> and read the result shown below it.</li>
+    </ul>
+
+    <h3>Photos don't work</h3>
+    <ul>
+      <li>Open Bridge and tap <strong>Allow camera</strong>.</li>
+      <li>Photos are part of Bridge Pro.</li>
+    </ul>
+
+    <h3>I don't hear the agent's answer</h3>
+    <ul>
+      <li>Replies are read aloud while a conversation is open. Start one with Siri ("Talk to Bridge"), the Action Button, or Shortcuts.</li>
+      <li>Say "status" to hear where things are.</li>
+    </ul>
+
+    <h3>Managing a subscription</h3>
+    <p>Cancel or change Bridge Pro any time in iPhone Settings: tap your name, then Subscriptions.</p>
+
+    <h2>Contact</h2>
+    <p>Report a problem or ask a question by opening an issue on <a href="https://github.com/stephen3303/claude-voice-relay/issues">GitHub</a>. Please don't include your relay token or address.</p>
+  </article>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="./">Home</a></li>
+        <li><a href="support.html" aria-current="page">Support</a></li>
+        <li><a href="privacy.html">Privacy</a></li>
+        <li><a href="terms.html">Terms</a></li>
+        <li><a href="https://github.com/stephen3303/claude-voice-relay">GitHub</a></li>
+      </ul>
+    </nav>
+    <p>© 2026 Stephen Smitherman.</p>
+    <p>Bridge is not affiliated with or endorsed by Anthropic, Meta or EssilorLuxottica. Claude and Claude Code are trademarks of Anthropic. Ray-Ban and Meta are trademarks of their respective owners.</p>
+  </div>
+</footer>
+</body>
+</html>
