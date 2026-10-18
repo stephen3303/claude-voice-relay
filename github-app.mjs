@@ -5,8 +5,9 @@
 import crypto from 'node:crypto';
 
 const API = 'https://api.github.com';
-// Reuse a token while it has this long left, so a turn starting now still has most of an hour.
-const REUSE_MS = 45 * 60_000;
+// Reuse a token only while it has nearly its full hour left, so every turn gets about 55 minutes.
+// A turn that runs longer than that gets a 401 on its next push.
+const REUSE_MS = 55 * 60_000;
 
 // owner/repo from a GitHub remote: https://github.com/o/r(.git), git@github.com:o/r.git, ssh://git@github.com/o/r
 export function parseRemote(url) {

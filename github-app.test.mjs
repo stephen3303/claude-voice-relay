@@ -55,9 +55,9 @@ test('tokenFor asks for a token scoped to the one repository, and reuses it whil
   assert.deepEqual(mint.body, { repositories: ['claude-voice-relay'] });
   assert.match(mint.headers.Authorization, /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
 
-  advance(10 * 60_000);
+  advance(4 * 60_000);
   assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_1');
-  advance(10 * 60_000); // 40 minutes left: too little for a long turn
+  advance(2 * 60_000); // 54 minutes left: a long turn could outlive it
   assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_2');
 });
 
