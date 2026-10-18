@@ -18,7 +18,8 @@ struct SettingsView: View {
     @State private var testResult = ""
     @State private var photoResult = ""
     @State private var readBack = Conversation.readBack
-    @State private var voiceID = Conversation.voiceID
+    // A deleted voice falls back to the best installed one; show that rather than a blank picker.
+    @State private var voiceID = Conversation.voices.contains { $0.identifier == Conversation.voiceID } ? Conversation.voiceID : ""
     @State private var hiFi = Conversation.hiFiSpeech
     @State private var previewer = AVSpeechSynthesizer()
     @State private var showPaywall = false

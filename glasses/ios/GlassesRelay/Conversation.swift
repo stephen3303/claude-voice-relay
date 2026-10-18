@@ -133,9 +133,9 @@ final class Conversation: NSObject, ObservableObject {
     /// `report` is off when switching back after a reply, so the status line keeps naming the voice.
     private func useGlassesMic(report: Bool = true) throws {
         let session = AVAudioSession.sharedInstance()
-        onHiFi = false
         // HFP is the only Bluetooth profile that carries the glasses' microphone.
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
+        onHiFi = false   // only once it worked, so a failed switch back is tried again on the next listen
         if let hfp = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
             try session.setPreferredInput(hfp)
             if report { status = "Using \(hfp.portName)" }
