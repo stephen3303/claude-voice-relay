@@ -53,13 +53,19 @@ jobs:
           for look in light dark; do
             xcrun simctl ui "$UDID" appearance $look
             xcrun simctl terminate "$UDID" com.smitherman.glassesrelay || true
-            xcrun simctl launch "$UDID" com.smitherman.glassesrelay -screenshots
+            xcrun simctl launch --stdout="$PWD/shots/console-$look.txt" --stderr="$PWD/shots/console-$look.txt" \
+              "$UDID" com.smitherman.glassesrelay -screenshots
             sleep 8
             xcrun simctl io "$UDID" screenshot "shots/bridge-$look.png"
+            # If the app isn't in front, say why: its console and any crash report.
+            xcrun simctl spawn "$UDID" launchctl list | grep -i glassesrelay || echo "app not running after launch ($look)"
           done
+          cat shots/console-*.txt || true
+          find ~/Library/Logs/DiagnosticReports -name 'GlassesRelay*' -newer GlassesRelay.xcodeproj \
+            -exec sh -c 'echo "== $1"; head -80 "$1"' _ {} \; | tee shots/crash.txt || true
           sips -g pixelWidth -g pixelHeight shots/*.png
 
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: glasses/ios/shots/*.png
+          path: glasses/ios/shots/
