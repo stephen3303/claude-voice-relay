@@ -16,7 +16,8 @@ How things ship:
 - The App Store flavour ships only when Stephen runs glasses-appstore.yml by hand.
 
 For the change (`git diff origin/main...HEAD`), check:
-1. Synth: `cd cloud/infra && npm ci && npx cdk synth -q`. Then compare the synthesized templates in
+1. Synth: `cd cloud/infra && npm ci && npx cdk synth -q` (in the GitHub review you can't run it; ci.yml's
+   `synth` job did, see `gh pr checks <number>`, so judge replacements from the CDK code diff instead). Then compare the synthesized templates in
    cdk.out against what the diff intends. Flag any resource REPLACEMENT or deletion: a changed DynamoDB key
    schema, table name, KMS key, or logical ID means data loss or every session signed out. Say which
    logical ID changes and why.

@@ -18,6 +18,10 @@ fail if it regressed. Existing tests show the pattern: pure logic is split from 
 auth.mjs take their store, clock and crypto as parameters; index.mjs wires DynamoDB, Bedrock and KMS), so
 tests pass fakes instead of mocking the AWS SDK. Follow that.
 
+In the GitHub review (claude-review.yml) you can't run code, by design: the PR is untrusted and the job
+holds a secret. There, read the results ci.yml already produced with `gh pr checks <number>` and judge
+coverage by reading.
+
 The iOS app (glasses/ios) has no tests and cannot be built here; CI builds it on a Mac. Don't try.
 
 When reviewing (the default), do not edit files. Report: each command and its result (pass/fail, with the

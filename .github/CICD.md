@@ -29,6 +29,22 @@ Claude Code loads these in any session in this repo (your PC, the cloud, and the
 Use one by hand: in Claude Code, "use the security-reviewer on my last commit", or on GitHub,
 "@claude have the ios-reviewer check this PR".
 
+## How the Claude workflows stay safe on a public repo
+
+- **Review (`claude-review.yml`):** Claude runs in a checkout of main, so `CLAUDE.md`, `.claude/` (agents,
+  settings, hooks) and `.mcp.json` always come from main. The PR is checked out into `./pr` as data with
+  its own Claude config deleted, and Claude's tools can read it but not run it; `ci.yml` runs the tests in
+  a job with no secrets. Fork PRs are skipped.
+- **`@claude` (`claude.yml`):** runs code, so it only acts on comments from you or collaborators, on
+  issues they opened and same-repo PRs. Pushes it makes use the workflow's token, so they don't start CI
+  by themselves; push again or rerun CI.
+- **No `id-token: write`** in either, so neither can mint the GitHub OIDC token that the AWS
+  `BridgeGitHubDeploy` role trusts. Keep it that way: today the role trusts any workflow on main.
+- Actions in these jobs are pinned to commit SHAs.
+
+A workflow edited in a same-repo branch runs with the secrets on that branch's PR. That's GitHub's model:
+anyone who can push a branch can read the secrets, so only give push access to people you'd give them to.
+
 ## What you need to add (once)
 
 The Claude workflows skip cleanly until one of these repository secrets exists
@@ -50,3 +66,6 @@ draft while you iterate if you want fewer reviews.
   default. To get a diff on PRs, add a second read-only role trusting `pull_request` and a step running
   `npx cdk diff`; ask Claude for it when you want it.
 - **Staging stack:** worth adding before Bridge Cloud has paying users.
+- **Narrower AWS trust:** the deploy role trusts `ref:refs/heads/main`, so any future workflow on main
+  with `id-token: write` can deploy. Scoping it to a `production` environment (only `cloud-deploy.yml`
+  uses it, restricted to main) needs a stack update you run in AWS; ask Claude for it.
