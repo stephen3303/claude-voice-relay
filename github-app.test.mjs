@@ -246,6 +246,16 @@ test('without the App, AGENT_GH_TOKEN and the host git identity are used', async
   assert.equal(await tok(agentGitHub({ ghApp: null }).gh), '');
 });
 
+test('AGENT_GH_TOKEN is pinned too, so a changed origin gets no token', async () => {
+  const { gh, state, logs } = agentGitHub({ ghApp: null, fallbackToken: 'github_pat_x' });
+  assert.equal(await tok(gh), 'github_pat_x');
+  state.remote = 'https://github.com/stephen3303/other-repo.git';
+  assert.equal(await tok(gh), '');
+  assert.match(logs.at(-1), /origin changed/);
+  const other = agentGitHub({ ghApp: null, fallbackToken: 'github_pat_x', remote: 'https://github.com/stephen3303/trading-bot.git' });
+  assert.equal(await tok(other.gh), '');
+});
+
 test('a pin that cannot be saved still holds for this run', async () => {
   const pinsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pins-')), 'github-pins.json');
   fs.mkdirSync(`${pinsFile}.tmp`); // a folder where the temp file goes, so the save fails

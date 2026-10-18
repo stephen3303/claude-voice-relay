@@ -81,6 +81,10 @@ test('the default branch is never pushed, and the token is still released', asyn
 test('a bad request, no access, or a failed push is said plainly', async () => {
   assert.match(await publisher({ text: '{' }).pub.publish(agent), /^I didn't push the work, because its push request was not valid JSON\.$/);
   assert.match(await publisher({ text: request({ body: 'x'.repeat(70_000) }) }).pub.publish(agent), /too long/);
+  const broken = publisher();
+  broken.pub = makePublisher({ readRequest: async () => request(), agentGitHub: { credentials: async () => { throw new Error('outage'); }, release: async () => {} },
+    push: async () => {}, fetch: async () => { throw new Error('unused'); } });
+  assert.match(await broken.pub.publish(agent), /no GitHub access/);
   const none = publisher({ creds: null });
   assert.match(await none.pub.publish(agent), /no GitHub access/);
   assert.deepEqual(none.pushes, []);

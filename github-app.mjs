@@ -209,11 +209,13 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
   async function credentials(a) {
     const remote = parseRemote(await getRemote(a.repoPath));
     if (!remote) { log(`${a.name} has no GitHub origin remote, so no GitHub token.`); return null; }
-    if (!ghApp) return fallbackToken ? { token: fallbackToken, ...remote } : null;
+    if (!ghApp && !fallbackToken) return null;
+    // Pinned with AGENT_GH_TOKEN too: it may cover more repos than this one.
     const slug = `${remote.owner}/${remote.repo}`.toLowerCase();
     const pinned = pin(a, slug);
     if (pinned && slug !== pinned) log(`${a.name}: origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in ${path.basename(pinsFile)} if that was you.`);
     if (slug !== pinned) return null;
+    if (!ghApp) return { token: fallbackToken, ...remote };
     const token = await ghApp.tokenFor(remote.owner, remote.repo);
     if (!token) return null;
     issued.add(token);

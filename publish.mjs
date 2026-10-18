@@ -87,7 +87,9 @@ export function makePublisher({ readRequest, agentGitHub, push, fetch = globalTh
     const req = parseRequest(text);
     if (req.error) { log(`${a.name}: ${req.error}`); return `I didn't push the work, because ${req.error}.`; }
 
-    const creds = await agentGitHub.credentials(a);
+    let creds;
+    try { creds = await agentGitHub.credentials(a); }
+    catch (err) { log(`${a.name}: no GitHub token: ${err.message}`); }
     if (!creds) return "I couldn't push the work, because there's no GitHub access for this repo. It's committed on its branch.";
     let pushed = false;
     try {
