@@ -12,6 +12,9 @@ name: Glasses App Store upload
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   upload:
     runs-on: macos-26
@@ -61,17 +64,6 @@ jobs:
             'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) APP_STORE' \
             archive | xcbeautify --renderer github-actions
 
-      # Symbols, so crash reports show function names and lines. Skipped without the token; never blocks the upload.
-      - name: Upload symbols to Sentry
-        continue-on-error: true
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
-        run: |
-          if [ -z "$SENTRY_AUTH_TOKEN" ]; then echo "No SENTRY_AUTH_TOKEN secret; skipping."; exit 0; fi
-          npx --yes @sentry/cli@2.58.6 debug-files upload --include-sources "$RUNNER_TEMP/Bridge.xcarchive/dSYMs"
-
       - name: Export and upload to App Store Connect
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -94,3 +86,19 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      # The App Store Connect key is gone before any npm package runs.
+      - name: Remove API key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keys"
+
+      # Symbols, so crash reports show function names and lines. Skipped without the token; never blocks the upload.
+      - name: Upload symbols to Sentry
+        continue-on-error: true
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then echo "No SENTRY_AUTH_TOKEN secret; skipping."; exit 0; fi
+          npx --yes @sentry/cli@2.58.6 debug-files upload --include-sources "$RUNNER_TEMP/Bridge.xcarchive/dSYMs"

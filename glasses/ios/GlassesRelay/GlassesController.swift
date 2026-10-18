@@ -13,9 +13,7 @@ final class GlassesController: ObservableObject {
     @Published var registration = "Unknown"
     @Published var deviceCount = 0
     @Published var cameraAllowed = false
-    @Published var lastError: String? {
-        didSet { if let lastError { ErrorReporting.report(message: lastError, "glasses") } }
-    }
+    @Published var lastError: String?
 
     let conversation = Conversation()
 
@@ -58,7 +56,7 @@ final class GlassesController: ObservableObject {
 
     func register() async {
         guard Self.toolkitReady else { return }
-        do { try await Wearables.shared.startRegistration() } catch { lastError = "\(error)" }
+        do { try await Wearables.shared.startRegistration() } catch { lastError = "\(error)"; ErrorReporting.report(error, "registration") }
     }
 
     // MARK: voice channel
@@ -86,7 +84,7 @@ final class GlassesController: ObservableObject {
     private func listenUntilDropped() async {
         let newStream: VoiceInvocationsStream
         do { newStream = try VoiceInvocationsStream(wearables: Wearables.shared) }
-        catch { lastError = "Voice channel would not open: \(error)"; return }
+        catch { lastError = "Voice channel would not open: \(error)"; ErrorReporting.report(error, "voice channel"); return }
 
         let (drops, drop) = AsyncStream<Void>.makeStream()
         let tokens = ListenerTokenBag()   // dropping a token cancels its listener
@@ -149,7 +147,7 @@ final class GlassesController: ObservableObject {
     func allowCamera() async {
         guard Self.toolkitReady else { return }
         do { cameraAllowed = try await Wearables.shared.requestPermission(.camera) == .granted }
-        catch { lastError = "Camera permission: \(error)" }
+        catch { lastError = "Camera permission: \(error)"; ErrorReporting.report(error, "camera permission") }
     }
 
     /// One photo from the glasses camera, as JPEG. A device session is opened just for the shot and

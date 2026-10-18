@@ -7,7 +7,6 @@ import Sentry
 /// your PC's address or the relay token.
 enum ErrorReporting {
     private static var started = false
-    private static var lastMessage: String?
 
     static func start() {
         guard let dsn = Bundle.main.object(forInfoDictionaryKey: "SentryDSN") as? String,
@@ -26,6 +25,7 @@ enum ErrorReporting {
             o.enableNetworkBreadcrumbs = false
             o.enableCaptureFailedRequests = false
             o.enableAutoPerformanceTracing = false
+            o.enableAutoSessionTracking = false   // sessions are usage data with an install ID, and skip beforeSend
             o.beforeSend = { event in
                 event.user = nil
                 return event
@@ -34,28 +34,18 @@ enum ErrorReporting {
         started = true
     }
 
-    /// A failure the app recovered from (a relay call, the glasses camera). Only the error's type, code
+    /// A failure the app recovered from (a relay call, the glasses camera, the Meta toolkit). Only the error's type, code
     /// and description are sent: the original's userInfo can hold the request URL.
     static func report(_ error: Error, _ place: String) {
         guard started else { return }
-        // Not set up yet, or the phone is locked: the app already says what to do, nothing is broken.
+        // Not set up yet, a wrong token, or the phone is locked: the app already says what to do, nothing is broken.
         if let failure = error as? Relay.Failure {
-            guard case .http = failure else { return }
+            guard case .http(let code) = failure, code != 401, code != 403 else { return }
         }
         if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
         let ns = error as NSError
         let clean = NSError(domain: ns.domain, code: ns.code,
                             userInfo: [NSLocalizedDescriptionKey: error.localizedDescription])
         SentrySDK.capture(error: clean) { scope in scope.setTag(value: place, key: "where") }
-    }
-
-    /// A failure the app shows as text (the glasses status line). Repeats of the same text are sent once.
-    static func report(message: String, _ place: String) {
-        guard started, message != lastMessage else { return }
-        lastMessage = message
-        SentrySDK.capture(message: message) { scope in
-            scope.setLevel(.error)
-            scope.setTag(value: place, key: "where")
-        }
     }
 }

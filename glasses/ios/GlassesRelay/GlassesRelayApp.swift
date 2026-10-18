@@ -59,7 +59,7 @@ struct GlassesRelayApp: App {
                     guard GlassesController.toolkitReady else { return }
                     Task {
                         do { _ = try await Wearables.shared.handleUrl(url) }
-                        catch { glasses.lastError = "Meta AI callback failed: \(error)" }
+                        catch { glasses.lastError = "Meta AI callback failed: \(error)"; ErrorReporting.report(error, "Meta AI callback") }
                     }
                 }
         }
