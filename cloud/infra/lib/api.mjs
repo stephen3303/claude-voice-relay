@@ -145,9 +145,10 @@ export class ApiStack extends Stack {
       }
     }
     // Registration and sign-in need no account, and each writes a row: keep a loop from filling the table.
+    // routeSettings is a raw JSON property, so CDK passes these keys through as is; CloudFormation wants PascalCase.
     stage.routeSettings = {
-      'POST /api/oauth/register': { throttlingRateLimit: 1, throttlingBurstLimit: 5 },
-      'GET /api/oauth/authorize': { throttlingRateLimit: 5, throttlingBurstLimit: 20 },
+      'POST /api/oauth/register': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 5 },
+      'GET /api/oauth/authorize': { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 20 },
     };
     new CfnOutput(this, 'ConnectorUrl', { value: `${api.apiEndpoint}/api/mcp` });
     new CfnOutput(this, 'AppleReturnUrl', { value: `${api.apiEndpoint}/api/oauth/apple` });
