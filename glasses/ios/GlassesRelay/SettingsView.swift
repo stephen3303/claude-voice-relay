@@ -183,6 +183,12 @@ struct SettingsView: View {
 
     private func preview() {
         previewer.stopSpeaking(at: .immediate)
+        // Outside a conversation the default session follows the silent switch; a conversation's own stays as it is.
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .playAndRecord {
+            try? session.setCategory(.playback, mode: .spokenAudio)
+            try? session.setActive(true)
+        }
         let u = AVSpeechUtterance(string: "This is how Bridge will sound.")
         u.voice = Conversation.bestVoice()
         u.rate = 0.5
