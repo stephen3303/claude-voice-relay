@@ -125,13 +125,14 @@ final class GlassesController: ObservableObject {
     // MARK: camera
 
     enum PhotoFailure: LocalizedError {
-        case noGlasses, notAllowed, timedOut, cameraDidNotStart, photoNeverArrived, failed(String)
+        case noGlasses, notAllowed, timedOut, cameraDidNotStart, cameraBusy, photoNeverArrived, failed(String)
         var errorDescription: String? {   // spoken aloud, so plain words
             switch self {
             case .noGlasses: return "I can't see your glasses. Check they're on and connected."
             case .notAllowed: return "The camera isn't allowed yet. Open Bridge and tap Allow camera."
             case .timedOut: return "The glasses took too long to connect. Try again."
             case .cameraDidNotStart: return "The glasses camera didn't wake up. Try again."
+            case .cameraBusy: return "The glasses camera was busy. Try again."
             case .photoNeverArrived: return "The photo didn't reach your phone. Try again."
             case .failed(let why): return "The photo didn't work. \(why)"
             }
@@ -169,8 +170,10 @@ final class GlassesController: ObservableObject {
         try session.start()
         try await withTimeout(15) {
             // stateStream announces changes, so a session that is already up would say nothing.
+            // Subscribe first, then read, so a start in between isn't missed either.
+            let states = session.stateStream()
             if case .started = session.state { return }
-            for await state in session.stateStream() {
+            for await state in states {
                 if case .started = state { return }
                 if case .stopped = state { throw PhotoFailure.failed("The glasses ended the session.") }
             }
@@ -188,12 +191,16 @@ final class GlassesController: ObservableObject {
         else { throw PhotoFailure.failed("The camera would not start.") }
         #endif
 
-        enum Event { case streaming, photoReady, photoStopped, progress, photo(Data), error(String), timeout(PhotoFailure) }
+        enum Event { case streaming, streamStopped, photoReady, photoStopped, progress, photo(Data), error(String), timeout(Int, PhotoFailure) }
         let (events, emit) = AsyncStream<Event>.makeStream()
         let tokens = ListenerTokenBag()
         defer { Task { await tokens.cancelAll() } }
         camera.stream.statePublisher.listen { state in
-            if case .streaming = state { emit.yield(.streaming) }
+            switch state {
+            case .streaming: emit.yield(.streaming)
+            case .stopped: emit.yield(.streamStopped)
+            default: break
+            }
         }.store(in: tokens)
         camera.stream.errorPublisher.listen { error in emit.yield(.error(error.localizedDescription)) }.store(in: tokens)
         #if APP_STORE
@@ -212,17 +219,31 @@ final class GlassesController: ObservableObject {
         #endif
 
         // One watchdog, re-armed per stage, so a slow wake-up and a slow transfer each get their
-        // own allowance and the spoken error says which one ran out.
+        // own allowance and the spoken error says which one ran out. A timeout that fired before a
+        // re-arm can already be queued, so each carries its generation and stale ones are ignored.
+        // Every allowance is clipped to one overall deadline, so progress can't keep it waiting forever.
+        let deadline = ContinuousClock.now + .seconds(60)
         var watchdog: Task<Void, Never>?
+        var generation = 0
         func arm(_ seconds: Double, _ failure: PhotoFailure) {
             watchdog?.cancel()
-            watchdog = Task { try? await Task.sleep(for: .seconds(seconds)); if !Task.isCancelled { emit.yield(.timeout(failure)) } }
+            generation += 1
+            let gen = generation, wait = min(Duration.seconds(seconds), deadline - ContinuousClock.now)
+            watchdog = Task { try? await Task.sleep(for: wait); if !Task.isCancelled { emit.yield(.timeout(gen, failure)) } }
         }
         defer { watchdog?.cancel() }
 
         camera.stream.start()
         arm(15, .cameraDidNotStart)
-        var photoStarting = false, fired = false
+        var photoStarting = false, shutterReady = false, fired = false
+        #if !APP_STORE
+        func fire() {
+            fired = true
+            // Medium keeps the Bluetooth transfer quick; plenty for Claude to read a screen or sign.
+            camera.photo.capturePhoto(resolution: .medium, quality: .medium)
+            arm(20, .photoNeverArrived)
+        }
+        #endif
         for await event in events {
             switch event {
             case .streaming where !photoStarting && !fired:
@@ -234,27 +255,28 @@ final class GlassesController: ObservableObject {
                 // The stream only wakes the sensor; the shutter is started once frames prove it's up.
                 photoStarting = true
                 camera.photo.start()
+                arm(10, .cameraDidNotStart)   // the sensor is up; a fresh allowance for the shutter
                 #endif
             case .streaming:
                 break
-            case .photoReady where !fired:
-                fired = true
+            #if !APP_STORE
+            case .photoReady where !shutterReady:
+                shutterReady = true
                 // Stream and shutter compete for the sensor, and stop() returns before the stream lets
                 // go. Meta's sample says a capture fired in that beat is refused with no error and no
-                // bytes, so it just times out. Wait for the stream to be down first.
+                // bytes, so it just times out. Fire only once the stream reports it is down.
                 camera.stream.stop()
-                for _ in 0..<60 where camera.stream.state != .stopped { try await Task.sleep(for: .milliseconds(50)) }
-                // Medium keeps the Bluetooth transfer quick; plenty for Claude to read a screen or sign.
-                camera.photo.capturePhoto(resolution: .medium, quality: .medium)
-                arm(20, .photoNeverArrived)
-            case .photoReady:
+                if camera.stream.state == .stopped { fire() } else { arm(5, .cameraBusy) }
+            case .streamStopped where shutterReady && !fired:
+                fire()
+            case .photoStopped where fired:
+                // Possibly just the end of a good capture with the data still on its way; give it a beat.
+                arm(3, .photoNeverArrived)
+            #endif
+            case .streamStopped, .photoReady, .photoStopped:
                 break
             case .progress:
                 arm(15, .photoNeverArrived)   // bytes are still crossing; keep waiting
-            case .photoStopped where fired:
-                throw PhotoFailure.failed("The glasses put the camera away before the photo arrived.")
-            case .photoStopped:
-                break
             case .photo(let jpeg):
                 #if APP_STORE
                 camera.stream.stop()
@@ -264,11 +286,14 @@ final class GlassesController: ObservableObject {
                 return jpeg
             case .error(let why):
                 throw PhotoFailure.failed(why)
-            case .timeout(let failure):
+            case .timeout(let gen, let failure) where gen == generation:
                 throw failure
+            case .timeout:
+                break   // fired before a later re-arm
             }
         }
-        throw PhotoFailure.timedOut
+        // The events never finish on their own, so getting here means the photo was cancelled.
+        throw CancellationError()
     }
 
     private func withTimeout<T>(_ seconds: Double, _ work: @escaping @MainActor () async throws -> T) async throws -> T {
