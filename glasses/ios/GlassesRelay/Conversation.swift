@@ -220,12 +220,15 @@ final class Conversation: NSObject, ObservableObject {
                 await say("Taking a picture.")
                 phase = .thinking
                 do { reply = try await Relay.shared.photo(try await takePhoto(), said: text) }
-                catch { reply = error.localizedDescription }
+                catch { reply = error.localizedDescription; ErrorReporting.report(error, "photo") }
                 // The camera session can disturb the Bluetooth audio route; put the glasses mic back.
                 try? configureAudioForGlasses()
             } else {
                 do { reply = try await Relay.shared.say(Self.forRelay(text), readBack: Self.readBack) }
-                catch { reply = "I couldn't reach your PC. \(error.localizedDescription)" }
+                catch {
+                    reply = "I couldn't reach your PC. \(error.localizedDescription)"
+                    ErrorReporting.report(error, "say")
+                }
             }
             if reply.hasPrefix("Sent") { awaitingAgent = true }
             transcript.append(("Relay", reply))
@@ -245,7 +248,7 @@ final class Conversation: NSObject, ObservableObject {
         Task {
             let reply: String
             do { reply = try await Relay.shared.photo(try await takePhoto(), said: question) }
-            catch { reply = error.localizedDescription }
+            catch { reply = error.localizedDescription; ErrorReporting.report(error, "look") }
             transcript.append(("You", question))
             transcript.append(("Relay", reply))
             await say(reply)
