@@ -54,9 +54,9 @@ jobs:
             xcrun simctl ui "$UDID" appearance $look
             for view in home settings; do
               EXTRA=(); [ $view = settings ] && EXTRA=(-show-settings)
-              xcrun simctl terminate "$UDID" com.smitherman.glassesrelay 2>/dev/null || true
+              xcrun simctl terminate "$UDID" com.talktobridge.bridge 2>/dev/null || true
               xcrun simctl launch --stdout="$PWD/shots/console-$look-$view.txt" --stderr="$PWD/shots/console-$look-$view.txt" \
-                "$UDID" com.smitherman.glassesrelay -screenshots "${EXTRA[@]}"
+                "$UDID" com.talktobridge.bridge -screenshots "${EXTRA[@]}"
               sleep 8
               xcrun simctl io "$UDID" screenshot "shots/bridge-$view-$look.png"
               # If the app isn't in front, say why: its console and any crash report.

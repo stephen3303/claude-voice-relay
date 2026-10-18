@@ -10,7 +10,7 @@ export const APPLE_ROOT_CA_G3 = '63:34:3A:BF:B8:9A:6A:03:EB:B5:7E:9B:3F:5F:A7:BE
 // 1.2.840.113635.100.6.11.1 and 1.2.840.113635.100.6.2.1), so no other certificate under Apple's root passes.
 export const LEAF_OID = Buffer.from('060a2a864886f76364060b01', 'hex');
 export const INTERMEDIATE_OID = Buffer.from('060a2a864886f76364060201', 'hex');
-const PRO_PRODUCT = /^com\.smitherman\.glassesrelay\.pro\./;
+const PRO_PRODUCT = /^com\.talktobridge\.bridge\.pro\./;
 const ENVIRONMENTS = new Set(['Production', 'Sandbox']);   // App Review and TestFlight buy in the sandbox
 
 const parse = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));

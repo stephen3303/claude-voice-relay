@@ -47,7 +47,7 @@ function jws(payload, { chain = [leafDer, midDer, rootDer], key = leafKey } = {}
 }
 
 const tx = (over = {}) => ({
-  bundleId: 'com.smitherman.glassesrelay', productId: 'com.smitherman.glassesrelay.pro.monthly', environment: 'Production',
+  bundleId: 'com.talktobridge.bridge', productId: 'com.talktobridge.bridge.pro.monthly', environment: 'Production',
   originalTransactionId: '1000', transactionId: '1001', type: 'Auto-Renewable Subscription',
   signedDate: NOW - DAY, purchaseDate: NOW - DAY, expiresDate: NOW + 29 * DAY, ...over,
 });
@@ -55,7 +55,7 @@ const tx = (over = {}) => ({
 const check = (token) => verifyAppleJws(token, { root: ROOT, now: NOW });
 
 test('a transaction signed through the pinned root is read', () => {
-  assert.equal(check(jws(tx())).productId, 'com.smitherman.glassesrelay.pro.monthly');
+  assert.equal(check(jws(tx())).productId, 'com.talktobridge.bridge.pro.monthly');
 });
 
 test('anything not signed by the App Store certificate under the pinned root is refused', () => {
@@ -102,7 +102,7 @@ function setup() {
     setPro: async (u, e) => { if (!(pros.get(u)?.until >= e.until)) pros.set(u, e); },
     dropPro: async (u, id) => { if (pros.get(u)?.transactionId === id) pros.delete(u); },
   };
-  const pro = makePro({ store, bundleId: 'com.smitherman.glassesrelay', now: () => clock, verify: (t, o) => verifyAppleJws(t, { ...o, root: ROOT }) });
+  const pro = makePro({ store, bundleId: 'com.talktobridge.bridge', now: () => clock, verify: (t, o) => verifyAppleJws(t, { ...o, root: ROOT }) });
   const notice = (type, t) => JSON.stringify({ signedPayload: jws({ notificationType: type, signedDate: clock, data: { signedTransactionInfo: jws(t) } }) });
   return { pro, owners, pros, notice, advance: (ms) => (clock += ms) };
 }
@@ -123,7 +123,7 @@ test("a purchase can't be lent: another account, another app or another product 
   assert.equal((await pro.claim('u2', jws(tx()))).status, 409);
   assert.equal(await pro.isPro('u2'), false);
   assert.equal((await pro.claim('u2', jws(tx({ originalTransactionId: '2000', bundleId: 'com.example.other' })))).status, 400);
-  assert.equal((await pro.claim('u2', jws(tx({ originalTransactionId: '2000', productId: 'com.smitherman.glassesrelay.tip' })))).status, 400);
+  assert.equal((await pro.claim('u2', jws(tx({ originalTransactionId: '2000', productId: 'com.talktobridge.bridge.tip' })))).status, 400);
   assert.equal((await pro.claim('u2', jws(tx({ originalTransactionId: '2000', environment: 'Xcode' })))).status, 400);
   assert.equal((await pro.claim('u2', 'junk')).status, 400);
   assert.equal((await pro.claim('u2', jws(tx({ originalTransactionId: '2000', environment: 'Sandbox' })))).status, 200, 'App Review buys in the sandbox');
@@ -186,7 +186,7 @@ test('notifications without a transaction are fine, and forged ones are refused'
   const { pro, notice } = setup();
   assert.equal((await pro.notify(JSON.stringify({ signedPayload: jws({ notificationType: 'TEST', signedDate: NOW, data: {} }) }))).status, 200);
   assert.equal((await pro.notify('{"signedPayload":"x.y.z"}')).status, 400);
-  const other = await pro.notify(notice('DID_RENEW', tx({ productId: 'com.smitherman.glassesrelay.tip' })));
+  const other = await pro.notify(notice('DID_RENEW', tx({ productId: 'com.talktobridge.bridge.tip' })));
   assert.deepEqual(other, { status: 200, body: { ignored: 'not Bridge Pro' } }, "another product is answered, so Apple stops retrying");
   assert.equal((await pro.notify('nope')).status, 400);
   assert.equal((await pro.notify(JSON.stringify({ signedPayload: 'x'.repeat(70_000) }))).status, 400);

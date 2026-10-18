@@ -7,7 +7,7 @@ final class Store: ObservableObject {
     static let shared = Store()
 
     /// Must match the auto-renewable subscriptions in App Store Connect (one subscription group).
-    static let productIDs = ["com.smitherman.glassesrelay.pro.monthly", "com.smitherman.glassesrelay.pro.yearly"]
+    static let productIDs = ["com.talktobridge.bridge.pro.monthly", "com.talktobridge.bridge.pro.yearly"]
     static let privacyURL = URL(string: "https://stephen3303.github.io/claude-voice-relay/privacy.html")!
     static let termsURL = URL(string: "https://stephen3303.github.io/claude-voice-relay/terms.html")!
 

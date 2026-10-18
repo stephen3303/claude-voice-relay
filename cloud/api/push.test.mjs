@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { makeApns, makeNotifier, APNS_HOSTS, LISTENING_MS } from './push.mjs';
 
-const BUNDLE = 'com.smitherman.glassesrelay';
+const BUNDLE = 'com.talktobridge.bridge';
 const apnsKey = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const PEM = apnsKey.privateKey.export({ type: 'pkcs8', format: 'pem' });
 const TOKEN = 'ab'.repeat(32), VOIP = 'cd'.repeat(32);

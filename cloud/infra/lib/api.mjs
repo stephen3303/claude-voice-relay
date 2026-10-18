@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 const API_DIR = fileURLToPath(new URL('../../api', import.meta.url));
 const LOOK_MODEL = 'us.anthropic.claude-haiku-5-5';   // quick photo answers: fast and cheap
-const BUNDLE_ID = 'com.smitherman.glassesrelay';     // Apple identity tokens' audience, and the push topic
+const BUNDLE_ID = 'com.talktobridge.bridge';     // Apple identity tokens' audience, and the push topic
 const ISSUER = 'https://talktobridge.com';           // Bridge session tokens' issuer
 const APNS_SECRET = 'bridge/apns';                   // { teamId, keyId, key }: cloud/setup/setup-apns.ps1
 
@@ -126,7 +126,7 @@ export class ApiStack extends Stack {
     // through. No API Gateway authorizer: MCP clients need a 401 with a WWW-Authenticate header to
     // find the sign-in, so the Lambda checks its own tokens. Its tokens can't pass the app's authorizer
     // (another audience). The well-known addresses sit at the root because OAuth clients look there.
-    const SERVICES_ID = 'com.smitherman.glassesrelay.web';   // Sign in with Apple for the web (Apple Developer, Identifiers)
+    const SERVICES_ID = 'com.talktobridge.bridge.web';   // Sign in with Apple for the web (Apple Developer, Identifiers)
     const connectorFn = new lambda.Function(this, 'Connector', {
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,

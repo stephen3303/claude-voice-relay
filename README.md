@@ -139,10 +139,10 @@ the same Apple ID as the Bridge app, so it's the same account and the same inbox
 
 One-time setup in Apple Developer (only the account holder can do this):
 1. **Certificates, Identifiers & Profiles → Identifiers → +** → **Services IDs**. Description
-   `Bridge web`, identifier `com.smitherman.glassesrelay.web` (it must be exactly this; it's
+   `Bridge web`, identifier `com.talktobridge.bridge.web` (it must be exactly this; it's
    `SERVICES_ID` in `cloud/infra/lib/api.mjs`).
 2. Open it, tick **Sign in with Apple**, **Configure**: Primary App ID = the Bridge app
-   (`com.smitherman.glassesrelay`, so you get the same account as in the app). Domain: the host of
+   (`com.talktobridge.bridge`, so you get the same account as in the app). Domain: the host of
    the `AppleReturnUrl` output of the Cloud deploy run (`<id>.execute-api.us-east-1.amazonaws.com`).
    Return URL: the `AppleReturnUrl` itself (`https://<id>.execute-api.us-east-1.amazonaws.com/api/oauth/apple`).
    Save, then Continue, then Save.

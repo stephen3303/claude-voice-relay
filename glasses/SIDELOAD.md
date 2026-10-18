@@ -6,7 +6,7 @@ The IPA is unsigned. Sideloadly, Impactor or AltStore signs it with your Apple I
 1. Install iTunes and iCloud from apple.com (not the Microsoft Store versions), then Sideloadly.
 2. Plug the iPhone in with a cable, unlock it and tap Trust.
 3. Download `GlassesRelay.ipa` from this release and drag it into Sideloadly.
-4. Enter your Apple ID and click Start. Leave the bundle ID as `com.smitherman.glassesrelay`
+4. Enter your Apple ID and click Start. Leave the bundle ID as `com.talktobridge.bridge`
    so the Meta AI app still finds Bridge.
 5. On the iPhone: Settings > General > VPN & Device Management, tap your Apple ID, then Trust.
 6. Turn on Developer Mode if iOS asks (Settings > Privacy & Security > Developer Mode) and restart.
@@ -16,7 +16,7 @@ use version 2.7.1 or newer. Apple stopped accepting the sign-in that versions be
 they fail to log in to your Apple ID (HTTP 503, error -80045 or a "Plist error").
 1. Install the Windows x86_64 setup, then plug the iPhone in, unlock it and tap Trust.
 2. Sign in with your Apple ID, drop in `GlassesRelay.ipa` and install. Keep the bundle ID as
-   `com.smitherman.glassesrelay` so the Meta AI app still finds Bridge.
+   `com.talktobridge.bridge` so the Meta AI app still finds Bridge.
 3. Then do Sideloadly steps 5 and 6 on the iPhone.
 
 If sign-in still fails, use Settings > Reset Anisette Data in Impactor and try again. The Impactor
