@@ -1,3 +1,5 @@
+// App Store build only: the first-launch Sign in with Apple screen (not in the public relay repo).
+#if APP_STORE
 import SwiftUI
 import AuthenticationServices
 
@@ -57,3 +59,4 @@ private struct Feature: View {
         }
     }
 }
+#endif

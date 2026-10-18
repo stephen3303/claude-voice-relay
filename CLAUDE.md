@@ -32,6 +32,13 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   repo (`github-pins.json`) live in `%USERPROFILE%\.bridge`. The relay refuses to mount its own folder, `.bridge` or
   anything above them, so agents work on this repo from a second clone.
 
+- `export-public.mjs` — writes the public, self-hosted copy (repo `bridge-relay`): the relay, agent image, hooks and
+  the sideload app with every `#if APP_STORE` branch removed, plus the files in `public/` (README tail, LICENSE,
+  its CI), read from the commit, not the working tree. It fails if anything paid or secret is left, or if a file under
+  `glasses/ios` isn't listed in its `INCLUDE` or `EXCLUDE` (add new app files there). This repo is the source of truth; keep
+  App Store-only Swift inside `#if APP_STORE` (CI builds the exported app as the `public` flavour). bridge-relay must start
+  from a fresh `git init`, never a clone of this repo, or its history would go public; the export refuses one.
+
 ## Build, test, run
 - Relay: `start.ps1` runs it and restarts it if it exits, so to reload after editing `relay.mjs`,
   stop the `node ... relay.mjs` process and it comes back in ~10 s. Check `logs/relay.log`.

@@ -2,10 +2,11 @@
 # personal: unsigned GlassesRelay.ipa artifact (with "Hey Meta"); sign and install it with Sideloadly.
 # appstore: compile check of the App Store flavour (no experimental Meta features, StoreKit Pro).
 #           Shipping it is glasses-appstore.yml.
+# public:   compile check of the app as export-public.mjs writes it for the public bridge-relay repo.
 name: Glasses iOS build
 on:
   push:
-    paths: ["glasses/ios/**", ".github/workflows/glasses-ios.yml"]
+    paths: ["glasses/ios/**", ".github/workflows/glasses-ios.yml", "export-public.mjs", "public/**"]
   workflow_dispatch:
 
 permissions:
@@ -18,12 +19,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        flavor: [personal, appstore]
+        flavor: [personal, appstore, public]
     defaults:
       run:
         working-directory: glasses/ios
     steps:
       - uses: actions/checkout@v4
+
+      - name: Swap in the public export
+        if: matrix.flavor == 'public'
+        working-directory: .
+        run: |
+          node export-public.mjs "$RUNNER_TEMP/public"
+          rm -rf glasses/ios
+          cp -R "$RUNNER_TEMP/public/glasses/ios" glasses/ios
 
       - name: Use newest Xcode (toolkit needs 26.4+)
         uses: maxim-lobanov/setup-xcode@v1

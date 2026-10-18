@@ -1,6 +1,8 @@
 import SwiftUI
+#if APP_STORE
 import StoreKit
 import AuthenticationServices
+#endif
 import Security
 import AVFoundation
 
@@ -10,8 +12,10 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
     @ObservedObject private var store = Store.shared
+    #if APP_STORE
     @ObservedObject private var account = Account.shared
     @ObservedObject private var push = Push.shared
+    #endif
     @AppStorage("relayURL") private var relayURL = ""
     @State private var url = Relay.shared.isDemo || Relay.shared.isCloud ? "" : Relay.shared.baseURL
     @State private var token = Relay.shared.token
@@ -23,9 +27,11 @@ struct SettingsView: View {
     @State private var hiFi = Conversation.hiFiSpeech
     @State private var natural = Conversation.naturalVoice
     @State private var previewer = AVSpeechSynthesizer()
+    #if APP_STORE
     @State private var showPaywall = false
     @State private var showManage = false
     @State private var confirmDelete = false
+    #endif
 
     private enum Mode: String { case cloud, pc, demo }
     private var mode: Binding<Mode> {
@@ -42,7 +48,9 @@ struct SettingsView: View {
             case .pc: relayURL = Relay.pcAddress(url) ?? ""
             }
             testResult = ""
+            #if APP_STORE
             push.refresh()   // the cloud learns whether it can reach this phone
+            #endif
         }
     }
 
@@ -96,11 +104,14 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            #if APP_STORE
             .sheet(isPresented: $showPaywall) { Paywall { showPaywall = false } }
             .manageSubscriptionsSheet(isPresented: $showManage)
+            #endif
         }
     }
 
+    #if APP_STORE
     // MARK: account (App Store build)
 
     private var accountSection: some View {
@@ -140,6 +151,8 @@ struct SettingsView: View {
             Text("With glasses or headphones connected, an agent that wants you rings like a phone call. Otherwise you get a notification.")
         }
     }
+
+    #endif
 
     // MARK: connection
 
@@ -235,6 +248,7 @@ struct SettingsView: View {
         }
     }
 
+    #if APP_STORE
     // MARK: Bridge Pro (App Store build)
 
     private var proSection: some View {
@@ -247,8 +261,10 @@ struct SettingsView: View {
             }
         } header: { Text("Bridge Pro") } footer: { Text(Store.summary) }
     }
+    #endif
 }
 
+#if APP_STORE
 /// The subscription sheet: StoreKit's own view, with restore and the policy links App Review asks for.
 struct Paywall: View {
     var done: () -> Void
@@ -271,3 +287,4 @@ struct Paywall: View {
         }
     }
 }
+#endif

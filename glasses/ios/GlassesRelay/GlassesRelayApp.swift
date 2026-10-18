@@ -3,7 +3,9 @@ import MWDATCore
 
 @main
 struct GlassesRelayApp: App {
+    #if APP_STORE
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate   // push tokens (Push.swift)
+    #endif
     @StateObject private var glasses = GlassesController.shared
 
     init() {
@@ -52,7 +54,9 @@ struct GlassesRelayApp: App {
                 .environmentObject(glasses)
                 .environmentObject(glasses.conversation)
                 .task { await glasses.start() }
+                #if APP_STORE
                 .task { await Account.shared.check() }
+                #endif
                 // Meta AI calls back into the app after registration; only its links go to the toolkit.
                 .onOpenURL { url in
                     guard URLComponents(url: url, resolvingAgainstBaseURL: false)?
