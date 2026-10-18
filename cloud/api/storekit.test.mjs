@@ -169,10 +169,10 @@ test('a refund that lands while the app is reporting the same transaction still 
   const t = jws(tx());
   await pro.claim('u1', t);
   pros.clear();
-  // The claim's check passes, then the refund arrives before its second look.
+  // Reads: the claim, the check before setPro, the check after it. The refund lands between the last two.
   const o = owners.get('1000');
   let reads = 0;
-  owners.get = function (k) { reads++; if (reads === 2) o.revoked.add('1001'); return Map.prototype.get.call(this, k); };
+  owners.get = function (k) { reads++; if (reads === 3) o.revoked.add('1001'); return Map.prototype.get.call(this, k); };
   await pro.claim('u1', t);
   assert.equal(await pro.isPro('u1'), false);
 });

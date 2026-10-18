@@ -58,7 +58,7 @@ final class Store: ObservableObject {
         do {
             try await Relay.shared.cloud("POST", "api/pro", body: ["transaction": jws], timeout: 4)
             reported = jws
-        } catch Relay.Failure.http(let code) where (400..<500).contains(code) && code != 401 {
+        } catch Relay.Failure.http(let code) where code == 400 || code == 409 {
             reported = jws
         } catch {}
         #endif
