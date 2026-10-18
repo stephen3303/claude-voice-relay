@@ -1,7 +1,7 @@
-// GitHub access for agent containers, as a GitHub App instead of the owner's own login.
-// The relay holds the App's private key; each agent turn gets a fresh installation token that covers
-// only that agent's repository, with only contents and pull request access (no workflows, secrets or
-// admin), and only when that repo's default branch is protected. It's revoked when the turn ends.
+// GitHub access for agents' work, as a GitHub App instead of the owner's own login.
+// The relay holds the App's private key; each push gets a fresh installation token that covers only that
+// agent's repository, with only contents and pull request access (no workflows, secrets or admin), and
+// only when that repo's default branch is protected. It's revoked as soon as the push is done.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -150,8 +150,10 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
   return { tokenFor, revoke, identity };
 }
 
-// What each agent turn gets: GH_TOKEN plus the git identity to commit as. Agents never get the owner's
-// own login: with the App, a token for the agent's pinned repo only; else `fallbackToken` (AGENT_GH_TOKEN).
+// Agents never get a GitHub token: they commit, and the relay pushes for them afterwards from a separate
+// container (publish.mjs). This decides which repo a push may go to and with which token: with the App, a
+// token for the agent's pinned repo only; else `fallbackToken` (AGENT_GH_TOKEN). It also gives each turn
+// the git identity to commit as, never the owner's when the App is set up.
 //
 // Agents can rewrite their repo's .git/config, so each folder's GitHub repo is pinned in `pinsFile` the
 // first time it's read and kept across agents and restarts: a changed origin must not get a token for
@@ -192,33 +194,50 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     return pins[key];
   }
 
-  const issued = new Set(); // App tokens handed to turns that haven't ended
-
-  async function env(a) {
-    let token = fallbackToken, who = hostGit;
-    if (ghApp) {
-      // Never the owner's identity on the App's pushes: without the bot's, the turn gets no token.
-      who = (await ghApp.identity()) || AGENT_FALLBACK;
-      const remote = parseRemote(await getRemote(a.repoPath));
-      const slug = remote && `${remote.owner}/${remote.repo}`.toLowerCase();
-      const pinned = slug && pin(a, slug);
-      if (!slug) log(`${a.name} has no GitHub origin remote, so no GitHub token.`);
-      else if (pinned && slug !== pinned) log(`${a.name}: origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in ${path.basename(pinsFile)} if that was you.`);
-      token = slug && slug === pinned && who !== AGENT_FALLBACK ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
-      if (token) issued.add(token);
-    }
+  // The git identity a turn commits as: the App's bot user when the App is set up, else the host's.
+  async function identity() {
+    const who = ghApp ? (await ghApp.identity()) || AGENT_FALLBACK : hostGit;
     return {
-      GH_TOKEN: token || '',
       GIT_AUTHOR_NAME: who.name, GIT_COMMITTER_NAME: who.name,
       GIT_AUTHOR_EMAIL: who.email, GIT_COMMITTER_EMAIL: who.email,
     };
   }
 
-  // Called when the turn ends: its App token is revoked (AGENT_GH_TOKEN is the owner's to manage).
-  async function release(vars) {
-    if (!issued.delete(vars?.GH_TOKEN)) return;
-    await ghApp.revoke(vars.GH_TOKEN);
+  // Called before each turn, so a new folder is pinned to its origin before the agent can change it.
+  async function pinNow(a) {
+    if (!ghApp && !fallbackToken) return;
+    const remote = parseRemote(await getRemote(a.repoPath));
+    if (remote) pin(a, `${remote.owner}/${remote.repo}`.toLowerCase());
   }
 
-  return { env, release, isPinned: (repoPath) => !!pins?.[keyOf(repoPath)] };
+  const issued = new Set(); // App tokens handed out and not yet released
+
+  // { token, owner, repo } for pushing the agent's work to its own GitHub repo, or null.
+  async function credentials(a) {
+    const remote = parseRemote(await getRemote(a.repoPath));
+    if (!remote) { log(`${a.name} has no GitHub origin remote, so no GitHub token.`); return null; }
+    if (!ghApp && !fallbackToken) return null;
+    // Pinned with AGENT_GH_TOKEN too: it may cover more repos than this one.
+    const slug = `${remote.owner}/${remote.repo}`.toLowerCase();
+    // Only read here: pins are made before the turn (pinNow), never from what the agent left in .git/config.
+    const pinned = pins?.[keyOf(a.repoPath)];
+    if (!pinned) { log(`${a.name}'s folder isn't pinned to a GitHub repo; no GitHub token.`); return null; }
+    if (slug !== pinned) {
+      log(`${a.name}: origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in ${path.basename(pinsFile)} if that was you.`);
+      return null;
+    }
+    if (!ghApp) return { token: fallbackToken, ...remote };
+    const token = await ghApp.tokenFor(remote.owner, remote.repo);
+    if (!token) return null;
+    issued.add(token);
+    return { token, ...remote };
+  }
+
+  // Called once the push is done: an App token is revoked (AGENT_GH_TOKEN is the owner's to manage).
+  async function release(creds) {
+    if (!issued.delete(creds?.token)) return;
+    await ghApp.revoke(creds.token);
+  }
+
+  return { identity, pinNow, credentials, release, isPinned: (repoPath) => !!pins?.[keyOf(repoPath)] };
 }

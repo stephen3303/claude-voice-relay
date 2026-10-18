@@ -86,11 +86,14 @@ The phone reaches the relay over HTTPS with `tailscale serve --bg 47879`. In the
 Tested from my phone: the relay has been verified end to end from an iPhone.
 
 ## GitHub access for agents
-Agents push with their own GitHub App, never your login. Each turn the relay hands the agent's
-container a fresh token that only covers that agent's repository, with contents and pull request
-access and nothing else (no workflows, secrets, settings or other repos), and revokes it when the
-turn ends. Their commits and pull requests show as `<app-name>[bot]`. A token also lasts at most an
-hour, so a turn longer than that can't push at the end.
+Agents never hold a GitHub token, yours or any other. They commit on a branch and ask for it to be
+pushed; after the turn the relay mints a token from its own GitHub App that only covers that agent's
+repository, with contents and pull request access and nothing else (no workflows, secrets, settings
+or other repos). One throwaway container copies the branch out of the repo with no token and no
+network, and a second one, which gets the token and nothing of the agent's but that copy, pushes it.
+The relay opens the pull request (or updates the open one), says which, and revokes the token
+straight away. Commits and pull requests show as `<app-name>[bot]`. Agents can't
+use `gh` or fetch private repos, since they have no credentials.
 
 The relay only hands out a token for a repo whose default branch is protected as below, and never
 lets an agent work in the relay's own folder (it could change the code your PC runs) or in a folder
@@ -121,8 +124,8 @@ approval doesn't count, so nothing merges without you.
    and `.env` gets `GITHUB_APP_ID` and `GITHUB_APP_KEY_FILE`.
 2. On the install page that opens: **Only select repositories**, pick the repos agents may push to,
    **Install**. Add more later under GitHub **Settings → Applications → Installed GitHub Apps**.
-3. `npm run build-agent`, then restart the relay. Older agent containers are replaced on their next
-   turn; their sessions are kept.
+3. `npm run build-agent`, then restart the relay. Older agent containers (which still had a
+   credential helper, or your old token) are replaced on their next turn; their sessions are kept.
 
 Without the App you can put a fine-grained token in `AGENT_GH_TOKEN` instead (GitHub **Settings →
 Developer settings → Fine-grained tokens**, only the agents' repos, Contents and Pull requests
