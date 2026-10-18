@@ -65,6 +65,7 @@ final class Conversation: NSObject, ObservableObject {
     }
     /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
     private var onHiFi = false
+    private var formatRetries = 0
 
     /// Pause after you stop talking before your turn is sent.
     private var endOfTurn: TimeInterval { Self.readBack ? 1.4 : 2.0 }
@@ -156,6 +157,8 @@ final class Conversation: NSObject, ObservableObject {
     // MARK: listening
 
     private func startListening() {
+        // A route change (the switch back from A2DP) can restart listening while a retry is queued; never run two.
+        stopListening()
         heard = ""
         phase = .listening
         let req = SFSpeechAudioBufferRecognitionRequest()
@@ -166,7 +169,12 @@ final class Conversation: NSObject, ObservableObject {
         if onHiFi { try? useGlassesMic(report: false) }
         let input = engine.inputNode
         // Right after switching back from A2DP the mic can briefly have no format; try again in a moment.
-        guard input.outputFormat(forBus: 0).sampleRate > 0 else { restartSoon(); return }
+        guard input.outputFormat(forBus: 0).sampleRate > 0 else {
+            formatRetries += 1
+            if formatRetries >= 3 { status = "Mic unavailable, still trying" }
+            restartSoon(); return
+        }
+        formatRetries = 0
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { [weak req] buffer, _ in
             req?.append(buffer)
@@ -176,7 +184,8 @@ final class Conversation: NSObject, ObservableObject {
 
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             Task { @MainActor in
-                guard let self, self.phase == .listening else { return }
+                // Only the current session: a cancelled one still calls back once.
+                guard let self, self.phase == .listening, self.request === req else { return }
                 if let result {
                     self.heard = result.bestTranscription.formattedString
                     self.armSilenceTimer()
