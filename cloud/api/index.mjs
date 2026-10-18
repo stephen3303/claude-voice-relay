@@ -170,9 +170,10 @@ const speak = makeSpeak({
 
 // Bridge Pro (storekit.mjs). pk PRO#<originalTransactionId>, sk OWNER: the account the subscription belongs to and
 // its refunded transaction IDs, outside USER#<sub> so a refund outlives the account. pk USER#<sub>, sk PRO: until when.
+// Reads are strongly consistent, so a refund written a moment ago is seen.
 const proStore = {
   async owner(tx) {
-    const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' } }));
+    const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' }, ConsistentRead: true }));
     return r.Item ?? null;
   },
   async claim(tx, user) {
@@ -195,7 +196,7 @@ const proStore = {
     return r.Attributes?.user ?? null;
   },
   async getPro(user) {
-    const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: 'PRO' } }));
+    const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: 'PRO' }, ConsistentRead: true }));
     return r.Item ?? null;
   },
   async setPro(user, { tx, transactionId, product, env, until }) {
