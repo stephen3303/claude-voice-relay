@@ -10,11 +10,15 @@ struct HelpView: View {
                 Section("Getting started") {
                     HelpItem("1. Connect your glasses", "In Settings, tap Connect to Meta AI and approve Bridge in the Meta AI app. Then tap Allow camera if you want photos.")
                     #if APP_STORE
-                    HelpItem("2. Choose a connection", "Sign in with Apple to use Bridge Cloud, or connect your own PC running the Bridge relay. Demo gives sample replies so you can try it first.")
+                    HelpItem("2. Sign in", "In Settings, sign in with Apple. Your agents run in Bridge Cloud, so there's nothing else to set up. Demo gives sample replies so you can try it first.")
                     #else
                     HelpItem("2. Connect your PC", "In Settings, choose My PC and enter your relay's address and VOICE_TOKEN, then tap Save and test. Demo gives sample replies so you can try it first.")
                     #endif
+                    #if APP_STORE
+                    HelpItem("3. Start talking", "Tap Talk, say \"Hey Siri, talk to Bridge\", or use the Action Button. Bridge says \"Go ahead\" when it's listening.")
+                    #else
                     HelpItem("3. Start talking", "Say \"Hey Meta, start Bridge\", or tap Talk. Bridge says \"Go ahead\" when it's listening.")
+                    #endif
                 }
                 Section("Talking to your agents") {
                     HelpItem("Start a task", "Begin with \"in\" and the project's name: \"In trading bot, add a stop-loss check.\"")
@@ -36,9 +40,17 @@ struct HelpView: View {
                 }
                 Section("If something isn't working") {
                     HelpItem("Bridge can't hear you", "Make sure the glasses are connected to your phone over Bluetooth. Bridge uses the glasses microphone when it can, and the phone's otherwise.")
+                    #if APP_STORE
+                    HelpItem("Bridge can't reach Bridge Cloud", "Check that your phone is online and you're signed in. Then tap Test in Settings, under Connection.")
+                    #else
                     HelpItem("\"Couldn't reach your PC\"", "Check that the relay is running and that your phone is on the same Tailscale network. Then use Save and test in Settings.")
+                    #endif
                     HelpItem("Photos don't work", "In Settings, tap Allow camera, then Test photo. The glasses must be on and nearby.")
-                    Link("More help on the website", destination: URL(string: "https://stephen3303.github.io/claude-voice-relay/support.html")!)
+                    #if APP_STORE
+                    Link("More help on the website", destination: URL(string: "https://talktobridge.com/support.html")!)
+                    #else
+                    Link("More help on GitHub", destination: URL(string: "https://github.com/stephen3303/claude-voice-relay#readme")!)
+                    #endif
                 }
             }
             .navigationTitle("Help")
