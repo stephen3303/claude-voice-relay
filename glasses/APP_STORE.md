@@ -106,10 +106,11 @@ Must match https://talktobridge.com/privacy.html and `PrivacyInfo.xcprivacy`. No
 - **Purchases > Purchase history:** linked, app functionality (Bridge Pro transactions checked by Bridge Cloud).
 - **User content > Photos:** linked, app functionality (photos the user asks about or sends to an agent).
 - **User content > Other user content:** linked, app functionality (task text and agents' messages).
+- **Usage data > Product interaction:** linked, app functionality (daily natural-voice characters and photo answers, kept 3 days, for limits).
 - **Diagnostics > Crash data, Performance data, Other diagnostic data:** not linked, app functionality (Sentry).
 
 Not collected: contact info (no email is requested; the first name stays on the phone), audio,
-location, usage data.
+location. Push tokens are only used to deliver the user's own calls and notifications.
 
 ## Screenshots
 
