@@ -16,6 +16,8 @@ const INBOX_KEEP_S = 7 * 24 * 3600;   // inbox messages are kept a week (DynamoD
 const PHOTO_MAX = 10 * 1024 * 1024;
 const TOKEN = /^[0-9a-f]{32,200}$/i;   // APNs device tokens are hex
 const SPEAK_MAX = 3000;               // Polly's SynthesizeSpeech limit, in characters
+const SPEECH_USER_DAY = 60_000;       // characters of natural voice per account per day (about $1.80 of Polly)
+const SPEECH_ALL_DAY = 1_000_000;     // and across every account (about $30): a hard ceiling on the bill
 const TEST_CALL = 'This is Bridge, checking that I can reach you. Say goodbye to hang up.';
 
 export const LOOK_PROMPT = [
@@ -31,8 +33,18 @@ export const LOOK_PROMPT = [
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
+ * deps.store.spendSpeech(key, day, chars, max) -> false when that would take key's total for day past max
  * deps.now() -> ms, deps.sleep(ms)
  */
+// What was said: the body's JSON "text", or the plain-text body. null for JSON without a string "text".
+function saidOf(raw) {
+  const body = raw.toString('utf8');
+  let j;
+  try { j = JSON.parse(body); } catch { return body.trim(); }
+  if (j && typeof j === 'object') return typeof j.text === 'string' ? j.text.trim() : null;
+  return body.trim();   // a bare number or string that happens to parse as JSON
+}
+
 export function makeHandler(deps) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -112,16 +124,8 @@ export function makeHandler(deps) {
     const route = `${event.requestContext.http.method} ${event.rawPath.replace(/^\/api/, '')}`;
     const raw = event.body ? Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8') : Buffer.alloc(0);
     try {
-      if (route === 'POST /voice/confirm') {
-        let said = raw.toString('utf8');
-        try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
-        return text(200, await confirm(user, said.trim()));
-      }
-      if (route === 'POST /voice/send') {
-        let said = raw.toString('utf8');
-        try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
-        return text(200, await send(user, said.trim()));
-      }
+      if (route === 'POST /voice/confirm') return text(200, await confirm(user, saidOf(raw) ?? ''));
+      if (route === 'POST /voice/send') return text(200, await send(user, saidOf(raw) ?? ''));
       if (route === 'GET /voice/inbox') {
         // A conversation is open while the app long-polls, so agents' messages need no push.
         // A one-off check (wait=0, e.g. Settings > Test connection) isn't a conversation.
@@ -152,11 +156,15 @@ export function makeHandler(deps) {
         return json(200, { ok: true });
       }
       if (route === 'POST /voice/tts') {
-        // The line the app is about to speak, as MP3. Any failure is a non-200, so the app uses the phone's voice.
-        let said = raw.toString('utf8');
-        try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
-        said = said.trim().slice(0, SPEAK_MAX);
+        // The line the app is about to speak, as MP3. Anything but a 200 makes the app use the phone's voice,
+        // so a line too long for one Polly call, or past the day's budget, is read whole by the phone instead.
+        const said = saidOf(raw);
         if (!said) return text(400, 'Nothing to say.');
+        const chars = [...said].length;
+        if (chars > SPEAK_MAX) return text(413, 'Too long for the cloud voice.');
+        const day = new Date(now()).toISOString().slice(0, 10);
+        if (!await deps.store.spendSpeech(`USER#${user}`, day, chars, SPEECH_USER_DAY)) return text(429, 'Cloud voice budget used up today.');
+        if (!await deps.store.spendSpeech('ALL', day, chars, SPEECH_ALL_DAY)) return text(429, 'Cloud voice budget used up today.');
         const mp3 = await deps.speak(said);
         return { statusCode: 200, headers: { 'content-type': 'audio/mpeg' }, body: Buffer.from(mp3).toString('base64'), isBase64Encoded: true };
       }

@@ -42,6 +42,21 @@ const store = {
     } }));
     return id;
   },
+  // Natural-voice characters spent today, per account and in total (pk ALL). Refused, and not counted, past max.
+  async spendSpeech(key, day, chars, max) {
+    try {
+      await db.send(new UpdateCommand({
+        TableName: TABLE, Key: { pk: key, sk: `SPEECH#${day}` },
+        UpdateExpression: 'ADD n :c SET expires = if_not_exists(expires, :exp)',
+        ConditionExpression: 'attribute_not_exists(n) OR n <= :room',
+        ExpressionAttributeValues: { ':c': chars, ':room': max - chars, ':exp': Math.floor(Date.now() / 1000) + 3 * 86400 },
+      }));
+      return true;
+    } catch (e) {
+      if (e.name === 'ConditionalCheckFailedException') return false;
+      throw e;
+    }
+  },
   async messagesAfter(user, after) {
     const r = await db.send(new QueryCommand({
       TableName: TABLE, KeyConditionExpression: 'pk = :pk AND sk > :from',
@@ -144,17 +159,31 @@ async function look(jpeg, said) {
   return r.output?.message?.content?.find((c) => c.text)?.text?.trim() || "I couldn't make out the photo.";
 }
 
-// The app's spoken replies. The generative engine is Polly's most natural; Ruth also has a neural voice,
-// used if the generative one fails (throttling, or a region without it).
+// The app's spoken replies. The generative engine is Polly's most natural. Ruth also has a neural voice, tried
+// only when the generative one is throttled or unavailable. Each call has a time limit, so both fit inside the
+// app's 20 s wait instead of producing audio nobody hears.
+const RETRY_NEURAL = new Set(['ThrottlingException', 'ServiceFailureException', 'EngineNotSupportedException']);
+const spoken = new Map();   // short fixed lines ("Sent.") are spoken again and again: keep their audio
 async function speak(text) {
+  const cached = spoken.get(text);
+  if (cached) return cached;
   const params = { Text: text, VoiceId: SPEECH_VOICE, OutputFormat: 'mp3', SampleRate: '24000' };
-  let r;
-  try { r = await polly.send(new SynthesizeSpeechCommand({ ...params, Engine: 'generative' })); }
+  const synth = async (Engine) => {
+    const r = await polly.send(new SynthesizeSpeechCommand({ ...params, Engine }), { abortSignal: AbortSignal.timeout(9000) });
+    return r.AudioStream.transformToByteArray();
+  };
+  let mp3;
+  try { mp3 = await synth('generative'); }
   catch (e) {
+    if (!RETRY_NEURAL.has(e.name)) throw e;
     console.warn('generative speech failed, using neural:', e.name, e.message);
-    r = await polly.send(new SynthesizeSpeechCommand({ ...params, Engine: 'neural' }));
+    mp3 = await synth('neural');
   }
-  return r.AudioStream.transformToByteArray();
+  if (text.length <= 120) {
+    if (spoken.size >= 200) spoken.delete(spoken.keys().next().value);
+    spoken.set(text, mp3);
+  }
+  return mp3;
 }
 
 // Cloud agents (Fargate, GitHub App) are build step 4 in cloud/DESIGN.md. Until then a confirmed task
