@@ -179,19 +179,14 @@ final class GlassesController: ObservableObject {
             }
         }
 
-        #if APP_STORE
         // App Store build: the standalone photo capability is experimental (Meta won't allow it in
-        // published apps yet), so take the still from the camera stream, which is not.
+        // published apps yet), so take the still from the camera stream, which is not. The personal
+        // build tries the standalone photo first and falls back to the stream, so both run it at medium.
         guard let camera = try session.addCamera(config: StreamConfiguration(
             videoCodec: .hvc1, audioCodec: nil, resolution: .medium, frameRate: 7))
         else { throw PhotoFailure.failed("The camera would not start.") }
-        #else
-        guard let camera = try session.addCamera(config: StreamConfiguration(
-            videoCodec: .hvc1, audioCodec: nil, resolution: .low, frameRate: 7))
-        else { throw PhotoFailure.failed("The camera would not start.") }
-        #endif
 
-        enum Event { case streaming, streamStopped, photoReady, photoStopped, progress, photo(Data), error(String), timeout(Int, PhotoFailure) }
+        enum Event { case streaming, streamStopped, photoReady, photoStopped, progress(UInt64, UInt64), photo(Data), error(String), timeout(Int, PhotoFailure) }
         let (events, emit) = AsyncStream<Event>.makeStream()
         let tokens = ListenerTokenBag()
         defer { Task { await tokens.cancelAll() } }
@@ -203,9 +198,8 @@ final class GlassesController: ObservableObject {
             }
         }.store(in: tokens)
         camera.stream.errorPublisher.listen { error in emit.yield(.error(error.localizedDescription)) }.store(in: tokens)
-        #if APP_STORE
         camera.stream.photoDataPublisher.listen { data in emit.yield(.photo(data.data)) }.store(in: tokens)
-        #else
+        #if !APP_STORE
         camera.photo.statePublisher.listen { state in
             switch state {
             case .started: emit.yield(.photoReady)
@@ -215,7 +209,7 @@ final class GlassesController: ObservableObject {
         }.store(in: tokens)
         camera.photo.photoDataPublisher.listen { data in emit.yield(.photo(data.imageData)) }.store(in: tokens)
         camera.photo.errorPublisher.listen { error in emit.yield(.error(error.description)) }.store(in: tokens)
-        camera.photo.transferProgressPublisher.listen { _ in emit.yield(.progress) }.store(in: tokens)
+        camera.photo.transferProgressPublisher.listen { p in emit.yield(.progress(p.bytesReceived, p.totalBytes)) }.store(in: tokens)
         #endif
 
         // One watchdog, re-armed per stage, so a slow wake-up and a slow transfer each get their
@@ -237,15 +231,33 @@ final class GlassesController: ObservableObject {
         arm(15, .cameraDidNotStart)
         var photoStarting = false, shutterReady = false, fired = false
         #if !APP_STORE
+        // The standalone photo is experimental, and in testing the shutter fired but the
+        // picture never crossed. So if it fails, take the still from the video stream instead (the
+        // App Store build's path), and say on the home screen what happened to the first try.
+        var fellBack = false, streamFired = false, bytes: (UInt64, UInt64)?
         func fire() {
             fired = true
             // Medium keeps the Bluetooth transfer quick; plenty for Claude to read a screen or sign.
             camera.photo.capturePhoto(resolution: .medium, quality: .medium)
-            arm(20, .photoNeverArrived)
+            arm(8, .photoNeverArrived)   // about a second when it works; progress buys more time
+        }
+        func fallBack(_ why: String) {
+            fellBack = true
+            let crossed = bytes.map { " \($0.0) of \($0.1) bytes arrived." } ?? " No bytes arrived."
+            lastError = "Glasses photo: the full photo failed (\(why)).\(crossed) Trying a still from the video stream instead."
+            camera.photo.stop()
+            camera.stream.start()
+            arm(15, .photoNeverArrived)
         }
         #endif
         for await event in events {
             switch event {
+            #if !APP_STORE
+            case .streaming where fellBack && !streamFired:
+                streamFired = true
+                guard camera.stream.capturePhoto(format: .jpeg) else { throw PhotoFailure.cameraBusy }
+                arm(15, .photoNeverArrived)
+            #endif
             case .streaming where !photoStarting && !fired:
                 #if APP_STORE
                 fired = true
@@ -269,18 +281,24 @@ final class GlassesController: ObservableObject {
                 if camera.stream.state == .stopped { fire() } else { arm(5, .cameraBusy) }
             case .streamStopped where shutterReady && !fired:
                 fire()
-            case .photoStopped where fired:
+            case .photoStopped where fired && !fellBack:
                 // Possibly just the end of a good capture with the data still on its way; give it a beat.
                 arm(3, .photoNeverArrived)
+            case .error(let why) where fired && !fellBack:
+                fallBack(why)
+            case .timeout(let gen, .photoNeverArrived) where gen == generation && fired && !fellBack:
+                fallBack("it never arrived")
             #endif
             case .streamStopped, .photoReady, .photoStopped:
                 break
-            case .progress:
+            case .progress(let received, let total):
+                #if !APP_STORE
+                bytes = (received, total)
+                #endif
                 arm(15, .photoNeverArrived)   // bytes are still crossing; keep waiting
             case .photo(let jpeg):
-                #if APP_STORE
                 camera.stream.stop()
-                #else
+                #if !APP_STORE
                 camera.photo.stop()
                 #endif
                 return jpeg
