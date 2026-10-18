@@ -56,8 +56,9 @@
 
     <h2>Claude Code and Anthropic</h2>
     <p>On your PC, the relay runs Claude Code, which sends your prompts and photos to Anthropic under your own Claude account. That processing is governed by Anthropic's terms and privacy policy, not by me.</p>
-    <h2>Optional natural voice (OpenAI)</h2>
+    <h2>Optional natural voice (OpenAI and Amazon Polly)</h2>
     <p>Natural voice is off by default. If you turn it on in the app's settings and have added your own OpenAI API key to the relay on your PC, the relay sends the text of each answer to OpenAI to turn it into speech, under your own OpenAI account and OpenAI's terms and privacy policy. Otherwise answers are spoken by your iPhone and nothing goes to OpenAI.</p>
+    <p>With Bridge Cloud and Bridge Pro, turning on Natural voice sends the text of each answer to Amazon Polly, on Bridge's Amazon Web Services account, to turn it into speech. Bridge Cloud counts the characters for a daily limit but doesn't store the text. With Natural voice off, nothing goes to Polly.</p>
 
     <h2>Crash and error reports</h2>
     <p>When the app crashes, freezes, or a step fails (for example the glasses camera or a call to your relay), it sends a report to Sentry, a crash reporting service, under Sentry's privacy policy. A report holds the error, where in the app it happened, the app version, and the iPhone's model, iOS version and state (such as free memory and battery). It holds no name, account, audio, text of what you say, photos, answers, PC address or relay token, and it is not linked to you. Sentry is set not to store IP addresses. Reports are used only to fix Bridge.</p>
