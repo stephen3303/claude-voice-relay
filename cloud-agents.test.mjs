@@ -85,15 +85,16 @@ test('runCloud rejects when claude is not installed', async () => {
   await assert.rejects(runCloud({ spawn, claudeBin: '/usr/bin/claude', env: {}, cwd: '/p', prompt: 'x', timeoutMs: 1000 }), /ENOENT/);
 });
 
-function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true, unsafe = false } = {}) {
-  const runs = [], said = [], spoken = [], checked = [];
+function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true, unsafe = false, during } = {}) {
+  const runs = [], said = [], spoken = [], checked = [], saves = [];
   const cloudTurn = makeCloudTurn({
-    run: async (o) => { runs.push(o); if (reply instanceof Error) throw reply; return reply; },
+    run: async (o) => { runs.push(o); if (during) during(o); if (reply instanceof Error) throw reply; return reply; },
+    save: () => saves.push(1),
     checkRepo: async (a) => { checked.push(a.name); return why; },
     unsafe: () => unsafe,
     exists: () => exists, say: (t, o) => said.push(o?.spoken ?? t), speakResult: (a, r) => spoken.push(r.result),
   });
-  return { cloudTurn, runs, said, spoken, checked };
+  return { cloudTurn, runs, said, spoken, checked, saves };
 }
 const newAgent = () => ({ name: 'trading bot', repoPath: '/p/trading-bot', cloudNew: true });
 
@@ -101,7 +102,8 @@ test('cloudTurn starts a new task as a session after the repo check, then contin
   const h = turnHarness();
   const a = newAgent();
   await h.cloudTurn(a, 'add a stop-loss');
-  assert.deepEqual(h.runs[0], { cwd: '/p/trading-bot', sessionId: undefined, prompt: 'add a stop-loss' });
+  const { cwd, sessionId, prompt } = h.runs[0];
+  assert.deepEqual({ cwd, sessionId, prompt }, { cwd: '/p/trading-bot', sessionId: undefined, prompt: 'add a stop-loss' });
   assert.deepEqual(h.checked, ['trading bot']);
   assert.deepEqual(h.spoken, ['SPOKEN: Done.']);
   assert.equal(a.cloudId, 'cse_1');
@@ -192,4 +194,32 @@ test('runCloud refuses a claude that is not a full path, or lives in the project
     await assert.rejects(runCloud({ spawn, claudeBin, env: {}, cwd: '/p/trading-bot', prompt: 'x' }), /CLAUDE_BIN/, String(claudeBin));
   }
   assert.equal(calls.length, 0);
+});
+
+test('a new session id is saved as soon as the CLI reports it, and the child is kept for stop', async () => {
+  const seen = {};
+  const a = newAgent();
+  const h = turnHarness({ during: (o) => {
+    o.onSpawn('child');
+    seen.proc = a.proc;
+    o.onSession('cse_5', 'https://claude.ai/code/cse_5');
+    seen.id = a.cloudId;
+  } });
+  await h.cloudTurn(a, 'x');
+  assert.equal(seen.proc, 'child');
+  assert.equal(seen.id, 'cse_5'); // before the turn finished
+  assert.equal(h.saves.length, 1);
+  assert.equal(a.proc, null);
+});
+
+test('runCloud passes a leading slash as words, not as a slash command, and reports the session early', async () => {
+  const { spawn, calls } = fakeSpawn({ stderr: 'Cloud session: cse_8 (https://claude.ai/code/cse_8)\n',
+    stdout: JSON.stringify({ is_error: false, result: 'SPOKEN: Ok.', session_id: 'cse_8' }) });
+  const sessions = [];
+  let child;
+  await runCloud({ spawn, claudeBin: '/usr/bin/claude', env: {}, cwd: '/p', prompt: '/logout please',
+    onSession: (id) => sessions.push(id), onSpawn: (p) => { child = p; } });
+  assert.equal(calls[0].input, 'The user said: /logout please');
+  assert.deepEqual(sessions, ['cse_8']);
+  assert.ok(child);
 });

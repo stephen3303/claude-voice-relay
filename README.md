@@ -135,20 +135,29 @@ read and write, an expiry). It acts as you, so the rulesets can't tell agents ap
 With `AGENT_MODE=cloud` in `.env`, each voice task runs as a claude.ai cloud session instead of a
 Docker container, so the conversation shows up in the Claude app (**Code** tab) and at claude.ai/code
 with its full transcript, and you can pick it up there. The relay still speaks the replies.
+- **How a turn works:** the relay runs `claude -p --cloud` from the project folder and waits for the
+  session's answer, up to 60 minutes; meanwhile the agent is busy and what you say to it is queued.
+  After 60 minutes you hear "no answer", and the session carries on in the app. The session's id is
+  saved as soon as it exists, so a relay restart mid-turn doesn't lose it, but that turn's answer is
+  then only in the app.
 - The session works on the project folder's GitHub remote at its current branch (what's pushed, not
-  local changes), and pushes and opens its pull request itself through the Claude GitHub app, not the
-  relay's GitHub App. The relay still only starts one for a repo that passes the same check as
-  before a relay push (protected default branch, CODEOWNERS, the App installed), because those
-  rules are what stop any bot, the Claude GitHub app included, from changing main on its own.
-  So cloud mode needs the GitHub App below; `AGENT_GH_TOKEN` alone isn't enough.
+  local changes), and pushes and opens its pull request itself through the **Claude GitHub app**, not
+  the relay's GitHub App. Before starting one, the relay checks that repo the way it does before its
+  own pushes (protected default branch, CODEOWNERS, the relay's App installed), so cloud mode needs
+  the GitHub App below; `AGENT_GH_TOKEN` alone isn't enough.
+- **What that check doesn't cover:** unlike the relay's per-repo token, the Claude GitHub app can push
+  to every repo you've granted it, and a ruleset doesn't stop anyone on its bypass list. So, once:
+  in GitHub **Settings → Applications → Claude → Configure**, give it **Only select repositories**
+  (your agents' repos); and in each repo's "Protect main" ruleset, keep the **Bypass list empty**.
 - It needs Claude Code on the PC signed in with your claude.ai account: run `claude auth login` once
   (and `claude update`; older versions don't wait for a follow-up's answer, so you hear "sent" and read it in the app).
-  The `CLAUDE_CODE_OAUTH_TOKEN` setup token can't start cloud sessions; the relay keeps it away from them.
-- The relay starts `claude` without a shell, like the photo answers do, so it must be the native
-  install (`claude.exe`, from `irm https://claude.ai/install.ps1 | iex`), not npm's `claude.cmd`;
-  or set `CLAUDE_BIN` in `.env` to the full path of `claude.exe`.
+  The `CLAUDE_CODE_OAUTH_TOKEN` setup token can't start cloud sessions; the relay keeps it, and the
+  rest of `.env`, away from them, and loads only your user settings, not the project folder's.
+- The relay starts `claude` by its full path from PATH (never from the project folder), without a
+  shell, so it must be the native install (`claude.exe`, from `irm https://claude.ai/install.ps1 | iex`),
+  not npm's `claude.cmd`; or set `CLAUDE_BIN` in `.env` to the full path of `claude.exe`.
 - Photos can't go to cloud agents (they're files on the PC); quick "what am I looking at" photos still work.
-- "Stop" only stops the relay listening; stop the session itself in the Claude app.
+- "Stop" ends the relay's wait; stop the session itself in the Claude app.
 
 ## Use Bridge from Claude (custom connector)
 Bridge Cloud is also a remote MCP server, so Claude (claude.ai, the Claude apps, Claude Code) can

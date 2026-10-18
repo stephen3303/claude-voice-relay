@@ -63,7 +63,8 @@ const ENV_ALLOW = new Set(['PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'HOMEDRIVE'
   'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'SYSTEMROOT', 'SYSTEMDRIVE',
   'WINDIR', 'COMSPEC', 'OS', 'COMPUTERNAME', 'ALLUSERSPROFILE', 'PUBLIC', 'COMMONPROGRAMFILES', 'PROCESSOR_ARCHITECTURE',
   'NUMBER_OF_PROCESSORS', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR',
-  'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE']);
+  'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'CLAUDE_CODE_GIT_BASH_PATH',
+  'PROGRAMW6432', 'COMMONPROGRAMFILES(X86)', 'COMMONPROGRAMW6432']);
 export function cloudEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([k]) => ENV_ALLOW.has(k.toUpperCase())));
 }
@@ -86,14 +87,19 @@ export function parseCloud(out, err, code) {
 // The CLI waits on a remote session, so a hung sign-in, network or session would keep the agent busy for
 // good: after timeoutMs it's killed. The cloud session itself carries on and stays in the Claude app.
 export const CLOUD_TIMEOUT_MS = 60 * 60_000;
-// A failure after the session was created carries its id (e.sessionId, e.url): the CLI notes
-// "Cloud session: <id> (<url>)" on stderr as soon as it exists, so a reply can still reach it.
-export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeoutMs = CLOUD_TIMEOUT_MS }) {
+// The CLI notes "Cloud session: <id> (<url>)" on stderr as soon as the session exists: onSession gets it
+// then (so it can be saved before the turn ends), and a later failure carries it (e.sessionId, e.url).
+// onSpawn gets the child, so "stop" or the relay exiting can kill it.
+// In print mode a prompt starting with "/" would run as a slash command on this PC, not reach the session.
+export const asTask = (prompt) => (/^\s*\//.test(prompt) ? `The user said: ${prompt.trim()}` : prompt);
+export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeoutMs = CLOUD_TIMEOUT_MS,
+  onSpawn = () => {}, onSession = () => {} }) {
   return new Promise((resolve, reject) => {
     if (!claudeBin || !path.isAbsolute(claudeBin) || insideFolder(claudeBin, cwd)) {
       return reject(new Error("Claude Code wasn't found on this PC's PATH, outside the project folder. Install it, or set CLAUDE_BIN to claude.exe's full path."));
     }
     const p = spawn(claudeBin, cloudArgs(sessionId), { cwd, windowsHide: true, env: cloudEnv(env) });
+    onSpawn(p);
     let out = '', err = '', timedOut = false, created = null;
     const timer = setTimeout(() => { timedOut = true; p.kill(); }, timeoutMs);
     const fail = (e) => reject(created ? Object.assign(e, created) : e);
@@ -101,7 +107,7 @@ export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeou
     p.stderr.on('data', (d) => {
       err = (err + d).slice(-4000);
       const m = !created && /Cloud session: (\S+) \((https:\/\/\S+)\)/.exec(err);
-      if (m && SESSION_ID.test(m[1])) created = { sessionId: m[1], url: m[2] };
+      if (m && SESSION_ID.test(m[1])) { created = { sessionId: m[1], url: m[2] }; onSession(m[1], m[2]); }
     });
     p.on('error', (e) => { clearTimeout(timer); reject(e); });
     p.on('close', (code) => {
@@ -110,7 +116,7 @@ export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeou
       try { resolve(parseCloud(out, err, code)); } catch (e) { fail(e); }
     });
     p.stdin.on('error', () => {});
-    p.stdin.end(prompt);
+    p.stdin.end(asTask(prompt));
   });
 }
 
@@ -118,7 +124,7 @@ export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeou
 // a new task starts a cloud session; a reply goes to a.cloudId. checkRepo(a) resolves to why the repo
 // can't have a cloud agent, or '' when it can. unsafe(folder) is true for the relay's own folder, the
 // folder holding its keys, or one above them: the CLI runs there on the host and may bundle it.
-export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, log = () => {} }) {
+export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, save = () => {}, log = () => {} }) {
   return async function cloudTurn(a, prompt) {
     // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
     // failed after the session may have started) would start one with only that one line, next to an orphan
@@ -136,12 +142,18 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       if (why) throw new Error(why);
     }
     let r;
-    try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt }); }
+    // A new session's id is saved the moment it exists, so a relay restart mid-turn can still reach it.
+    const onSession = (id, url) => {
+      if (a.cloudId || a.stopped) return;
+      a.cloudId = id; a.cloudUrl = url; save();
+      log(a.name, 'cloud session', id, url);
+    };
+    try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt, onSession, onSpawn: (p) => { a.proc = p; } }); }
     catch (e) {
       // The session was created before the failure: a reply can still go to it.
-      if (e.sessionId && !a.cloudId) { a.cloudId = e.sessionId; a.cloudUrl = e.url; }
+      if (e.sessionId) onSession(e.sessionId, e.url);
       throw e;
-    }
+    } finally { a.proc = null; }
     if (a.stopped) return;
     if (r.session_id && r.session_id !== a.cloudId) log(a.name, 'cloud session', r.session_id, r.url || '');
     a.cloudId = r.session_id || a.cloudId;

@@ -294,15 +294,22 @@ const cloudTurn = makeCloudTurn({
   // for agents). AGENT_GH_TOKEN skips that check, so cloud mode needs the App.
   async checkRepo(a) {
     if (!ghApp) return 'cloud agents need the GitHub App set up first, as in the README. Nothing was started.';
+    // The CLI works on the current branch's remote; the check below is of origin, so they must be the same.
+    const branch = await hostValue('git', ['-C', a.repoPath, 'rev-parse', '--abbrev-ref', 'HEAD']);
+    const remote = branch && await hostValue('git', ['-C', a.repoPath, 'config', '--get', `branch.${branch}.remote`]);
+    if (remote && remote !== 'origin') return `its folder's current branch tracks ${remote}, not origin. Nothing was started.`;
     await agentGitHub.pinNow(a);
-    const creds = await agentGitHub.credentials(a);
-    if (!creds) return "its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.";
-    await agentGitHub.release(creds).catch((e) => log(a.name, 'token revoke failed:', e.message));
+    if (!await agentGitHub.credentials(a, { checkOnly: true })) {
+      return "its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.";
+    }
     return '';
   },
   unsafe: (folder) => unsafeMount(folder, PROTECTED),
-  exists: fs.existsSync, say, speakResult, log,
+  exists: fs.existsSync, say, speakResult, save, log,
 });
+// A cloud turn's CLI would outlive the relay (and keep its session waiting) when start.ps1 restarts it.
+process.on('exit', () => { for (const a of agents.values()) a.proc?.kill(); });
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(sig, () => process.exit(0));
 
 // `photo` (optional) is a host file copied into the container for this turn only, then deleted.
 // It goes in /tmp, never /work, so an agent can't commit it to the repo.
@@ -397,8 +404,8 @@ async function stopAgent(text) {
   if (!a) return say('Say stop, then the agent name.');
   a.stopped = true;
   agents.delete(a.name); save();
-  // A cloud session runs on without the relay: stopping here only stops listening for its reply.
-  if (cfg.cloud) return say(`Stopped listening to ${a.name}. If it's still working, stop it in the Claude app.`);
+  // A cloud session runs on without the relay: stopping here ends the local CLI waiting for its reply.
+  if (cfg.cloud) { a.proc?.kill(); return say(`Stopped listening to ${a.name}. If it's still working, stop it in the Claude app.`); }
   await run('docker', ['rm', '-f', a.container]).catch(() => {});
   say(`Stopped ${a.name}.`);
 }
