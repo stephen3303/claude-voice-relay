@@ -25,7 +25,7 @@ function fakeSpawn({ stdout = '', stderr = '', code = 0, hang = false } = {}) {
 }
 
 test('cloudArgs starts a new cloud session, or continues one by id, with only fixed flags', () => {
-  assert.deepEqual(cloudArgs(), ['-p', '--output-format', 'json', '--append-system-prompt', CLOUD_PROMPT, '--cloud']);
+  assert.deepEqual(cloudArgs(), ['-p', '--output-format', 'json', '--setting-sources', 'user', '--append-system-prompt', CLOUD_PROMPT, '--cloud']);
   assert.deepEqual(cloudArgs('cse_01ABC-x_9').slice(-2), ['--cloud', 'cse_01ABC-x_9']);
   for (const bad of ['--resume', 'a b', 'x;rm', '', 'x'.repeat(101)]) assert.throws(() => cloudArgs(bad), /Bad cloud session id/, bad);
 });
@@ -149,4 +149,19 @@ test('cloudTurn says when a follow-up was only queued, and stays quiet once stop
 test('cloudTurn refuses a folder that does not exist', async () => {
   const h = turnHarness({ exists: false });
   await assert.rejects(h.cloudTurn(newAgent(), 'x'), /doesn't exist yet/);
+});
+
+test('a CLI failure after the session exists keeps its id, so a reply can reach it', async () => {
+  const { spawn } = fakeSpawn({ stderr: 'Cloud session: cse_7 (https://claude.ai/code/cse_7)\nError: the cloud session stopped before it produced a result', code: 1 });
+  const e = await runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x' }).catch((x) => x);
+  assert.match(e.message, /stopped before/);
+  assert.equal(e.sessionId, 'cse_7');
+  assert.equal(e.url, 'https://claude.ai/code/cse_7');
+
+  const h = turnHarness({ reply: e });
+  const a = newAgent();
+  await assert.rejects(h.cloudTurn(a, 'add a stop-loss'), /stopped before/);
+  assert.equal(a.cloudId, 'cse_7');
+  await assert.rejects(h.cloudTurn(a, 'Yes, go ahead.'), /stopped before/); // the harness keeps failing,
+  assert.equal(h.runs[1].sessionId, 'cse_7'); // but the reply went to the same session
 });

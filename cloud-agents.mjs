@@ -21,9 +21,12 @@ export const CLOUD_PROMPT = [
 ].join(' ');
 
 // argv only ever holds fixed flags and a session id from Claude's own output: what was said goes over stdin.
+// The CLI runs on the host in the project folder, so it loads user settings only: a .claude/settings.json in
+// the folder (hooks, apiKeyHelper, env) would otherwise run on the PC, outside any container.
+const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 export function cloudArgs(sessionId) {
-  if (sessionId != null && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(sessionId)) throw new Error('Bad cloud session id.');
-  return ['-p', '--output-format', 'json', '--append-system-prompt', CLOUD_PROMPT,
+  if (sessionId != null && !SESSION_ID.test(sessionId)) throw new Error('Bad cloud session id.');
+  return ['-p', '--output-format', 'json', '--setting-sources', 'user', '--append-system-prompt', CLOUD_PROMPT,
     ...(sessionId ? ['--cloud', sessionId] : ['--cloud'])];
 }
 
@@ -56,18 +59,25 @@ export function parseCloud(out, err, code) {
 // The CLI waits on a remote session, so a hung sign-in, network or session would keep the agent busy for
 // good: after timeoutMs it's killed. The cloud session itself carries on and stays in the Claude app.
 export const CLOUD_TIMEOUT_MS = 60 * 60_000;
+// A failure after the session was created carries its id (e.sessionId, e.url): the CLI notes
+// "Cloud session: <id> (<url>)" on stderr as soon as it exists, so a reply can still reach it.
 export function runCloud({ spawn, claudeBin = 'claude', env, cwd, sessionId, prompt, timeoutMs = CLOUD_TIMEOUT_MS }) {
   return new Promise((resolve, reject) => {
     const p = spawn(claudeBin, cloudArgs(sessionId), { cwd, windowsHide: true, env: cloudEnv(env) });
-    let out = '', err = '', timedOut = false;
+    let out = '', err = '', timedOut = false, created = null;
     const timer = setTimeout(() => { timedOut = true; p.kill(); }, timeoutMs);
+    const fail = (e) => reject(created ? Object.assign(e, created) : e);
     p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (err = (err + d).slice(-4000)));
+    p.stderr.on('data', (d) => {
+      err = (err + d).slice(-4000);
+      const m = !created && /Cloud session: (\S+) \((https:\/\/\S+)\)/.exec(err);
+      if (m && SESSION_ID.test(m[1])) created = { sessionId: m[1], url: m[2] };
+    });
     p.on('error', (e) => { clearTimeout(timer); reject(e); });
     p.on('close', (code) => {
       clearTimeout(timer);
-      if (timedOut) return reject(new Error(`no answer after ${Math.round(timeoutMs / 60_000)} minutes. It may still be working; check the Claude app.`));
-      try { resolve(parseCloud(out, err, code)); } catch (e) { reject(e); }
+      if (timedOut) return fail(new Error(`no answer after ${Math.round(timeoutMs / 60_000)} minutes. It may still be working; check the Claude app.`));
+      try { resolve(parseCloud(out, err, code)); } catch (e) { fail(e); }
     });
     p.stdin.on('error', () => {});
     p.stdin.end(prompt);
@@ -90,7 +100,13 @@ export function makeCloudTurn({ run = runCloud, checkRepo, exists, say, speakRes
       if (why) throw new Error(why);
     }
     a.cloudNew = false; // from here the session may exist, so a failure means start over
-    const r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt });
+    let r;
+    try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt }); }
+    catch (e) {
+      // The session was created before the failure: a reply can still go to it.
+      if (e.sessionId && !a.cloudId) { a.cloudId = e.sessionId; a.cloudUrl = e.url; }
+      throw e;
+    }
     if (a.stopped) return;
     if (r.session_id && r.session_id !== a.cloudId) log(a.name, 'cloud session', r.session_id, r.url || '');
     a.cloudId = r.session_id || a.cloudId;
