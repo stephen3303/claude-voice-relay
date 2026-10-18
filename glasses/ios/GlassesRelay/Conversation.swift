@@ -195,7 +195,12 @@ final class Conversation: NSObject, ObservableObject {
             req?.append(buffer)
         }
         engine.prepare()
-        do { try engine.start() } catch { status = "Mic failed: \(error.localizedDescription)"; return }
+        do { try engine.start() } catch {
+            // Often a route still settling (just back from A2DP); retry like the cases above.
+            status = "Mic failed: \(error.localizedDescription)"
+            micRetries += 1
+            restartSoon(); return
+        }
 
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             Task { @MainActor in
