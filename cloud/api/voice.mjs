@@ -163,9 +163,16 @@ export function makeHandler(deps) {
         const chars = [...said].length;
         if (chars > SPEAK_MAX) return text(413, 'Too long for the cloud voice.');
         const day = new Date(now()).toISOString().slice(0, 10);
+        // A negative spend with a huge max always passes (MAX_SAFE_INTEGER would overflow the marshaller).
+        const refund = (key) => deps.store.spendSpeech(key, day, -chars, 1e15).catch((e) => console.error('refund', e));
         if (!await deps.store.spendSpeech(`USER#${user}`, day, chars, SPEECH_USER_DAY)) return text(429, 'Cloud voice budget used up today.');
-        if (!await deps.store.spendSpeech('ALL', day, chars, SPEECH_ALL_DAY)) return text(429, 'Cloud voice budget used up today.');
-        const mp3 = await deps.speak(said);
+        if (!await deps.store.spendSpeech('ALL', day, chars, SPEECH_ALL_DAY)) {
+          await refund(`USER#${user}`);
+          return text(429, 'Cloud voice budget used up today.');
+        }
+        let mp3;
+        try { mp3 = await deps.speak(said); }
+        catch (e) { await Promise.all([refund(`USER#${user}`), refund('ALL')]); throw e; }   // nothing was spoken
         return { statusCode: 200, headers: { 'content-type': 'audio/mpeg' }, body: Buffer.from(mp3).toString('base64'), isBase64Encoded: true };
       }
       if (route === 'POST /voice/photo') {

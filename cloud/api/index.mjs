@@ -160,9 +160,9 @@ async function look(jpeg, said) {
 }
 
 // The app's spoken replies. The generative engine is Polly's most natural. Ruth also has a neural voice, tried
-// only when the generative one is throttled or unavailable. Each call has a time limit, so both fit inside the
-// app's 20 s wait instead of producing audio nobody hears.
-const RETRY_NEURAL = new Set(['ThrottlingException', 'ServiceFailureException', 'EngineNotSupportedException']);
+// only when the generative one is throttled, stalled or unavailable (not on errors a retry can't fix). Each call
+// has a time limit, so both fit inside the app's 20 s wait instead of producing audio nobody hears.
+const RETRY_NEURAL = new Set(['ThrottlingException', 'ServiceFailureException', 'EngineNotSupportedException', 'TimeoutError', 'AbortError']);
 const spoken = new Map();   // short fixed lines ("Sent.") are spoken again and again: keep their audio
 async function speak(text) {
   const cached = spoken.get(text);

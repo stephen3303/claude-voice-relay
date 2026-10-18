@@ -183,6 +183,17 @@ test('tts answers MP3 as base64, and a failure is a non-200 so the app falls bac
   assert.equal((await call('POST', '/voice/tts', { body: 'hi', user: null })).statusCode, 401);
 });
 
+test('tts refunds the budget when nothing was spoken', async () => {
+  const { call, budget, now } = setup();
+  const day = new Date(now()).toISOString().slice(0, 10);
+  await call('POST', '/voice/tts', { body: 'fail' });
+  assert.equal(budget.get(`USER#u1/${day}`), 0);
+  assert.equal(budget.get(`ALL/${day}`), 0);
+  budget.set(`ALL/${day}`, 1_000_000);
+  assert.equal((await call('POST', '/voice/tts', { body: 'hello' })).statusCode, 429);
+  assert.equal(budget.get(`USER#u1/${day}`), 0, 'the total cap refused it, so u1 is not charged');
+});
+
 test('tts refuses JSON without a text string instead of reading it out', async () => {
   const { call, spoken } = setup();
   assert.equal((await call('POST', '/voice/tts', { body: '{"text":null}' })).statusCode, 400);
