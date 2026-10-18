@@ -179,19 +179,14 @@ final class GlassesController: ObservableObject {
             }
         }
 
-        #if APP_STORE
         // App Store build: the standalone photo capability is experimental (Meta won't allow it in
-        // published apps yet), so take the still from the camera stream, which is not.
+        // published apps yet), so take the still from the camera stream, which is not. The personal
+        // build tries the standalone photo first and falls back to the stream, so both run it at medium.
         guard let camera = try session.addCamera(config: StreamConfiguration(
             videoCodec: .hvc1, audioCodec: nil, resolution: .medium, frameRate: 7))
         else { throw PhotoFailure.failed("The camera would not start.") }
-        #else
-        guard let camera = try session.addCamera(config: StreamConfiguration(
-            videoCodec: .hvc1, audioCodec: nil, resolution: .low, frameRate: 7))
-        else { throw PhotoFailure.failed("The camera would not start.") }
-        #endif
 
-        enum Event { case streaming, streamStopped, photoReady, photoStopped, progress, photo(Data), error(String), timeout(Int, PhotoFailure) }
+        enum Event { case streaming, streamStopped, photoReady, photoStopped, progress(UInt64, UInt64), photo(Data), error(String), photoError(String), timeout(Int, PhotoFailure) }
         let (events, emit) = AsyncStream<Event>.makeStream()
         let tokens = ListenerTokenBag()
         defer { Task { await tokens.cancelAll() } }
@@ -203,9 +198,8 @@ final class GlassesController: ObservableObject {
             }
         }.store(in: tokens)
         camera.stream.errorPublisher.listen { error in emit.yield(.error(error.localizedDescription)) }.store(in: tokens)
-        #if APP_STORE
         camera.stream.photoDataPublisher.listen { data in emit.yield(.photo(data.data)) }.store(in: tokens)
-        #else
+        #if !APP_STORE
         camera.photo.statePublisher.listen { state in
             switch state {
             case .started: emit.yield(.photoReady)
@@ -214,15 +208,15 @@ final class GlassesController: ObservableObject {
             }
         }.store(in: tokens)
         camera.photo.photoDataPublisher.listen { data in emit.yield(.photo(data.imageData)) }.store(in: tokens)
-        camera.photo.errorPublisher.listen { error in emit.yield(.error(error.description)) }.store(in: tokens)
-        camera.photo.transferProgressPublisher.listen { _ in emit.yield(.progress) }.store(in: tokens)
+        camera.photo.errorPublisher.listen { error in emit.yield(.photoError(error.description)) }.store(in: tokens)
+        camera.photo.transferProgressPublisher.listen { p in emit.yield(.progress(p.bytesReceived, p.totalBytes)) }.store(in: tokens)
         #endif
 
         // One watchdog, re-armed per stage, so a slow wake-up and a slow transfer each get their
         // own allowance and the spoken error says which one ran out. A timeout that fired before a
         // re-arm can already be queued, so each carries its generation and stale ones are ignored.
         // Every allowance is clipped to one overall deadline, so progress can't keep it waiting forever.
-        let deadline = ContinuousClock.now + .seconds(60)
+        var deadline = ContinuousClock.now + .seconds(60)
         var watchdog: Task<Void, Never>?
         var generation = 0
         func arm(_ seconds: Double, _ failure: PhotoFailure) {
@@ -233,24 +227,78 @@ final class GlassesController: ObservableObject {
         }
         defer { watchdog?.cancel() }
 
+        /// The still taken from the running video stream: the App Store build's only path, and the
+        /// personal build's fallback.
+        func fireStreamStill() throws {
+            guard camera.stream.capturePhoto(format: .jpeg) else { throw PhotoFailure.cameraBusy }
+            arm(20, .photoNeverArrived)
+        }
+
         camera.stream.start()
         arm(15, .cameraDidNotStart)
         var photoStarting = false, shutterReady = false, fired = false
         #if !APP_STORE
+        // The standalone photo is experimental, and in testing the shutter fired but the
+        // picture never crossed. So if it fails, take the still from the video stream instead, and
+        // leave a note on the home screen saying how far the full photo got.
+        var fellBack = false, photoDown = false, streamRestarted = false, streamFired = false
+        var bytes: (UInt64, UInt64)?, why = ""
+        var succeeded = false
         func fire() {
             fired = true
             // Medium keeps the Bluetooth transfer quick; plenty for Claude to read a screen or sign.
             camera.photo.capturePhoto(resolution: .medium, quality: .medium)
-            arm(20, .photoNeverArrived)
+            // About a second when it works (Meta's sample allows 15 s); progress buys more time.
+            arm(12, .photoNeverArrived)
+        }
+        func note(_ outcome: String) -> String {
+            let crossed = bytes.map { "\($0.0) of \($0.1) bytes arrived" } ?? "no bytes arrived"
+            return "Last glasses photo: the full photo failed (\(why); \(crossed)). \(outcome)"
+        }
+        func restartStream() {
+            streamRestarted = true
+            camera.stream.start()
+            arm(15, .photoNeverArrived)
+        }
+        func fallBack(_ reason: String) {
+            fellBack = true
+            why = reason
+            deadline = ContinuousClock.now + .seconds(20)   // the fallback's own budget
+            // The shutter and the stream compete for the sensor, so the stream waits for the shutter
+            // to report it's down, as the shutter waited for the stream on the way in.
+            camera.photo.stop()
+            if photoDown { restartStream() } else { arm(3, .cameraBusy) }
+        }
+        defer {
+            if fellBack { lastError = note(succeeded ? "The fallback got a photo." : "The fallback failed too.") }
         }
         #endif
         for await event in events {
             switch event {
+            #if !APP_STORE
+            case .photoStopped where fellBack && !streamRestarted:
+                photoDown = true
+                restartStream()
+            case .timeout(let gen, _) where gen == generation && fellBack && !streamRestarted:
+                restartStream()   // the shutter never said it let go; try the stream anyway
+            case .streaming where fellBack && !streamFired:
+                streamFired = true
+                try fireStreamStill()
+            case .progress, .photoError:
+                guard !fellBack else { break }   // leftovers from the abandoned full photo
+                if case .progress(let received, let total) = event {
+                    bytes = (received, total)
+                    arm(15, .photoNeverArrived)   // bytes are still crossing; keep waiting
+                } else if case .photoError(let message) = event, fired {
+                    fallBack(message)
+                } else if case .photoError(let message) = event {
+                    throw PhotoFailure.failed(message)
+                }
+            #endif
             case .streaming where !photoStarting && !fired:
                 #if APP_STORE
                 fired = true
-                guard camera.stream.capturePhoto(format: .jpeg) else { throw PhotoFailure.failed("The camera was busy.") }
-                arm(20, .photoNeverArrived)
+                try fireStreamStill()
                 #else
                 // The stream only wakes the sensor; the shutter is started once frames prove it's up.
                 photoStarting = true
@@ -269,23 +317,29 @@ final class GlassesController: ObservableObject {
                 if camera.stream.state == .stopped { fire() } else { arm(5, .cameraBusy) }
             case .streamStopped where shutterReady && !fired:
                 fire()
-            case .photoStopped where fired:
+            case .photoStopped where fired && !fellBack:
                 // Possibly just the end of a good capture with the data still on its way; give it a beat.
+                photoDown = true
                 arm(3, .photoNeverArrived)
+            case .timeout(let gen, .photoNeverArrived) where gen == generation && fired && !fellBack:
+                fallBack("it never arrived")
             #endif
             case .streamStopped, .photoReady, .photoStopped:
                 break
-            case .progress:
-                arm(15, .photoNeverArrived)   // bytes are still crossing; keep waiting
+            #if APP_STORE
+            case .progress, .photoError:
+                break
+            #endif
             case .photo(let jpeg):
-                #if APP_STORE
+                // A late full photo after the fallback started is still taken; it's the better picture.
                 camera.stream.stop()
-                #else
+                #if !APP_STORE
                 camera.photo.stop()
+                succeeded = true
                 #endif
                 return jpeg
-            case .error(let why):
-                throw PhotoFailure.failed(why)
+            case .error(let message):
+                throw PhotoFailure.failed(message)
             case .timeout(let gen, let failure) where gen == generation:
                 throw failure
             case .timeout:
