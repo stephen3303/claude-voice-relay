@@ -8,3 +8,6 @@ glasses/ios/GlassesRelay.xcodeproj/
 glasses/ios/build/
 glasses/ios/Payload/
 *.ipa
+
+# CDK
+cdk.out/

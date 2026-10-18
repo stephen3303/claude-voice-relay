@@ -1,0 +1,8 @@
+{
+  "name": "bridge-cloud-infra",
+  "private": true,
+  "type": "module",
+  "scripts": { "synth": "cdk synth", "deploy": "cdk deploy --all --require-approval never" },
+  "dependencies": { "aws-cdk-lib": "^2.200.0", "constructs": "^10.4.2" },
+  "devDependencies": { "aws-cdk": "^2.1100.0" }
+}

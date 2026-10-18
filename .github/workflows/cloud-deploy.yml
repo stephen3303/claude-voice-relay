@@ -1,0 +1,50 @@
+# Deploys Bridge Cloud (cloud/infra) with the BridgeGitHubDeploy role: short-lived credentials from
+# GitHub's OIDC token, no stored AWS keys. The role only trusts this repo's main branch.
+name: Cloud deploy
+on:
+  push:
+    branches: [main]
+    paths: ["cloud/infra/**", "site/**", ".github/workflows/cloud-deploy.yml"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # for the OIDC token
+  contents: read
+
+concurrency: cloud-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: cloud/infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloud/infra/package-lock.json
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Check Bedrock access (one tiny Claude call)
+        continue-on-error: true
+        run: |
+          aws bedrock-runtime converse --model-id us.anthropic.claude-haiku-5-5 \
+            --messages '[{"role":"user","content":[{"text":"Reply with the word ok."}]}]' \
+            --inference-config maxTokens=5 --query 'output.message.content[0].text' --output text
+
+      - run: npm ci
+
+      - name: Deploy
+        run: npx cdk deploy --all --require-approval never --outputs-file outputs.json
+
+      - name: Site address
+        run: cat outputs.json
