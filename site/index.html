@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bridge: talk to your Claude agents hands-free</title>
-<meta name="description" content="Bridge lets you talk to your Claude Code agents hands-free: from the Bridge iPhone app with Ray-Ban Meta glasses or any Bluetooth headset, and soon from any Claude app through the Bridge connector.">
+<meta name="description" content="Bridge lets you talk to your Claude agents hands-free, through Ray-Ban Meta glasses or any Bluetooth headset. Your agents run in Bridge Cloud, so there's nothing to set up but the iPhone app.">
 <meta name="theme-color" content="#0E1730">
 <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
 <link rel="icon" type="image/png" sizes="256x256" href="icon-256.png">
@@ -31,13 +31,13 @@
     <div class="wrap">
       <img class="hero-icon" src="icon-256.png" alt="Bridge app icon: glasses with sound waves" width="128" height="128">
       <h1 id="hero-title">Bridge</h1>
-      <p class="pitch">Talk to your Claude Code agents hands-free, through Ray-Ban Meta glasses or your headphones, and soon from any Claude app.</p>
+      <p class="pitch">Talk to your Claude agents hands-free, through Ray-Ban Meta glasses or your headphones. Your agents run in Bridge Cloud, so all you need is your iPhone.</p>
       <p class="badge">Coming soon to the App Store</p>
       <div class="hero-links">
         <a href="#how">How it works</a>
-        <a href="https://github.com/stephen3303/claude-voice-relay">Relay on GitHub</a>
+        <a href="#pricing">Pricing</a>
       </div>
-      <p class="works-with">Works with Ray-Ban Meta glasses · Works with any Bluetooth headset · Works with Claude Code</p>
+      <p class="works-with">Works with Ray-Ban Meta glasses · Works with any Bluetooth headset · Works with Claude</p>
     </div>
   </section>
 
@@ -46,19 +46,16 @@
       <h2 id="where-title">Where it works</h2>
       <ul class="grid three">
         <li class="card">
+          <h3>Ray-Ban Meta glasses</h3>
+          <p>Start Bridge with Siri or the Action Button and talk through the glasses. Take a photo with the glasses camera and ask Claude about what you see, or hand it to an agent.</p>
+        </li>
+        <li class="card">
+          <h3>Any headset, or just your iPhone</h3>
+          <p>AirPods, a car's Bluetooth or the iPhone itself. When an agent has something for you, it rings like a phone call, so you can answer without touching anything.</p>
+        </li>
+        <li class="card">
           <h3>Any Claude app</h3>
-          <p>Add Bridge as a connector in Claude, and Claude can start tasks for your agents in Bridge Cloud and read their answers. It works with Bridge Cloud, not the self-hosted relay. Connectors sync across Claude on the web, desktop and mobile, so it isn't tied to one computer or phone.</p>
-          <p class="note">Coming with Bridge Cloud.</p>
-        </li>
-        <li class="card">
-          <h3>The Bridge iPhone app</h3>
-          <p>The hands-free part: talk through Ray-Ban Meta glasses or any Bluetooth headset, take photos with the glasses camera, and let agents call you when they have something to say.</p>
-          <p class="note">Coming soon to the App Store.</p>
-        </li>
-        <li class="card">
-          <h3>Self-hosted on your PC</h3>
-          <p>Run the open-source relay on your own Windows PC, and your agents run there in Docker, one per project, reached over your private Tailscale network.</p>
-          <p class="note">Available now. <a href="https://github.com/stephen3303/claude-voice-relay#readme">Setup is in the README</a>.</p>
+          <p>Add Bridge as a connector in Claude, and Claude can start tasks for your agents and read their answers, on the web, desktop or mobile.</p>
         </li>
       </ul>
     </div>
@@ -67,22 +64,21 @@
   <section class="section" id="how" aria-labelledby="how-title">
     <div class="wrap">
       <h2 id="how-title">How it works</h2>
-      <p class="section-intro">With the iPhone app and the self-hosted relay:</p>
       <ol class="grid three">
         <li class="card">
           <span class="step-number" aria-hidden="true">1</span>
           <h3>You speak</h3>
-          <p>Bridge turns your speech into text on your iPhone, using Apple's speech recognition. Where the iPhone can recognise your language on-device, your audio stays on the phone; otherwise Apple's servers recognise it.</p>
+          <p>Bridge turns your speech into text on your iPhone, using Apple's speech recognition, and reads your task back before anything is sent.</p>
         </li>
         <li class="card">
           <span class="step-number" aria-hidden="true">2</span>
-          <h3>It goes to your PC</h3>
-          <p>The text travels over your private Tailscale connection to the open-source relay on your PC. The relay runs Claude Code agents in Docker containers, one per project.</p>
+          <h3>Bridge Cloud takes it</h3>
+          <p>Say "send it" and the text goes to your agents in Bridge Cloud, under the Bridge account you made with Sign in with Apple. There's no computer to leave running.</p>
         </li>
         <li class="card">
           <span class="step-number" aria-hidden="true">3</span>
           <h3>You hear the answer</h3>
-          <p>The agent's answer is spoken back to you. While a conversation is open, replies are read aloud as they arrive.</p>
+          <p>Replies are read aloud as they arrive. If you've hung up, the agent calls you back, or sends a notification when no headset is connected.</p>
         </li>
       </ol>
     </div>
@@ -102,7 +98,7 @@
         </li>
         <li class="card">
           <h3>Show Claude what you see</h3>
-          <p>Say <span class="says">"look at this, …"</span> and the glasses camera takes a photo; you hear Claude's answer. Say <span class="says">"send this to &lt;project&gt;, …"</span> to give the photo to that project's agent. Photos are deleted from the PC once answered.</p>
+          <p>Say <span class="says">"look at this, …"</span> and the glasses camera takes a photo; you hear Claude's answer. Say <span class="says">"send this to &lt;project&gt;, …"</span> to give the photo to that project's agent. Photos aren't kept once they're answered.</p>
         </li>
         <li class="card">
           <h3>Start it your way</h3>
@@ -117,15 +113,16 @@
       <h2 id="req-title">What you need</h2>
       <div class="card">
         <ul>
-          <li>For the connector (coming with Bridge Cloud): a Claude plan that allows custom connectors, and a Bridge account (Sign in with Apple).</li>
-          <li>For hands-free voice: an iPhone running iOS 17.2 or later, and any Bluetooth headset. Ray-Ban Meta glasses add the camera features.</li>
-          <li>To self-host: a Windows PC running the relay, with Docker and Tailscale, and your own Claude subscription signed in to Claude Code on that PC.</li>
+          <li>An iPhone running iOS 17.2 or later.</li>
+          <li>A Bridge account, made in the app with Sign in with Apple.</li>
+          <li>Any Bluetooth headset for hands-free voice. Ray-Ban Meta glasses add the camera features.</li>
+          <li>For the connector: a Claude plan that allows custom connectors.</li>
         </ul>
       </div>
     </div>
   </section>
 
-  <section class="section" aria-labelledby="pricing-title">
+  <section class="section" id="pricing" aria-labelledby="pricing-title">
     <div class="wrap">
       <h2 id="pricing-title">Pricing</h2>
       <p class="section-intro">Planned pricing for the App Store release.</p>
@@ -133,12 +130,12 @@
         <li class="card">
           <h3>Bridge</h3>
           <p class="plan-price">Free</p>
-          <p>Voice conversations with your agents.</p>
+          <p>Voice conversations with your agents, read-back, and calls from your agents, spoken by your iPhone's own voices.</p>
         </li>
         <li class="card">
           <h3>Bridge Pro</h3>
           <p class="plan-price">$4.99/month or $49.99/year</p>
-          <p>Adds photos and Shortcuts actions. Starts with a 1-week free trial.</p>
+          <p>Adds photos from your glasses, a natural cloud voice for replies, and the Ask and Look actions for Shortcuts. Starts with a 1-week free trial.</p>
           <p class="note">Billed through the App Store. Cancel any time in iPhone Settings.</p>
         </li>
       </ul>
@@ -149,28 +146,28 @@
     <div class="wrap">
       <h2 id="faq-title">Questions</h2>
       <details>
-        <summary>Do I need a Windows PC?</summary>
-        <p>Today, yes: your agents run in the relay on your own PC. When Bridge Cloud launches, the connector and the app will work without one.</p>
+        <summary>Do I need a computer?</summary>
+        <p>No. Your agents run in Bridge Cloud, so the iPhone app is all you need.</p>
       </details>
       <details>
         <summary>Does my voice leave my iPhone?</summary>
-        <p>Not where the iPhone can recognise your language on-device; otherwise Apple's speech recognition servers receive it. Bridge itself only sends the recognised text: to the relay on your own PC over your Tailscale network, or to Bridge Cloud if you use it.</p>
+        <p>Not where the iPhone can recognise your language on-device; otherwise Apple's speech recognition servers receive it. Bridge itself only sends the recognised text to Bridge Cloud, never your audio. The <a href="privacy.html">privacy policy</a> has the details.</p>
       </details>
       <details>
         <summary>Do I need an account?</summary>
-        <p>Not to self-host: with the relay on your PC there is no account, and it uses your own Claude subscription, signed in to Claude Code on that PC. The relay has no analytics, no ads and no tracking. The connector and Bridge Cloud, when they launch, will use a Bridge account created with Sign in with Apple.</p>
+        <p>Yes, a Bridge account, made in the app with Sign in with Apple. Bridge gets no email address from it. You can delete the account, and everything stored for it, in the app's Settings.</p>
       </details>
       <details>
         <summary>Do I need Ray-Ban Meta glasses?</summary>
-        <p>Only for the camera features. Voice conversations work with any Bluetooth headset.</p>
+        <p>Only for the camera features. Voice conversations work with any Bluetooth headset, or with the iPhone on its own.</p>
       </details>
       <details>
-        <summary>What runs on my PC if I self-host?</summary>
-        <p>The relay, which is open source. It runs Claude Code agents in Docker containers, one per project. <a href="https://github.com/stephen3303/claude-voice-relay#readme">Setup is in the README</a>.</p>
+        <summary>Can my agents call me?</summary>
+        <p>Yes. With glasses or headphones connected, an agent that has something for you rings like a phone call; answer it to hear the message and reply. Otherwise you get a notification. Turn it off in the app's Settings.</p>
       </details>
       <details>
         <summary>Where do I get help?</summary>
-        <p>See <a href="support.html">Support</a>, or open an issue on <a href="https://github.com/stephen3303/claude-voice-relay/issues">GitHub</a>.</p>
+        <p>See <a href="support.html">Support</a>, or email <a href="mailto:support@talktobridge.com">support@talktobridge.com</a>.</p>
       </details>
     </div>
   </section>
@@ -184,11 +181,10 @@
         <li><a href="support.html">Support</a></li>
         <li><a href="privacy.html">Privacy</a></li>
         <li><a href="terms.html">Terms</a></li>
-        <li><a href="https://github.com/stephen3303/claude-voice-relay">GitHub</a></li>
       </ul>
     </nav>
     <p>© 2026 Bridge.</p>
-    <p>Bridge is not affiliated with or endorsed by Anthropic, Meta or EssilorLuxottica. Claude and Claude Code are trademarks of Anthropic. Ray-Ban and Meta are trademarks of their respective owners.</p>
+    <p>Bridge is not affiliated with or endorsed by Anthropic, Meta or EssilorLuxottica. Claude is a trademark of Anthropic. Ray-Ban and Meta are trademarks of their respective owners.</p>
   </div>
 </footer>
 </body>

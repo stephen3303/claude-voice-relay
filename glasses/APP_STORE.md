@@ -47,46 +47,46 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
 - **Category:** Developer Tools (secondary: Productivity)
 - **Age rating:** 4+ (no objectionable content; answers come from the user's own agents)
 - **Price:** Free, with Bridge Pro in-app subscription
-- **Privacy policy URL:** https://stephen3303.github.io/claude-voice-relay/privacy.html
-- **Support URL:** https://stephen3303.github.io/claude-voice-relay/support.html
-- **Marketing URL:** https://stephen3303.github.io/claude-voice-relay/
-- **Keywords (100 max):** voice,coding,agents,developer,hands-free,glasses,ray-ban,relay,shortcuts,siri,claude code
+- **Privacy policy URL:** https://talktobridge.com/privacy.html
+- **Support URL:** https://talktobridge.com/support.html
+- **Marketing URL:** https://talktobridge.com/
+- **Keywords (100 max):** voice,coding,agents,developer,hands-free,glasses,ray-ban,headset,shortcuts,siri,claude
 - **Promotional text:** Run your coding agents from anywhere: talk, hear the answer, keep your hands free.
 
 **Description:**
 
-Bridge lets you talk to the coding agents running on your own PC, hands-free, through Ray-Ban Meta
-glasses or any Bluetooth headset.
+Bridge lets you talk to your Claude agents hands-free, through Ray-Ban Meta glasses or any Bluetooth
+headset. Your agents run in Bridge Cloud, so all you need is your iPhone and a Bridge account.
 
 Say "in my project, add a stop-loss check". Bridge reads the task back, and when you say "send it",
-your agent starts work. When it's done, or needs a yes or no from you, you hear it.
+your agent starts work. When it's done, or needs a yes or no from you, it calls you.
 
 - Hands-free: start with Siri ("Talk to Bridge"), the Action Button or Shortcuts
 - Read-back before anything is sent, so a misheard word never starts the wrong task
 - Hear your agents' answers as they arrive, and answer their questions by voice
-- Private: speech is recognized on your iPhone, and text goes only to your own PC over your Tailscale network
+- Agents can call you: with a headset connected, a message rings like a phone call
+- Works from Claude too: add Bridge as a connector in any Claude app
+- Private: Sign in with Apple, no email address, no ads, no tracking; delete your account in the app
 
 Bridge Pro:
 - "Look at this": take a photo with your glasses and hear what Claude sees
 - "Send this to my project": hand the photo to that agent
+- A natural cloud voice for replies
 - Ask Bridge and Look with Bridge actions for Shortcuts and automations
-
-Requires the free, open-source Bridge relay on a Windows PC with Docker, Tailscale and your own
-Claude Code subscription. Setup: https://github.com/stephen3303/claude-voice-relay
 
 Bridge Pro is an auto-renewing subscription, monthly or yearly, with a 1-week free trial. Payment
 is charged to your Apple ID. It renews unless cancelled at least 24 hours before the end of the
 period; manage or cancel it in Settings > Apple ID > Subscriptions.
-Terms: https://stephen3303.github.io/claude-voice-relay/terms.html
+Terms: https://talktobridge.com/terms.html
 
 Not affiliated with Anthropic or Meta. Ray-Ban is a trademark of Luxottica.
 
 ## App Review notes (paste into "Notes" under App Review Information)
 
-Bridge is a voice front end for software the user runs on their own computer (the open-source relay
-at https://github.com/stephen3303/claude-voice-relay). Reviewing it without that setup:
+Bridge is a voice front end for the user's Claude agents, which run in Bridge Cloud. To review it:
 
-1. Open Bridge > PC relay > tap "Use demo (no PC needed)".
+1. Sign in with Apple in Settings > Account, which selects Bridge Cloud. Or, without signing in,
+   choose Settings > Connection > Demo for sample replies.
 2. Tap "Talk now" and allow the microphone and speech recognition.
 3. Say "in demo, write a test". Bridge reads it back. Say "send it". Then say "goodbye".
 
@@ -100,8 +100,16 @@ says "goodbye" or the conversation times out.
 
 ## Privacy "nutrition label"
 
-Data Not Collected. Speech is recognized on device; text and photos go only to the user's own
-relay, and the developer never receives them; no analytics or tracking. (`PrivacyInfo.xcprivacy` matches.)
+Must match https://talktobridge.com/privacy.html and `PrivacyInfo.xcprivacy`. No tracking.
+
+- **Identifiers > User ID:** linked to the user, app functionality (the Sign in with Apple identifier).
+- **Purchases > Purchase history:** linked, app functionality (Bridge Pro transactions checked by Bridge Cloud).
+- **User content > Photos:** linked, app functionality (photos the user asks about or sends to an agent).
+- **User content > Other user content:** linked, app functionality (task text and agents' messages).
+- **Diagnostics > Crash data, Performance data, Other diagnostic data:** not linked, app functionality (Sentry).
+
+Not collected: contact info (no email is requested; the first name stays on the phone), audio,
+location, usage data.
 
 ## Screenshots
 
@@ -112,5 +120,5 @@ conversation transcript, the Bridge Pro sheet) and add them in App Store Connect
 
 - **Ongoing value (guideline 3.1.2):** Apple sometimes rejects subscriptions that only unlock
   features. If that happens, switch Pro to a one-time non-consumable purchase in `Store.swift`.
-- **Companion software (2.1):** the reviewer needs the demo mode and the video above.
+- **Account (2.1):** the reviewer signs in with Apple, or uses the demo, plus the video above.
 - **MFi accessory protocol:** see step 7.

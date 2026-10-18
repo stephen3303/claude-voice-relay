@@ -38,7 +38,7 @@ struct HelpView: View {
                     HelpItem("Bridge can't hear you", "Make sure the glasses are connected to your phone over Bluetooth. Bridge uses the glasses microphone when it can, and the phone's otherwise.")
                     HelpItem("\"Couldn't reach your PC\"", "Check that the relay is running and that your phone is on the same Tailscale network. Then use Save and test in Settings.")
                     HelpItem("Photos don't work", "In Settings, tap Allow camera, then Test photo. The glasses must be on and nearby.")
-                    Link("More help on the website", destination: URL(string: "https://stephen3303.github.io/claude-voice-relay/support.html")!)
+                    Link("More help on the website", destination: URL(string: "https://talktobridge.com/support.html")!)
                 }
             }
             .navigationTitle("Help")

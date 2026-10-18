@@ -67,9 +67,8 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
   talktobridge.com and www, pointing at the `CloudFrontTarget` output.
 - App Store: Stephen has enrolled. Still needed: the App Store Connect API key, the app record, and
   the Meta app ID and client token, stored with `glasses/setup-appstore-secrets.ps1`. Then run the
-  subscriptions workflow, then the App Store upload. Before that upload, `site/privacy.html` must cover
-  Bridge Cloud, the Bridge account (Sign in with Apple), push, spoken replies via Amazon Polly and the
-  Bridge Pro purchase record the app sends to Bridge Cloud (`/api/pro`); today it
-  covers self-hosting only. Also set App Store Server Notifications (Version 2, production and sandbox URLs)
+  subscriptions workflow, then the App Store upload. The site describes the App Store product only (Bridge
+  Cloud, Pro); `site/privacy.html` covers it, but still names "the developer of Bridge" and
+  support@talktobridge.com, which needs a real legal name and a working mailbox before upload. Also set App Store Server Notifications (Version 2, production and sandbox URLs)
   to the `AppStoreNotificationsUrl` output, so renewals and refunds reach Bridge Pro's cloud check (`cloud/api/storekit.mjs`).
 - Cloud agents (Fargate + GitHub App) aren't built yet; the cloud API answers tasks honestly.
