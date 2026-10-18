@@ -201,6 +201,13 @@ test('tts refuses JSON without a text string instead of reading it out', async (
   assert.deepEqual(spoken, []);
 });
 
+test('confirm and send treat JSON without a text string as nothing said', async () => {
+  const { call, started } = setup();
+  assert.match((await call('POST', '/voice/send', { body: '{"msg":"x"}' })).body, /didn't catch that/);
+  assert.match((await call('POST', '/voice/confirm', { body: '{"text":null}' })).body, /didn't catch that/);
+  assert.equal(started.length, 0);
+});
+
 test('a line over Polly\'s limit is refused whole, so the phone reads all of it', async () => {
   const { call, spoken } = setup();
   assert.equal((await call('POST', '/voice/tts', { body: 'x'.repeat(3001) })).statusCode, 413);
