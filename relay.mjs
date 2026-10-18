@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
+import { runCloud } from './cloud-agents.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +37,8 @@ const cfg = {
   githubAppId: process.env.GITHUB_APP_ID || '',
   githubAppKeyFile: process.env.GITHUB_APP_KEY_FILE || '',
   agentGhToken: process.env.AGENT_GH_TOKEN || '',
+  // AGENT_MODE=cloud runs tasks as claude.ai cloud sessions (cloud-agents.mjs) instead of Docker on this PC.
+  cloud: process.env.AGENT_MODE === 'cloud',
 };
 
 const log = (...a) => {
@@ -50,7 +53,8 @@ const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 // make start.ps1 restart it every 10 seconds).
 const voiceOff = !cfg.voiceToken ? 'VOICE_TOKEN is missing from .env'
   : cfg.voiceToken.length < 24 ? 'VOICE_TOKEN is shorter than 24 characters' : '';
-if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
+if (cfg.cloud) log('Agents run as claude.ai cloud sessions (AGENT_MODE=cloud).');
+else if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
 const VOICE_PROMPT = [
@@ -165,8 +169,8 @@ const publisher = makePublisher({
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
 function save() {
-  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, awaiting, question, lastAt }) =>
-    ({ name, repoPath, container, sessionId, awaiting, question, lastAt }));
+  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, cloudId, cloudUrl, awaiting, question, lastAt }) =>
+    ({ name, repoPath, container, sessionId, cloudId, cloudUrl, awaiting, question, lastAt }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
 }
 function load() {
@@ -272,12 +276,39 @@ function spoken(result) {
   return s.replace(/\s+/g, ' ').trim() || 'Finished, with no summary.';
 }
 
+function speakResult(a, r) {
+  fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
+  const line = spoken(r.result);
+  a.awaiting = line.endsWith('?');
+  a.question = a.awaiting ? line : ''; // "status" repeats it, in case the app missed it
+  say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
+    { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line });
+}
+
+// AGENT_MODE=cloud: the turn runs in a claude.ai cloud session (cloud-agents.mjs) on the folder's GitHub
+// remote, so it shows in the Claude app. The session pushes and opens its own pull request.
+async function cloudTurn(a, prompt) {
+  if (!fs.existsSync(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
+  const r = await runCloud({ spawn, claudeBin: process.env.CLAUDE_BIN || 'claude', env: process.env,
+    cwd: a.repoPath, sessionId: a.cloudId, prompt });
+  if (a.stopped) return;
+  if (r.session_id && r.session_id !== a.cloudId) log(a.name, 'cloud session', r.session_id, r.url || '');
+  a.cloudId = r.session_id || a.cloudId;
+  a.cloudUrl = r.url || a.cloudUrl;
+  if (r.queued) {
+    a.awaiting = false; a.question = '';
+    return say(`${a.name}: sent. Its answer will be in the Claude app.`, { spoken: `Sent to ${a.name}. Its answer will be in the Claude app.` });
+  }
+  speakResult(a, r);
+}
+
 // `photo` (optional) is a host file copied into the container for this turn only, then deleted.
 // It goes in /tmp, never /work, so an agent can't commit it to the repo.
 async function turn(a, prompt, photo) {
   a.busy = true; a.awaiting = false; a.lastAt = Date.now(); save();
   const photoIn = photo && `/tmp/${path.basename(photo)}`;
   try {
+    if (cfg.cloud) return await cloudTurn(a, prompt);
     await ensureContainer(a);
     // A request left by a turn that failed or was stopped belongs to that turn, not this one.
     // The folder is made here (in a git repo only) so the agent only has to write the file.
@@ -289,12 +320,7 @@ async function turn(a, prompt, photo) {
     }
     const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt, await agentGitHub.identity());
     a.sessionId = r.session_id || a.sessionId;
-    fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
-    const line = spoken(r.result);
-    a.awaiting = line.endsWith('?');
-    a.question = a.awaiting ? line : ''; // "status" repeats it, in case the app missed it
-    say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
-      { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line });
+    speakResult(a, r);
     const pushed = !a.stopped && await publisher.publish(a);
     if (pushed) say(`${a.name}: ${pushed}`, { spoken: pushed });
   } catch (e) {
@@ -334,7 +360,7 @@ async function startTask(body) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
     a.repoPath = parsed.repo;
   }
-  a.sessionId = null; // a new task gets fresh context
+  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; // a new task gets fresh context (a new cloud session)
   say(`Starting ${name}.`);
   turn(a, parsed.task);
 }
@@ -367,8 +393,10 @@ async function stopAgent(text) {
   const a = findAgentPrefix(text);
   if (!a) return say('Say stop, then the agent name.');
   a.stopped = true;
-  await run('docker', ['rm', '-f', a.container]).catch(() => {});
   agents.delete(a.name); save();
+  // A cloud session runs on without the relay: stopping here only stops listening for its reply.
+  if (cfg.cloud) return say(`Stopped listening to ${a.name}. If it's still working, stop it in the Claude app.`);
+  await run('docker', ['rm', '-f', a.container]).catch(() => {});
   say(`Stopped ${a.name}.`);
 }
 
@@ -448,6 +476,8 @@ function photoToAgent(file, target, said) {
     ? { repo: resolveRepo(target, true), task: said.trim() }
     : parseTask(`in ${target}`) || { repo: resolveRepo(target, true), task: '' };
   if (!t.repo) { fs.rmSync(file, { force: true }); return `I couldn't tell which project ${target} is. Nothing was sent.`; }
+  // The photo is a file on this PC, which a cloud session can't open.
+  if (cfg.cloud) { fs.rmSync(file, { force: true }); return 'Photos only go to agents on your PC, and agents run in the cloud now. Nothing was sent.'; }
   const name = spokenName(t.repo);
   let a = agents.get(name);
   if (a?.busy) { fs.rmSync(file, { force: true }); return `${name} is still working. Send the photo again when it finishes.`; }

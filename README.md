@@ -131,6 +131,19 @@ Without the App you can put a fine-grained token in `AGENT_GH_TOKEN` instead (Gi
 Developer settings → Fine-grained tokens**, only the agents' repos, Contents and Pull requests
 read and write, an expiry). It acts as you, so the rulesets can't tell agents apart; the App is better.
 
+## Agents in the Claude app (cloud sessions)
+With `AGENT_MODE=cloud` in `.env`, each voice task runs as a claude.ai cloud session instead of a
+Docker container, so the conversation shows up in the Claude app (**Code** tab) and at claude.ai/code
+with its full transcript, and you can pick it up there. The relay still speaks the replies.
+- The session works on the project folder's GitHub remote at its current branch (what's pushed, not
+  local changes), and pushes and opens its pull request itself through the Claude GitHub app, not the
+  relay's GitHub App.
+- It needs Claude Code on the PC signed in with your claude.ai account: run `claude auth login` once
+  (and `claude update`; older versions don't wait for a follow-up's answer, so you hear "sent" and read it in the app).
+  The `CLAUDE_CODE_OAUTH_TOKEN` setup token can't start cloud sessions; the relay keeps it away from them.
+- Photos can't go to cloud agents (they're files on the PC); quick "what am I looking at" photos still work.
+- "Stop" only stops the relay listening; stop the session itself in the Claude app.
+
 ## Use Bridge from Claude (custom connector)
 Bridge Cloud is also a remote MCP server, so Claude (claude.ai, the Claude apps, Claude Code) can
 start tasks for your agents and read what they said. It has two tools: **send_task** (a project and
