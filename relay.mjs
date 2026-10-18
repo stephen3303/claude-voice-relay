@@ -137,9 +137,18 @@ const publisher = makePublisher({
   },
   // The token goes only into this throwaway container: no agent code runs in it, and the agent's repo is
   // mounted read-only and read through git's transport, never with its hooks or config.
-  push: ({ a, branch, repo, token }) => run('docker', ['run', '--rm', '-v', `${a.repoPath}:/src:ro`,
-    '-e', 'GH_TOKEN', '-e', 'BRANCH', '-e', 'REPO', cfg.image, 'sh', '-c', PUSH_SCRIPT],
-  { env: { ...process.env, GH_TOKEN: token, BRANCH: branch, REPO: repo }, timeout: 5 * 60_000 }),
+  push: async ({ a, branch, repo, token }) => {
+    // Named, so a push that times out (which only stops the docker client) can be removed with its token.
+    const name = `${a.container}-push-${Date.now()}`;
+    try {
+      await run('docker', ['run', '--rm', '--name', name, '-v', `${a.repoPath}:/src:ro`,
+        '-e', 'GH_TOKEN', '-e', 'BRANCH', '-e', 'REPO', cfg.image, 'sh', '-c', PUSH_SCRIPT],
+      { env: { ...process.env, GH_TOKEN: token, BRANCH: branch, REPO: repo }, timeout: 5 * 60_000 });
+    } catch (e) {
+      await run('docker', ['rm', '-f', name]).catch(() => {});
+      throw e;
+    }
+  },
 });
 
 // ---------- agent state ----------

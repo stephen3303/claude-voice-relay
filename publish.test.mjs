@@ -112,6 +112,8 @@ test('the push script copies the branch without running the agent repo\'s hooks 
   for (const h of ['pre-upload', 'post-checkout', 'reference-transaction']) {
     fs.writeFileSync(path.join(src, '.git', 'hooks', h), `#!/bin/sh\ntouch ${pwned}-${h}\n`, { mode: 0o755 });
   }
+  // As root (a dev container), give the repo another owner, as the bind mount does on the PC.
+  if (process.getuid?.() === 0) execFileSync('chown', ['-R', '65534', src]);
   const remote = path.join(dir, 'remote', 'o', 'r.git');
   fs.mkdirSync(remote, { recursive: true });
   git(remote, 'init', '-q', '--bare');
@@ -125,4 +127,11 @@ test('the push script copies the branch without running the agent repo\'s hooks 
   assert.equal(r.status, 0, r.stderr);
   assert.equal(git(remote, 'log', '--format=%s', 'fix/x').trim(), 'work\ninit');
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f.startsWith('pwned')), []);
+});
+
+test('the token is out of the environment while the agent repo is read', () => {
+  const lines = PUSH_SCRIPT.split('\n');
+  const fetch = lines.findIndex((l) => / fetch /.test(l));
+  assert.ok(lines.slice(0, fetch).some((l) => /unset GH_TOKEN/.test(l)));
+  assert.doesNotMatch(lines[fetch], /GH_TOKEN|\$T/);
 });

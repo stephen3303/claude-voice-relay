@@ -26,13 +26,19 @@ export function parseRequest(text) {
 }
 
 // The fixed script the push container runs. The agent's repo is mounted read-only at /src and is only
-// read through git's own transport, from a fresh repo with no hooks or config of the agent's.
+// read through git's own transport into a fresh repo, so its hooks never run. Reading it does parse its
+// config (git treats that as safe for fetches, and a test checks the known ways to run code), so the
+// fetch also runs without the token in its environment and without any other config; the token reaches
+// only the push, which touches nothing but the fresh repo.
 export const PUSH_SCRIPT = [
   'set -e',
+  'T="$GH_TOKEN"; unset GH_TOKEN',
   'git init -q --bare /tmp/r',
   'cd /tmp/r',
-  'git fetch -q --no-tags file:///src "+refs/heads/$BRANCH:refs/heads/$BRANCH"',
-  `git -c credential.helper= -c credential.helper='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' push -q "https://github.com/$REPO.git" "refs/heads/$BRANCH:refs/heads/$BRANCH"`,
+  // Its only setting lets git read /src, which belongs to another user (-c doesn't reach upload-pack).
+  `git config -f /tmp/r/fetch.gitconfig safe.directory '*'`,
+  `GIT_CONFIG_GLOBAL=/tmp/r/fetch.gitconfig GIT_CONFIG_NOSYSTEM=1 git fetch -q --no-tags file:///src "+refs/heads/$BRANCH:refs/heads/$BRANCH"`,
+  `GH_TOKEN="$T" git -c credential.helper= -c credential.helper='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' push -q "https://github.com/$REPO.git" "refs/heads/$BRANCH:refs/heads/$BRANCH"`,
 ].join('\n');
 
 /**
