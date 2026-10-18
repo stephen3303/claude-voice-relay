@@ -31,7 +31,6 @@ jobs:
             baseline: false
           - tag: v2.7.0
             baseline: true
-    continue-on-error: ${{ matrix.baseline }}
     name: Impactor ${{ matrix.tag }}${{ matrix.baseline && ' (baseline)' || '' }}
     steps:
       - name: Get Impactor ${{ matrix.tag }}
@@ -45,6 +44,8 @@ jobs:
 
       - name: Try an Apple sign-in with a made-up Apple ID
         working-directory: impactor
+        # The baseline's rejection is expected: keep its job green so the PR checks stay readable.
+        continue-on-error: ${{ matrix.baseline }}
         env:
           TAG: ${{ matrix.tag }}
         run: |
