@@ -8,7 +8,7 @@
 | iOS build | `glasses-ios.yml` | push touching `glasses/ios/**` | nothing |
 | Claude review | `claude-review.yml` | PR opened, updated, reopened or marked ready (drafts skipped) | a Claude credential (below) |
 | Ask Claude | `claude.yml` | a comment containing `@claude` from you or a collaborator | a Claude credential |
-| Deploy cloud | `cloud-deploy.yml` | merge to main touching `cloud/**` or `site/**` | `AWS_DEPLOY_ROLE_ARN` variable (already set) |
+| Deploy cloud | `cloud-deploy.yml` | merge to main touching `cloud/**` or `site/**` | `AWS_DEPLOY_ROLE_ARN` variable (set) and the `aws-deploy` environment (`cloud/setup/update-deploy-role.ps1`) |
 | Website | `pages.yml` | merge to main touching `site/**` | nothing |
 | App Store | `glasses-appstore.yml`, `glasses-subscriptions.yml` | by hand | the `ASC_*`, `APPLE_TEAM_ID`, `META_*` secrets |
 
@@ -28,6 +28,25 @@ Claude Code loads these in any session in this repo (your PC, the cloud, and the
 
 Use one by hand: in Claude Code, "use the security-reviewer on my last commit", or on GitHub,
 "@claude have the ios-reviewer check this PR".
+
+## How the Claude workflows stay safe on a public repo
+
+- **Review (`claude-review.yml`):** Claude runs in a checkout of main, so `CLAUDE.md`, `.claude/` (agents,
+  settings, hooks) and `.mcp.json` always come from main. The PR is checked out into `./pr` as data with
+  its own Claude config deleted, and Claude's tools can read it but not run it; `ci.yml` runs the tests in
+  a job with no secrets. Fork PRs are skipped.
+- **`@claude` (`claude.yml`):** runs code, so it only acts on comments from you or collaborators, on
+  issues they opened and same-repo PRs, and it only reads your comments in the thread, since anyone can
+  comment on a public repo (not the Claude review's, which are written from the PR's content). To add a collaborator, add their username to
+  `include_comments_by_actor`. Pushes it makes use the workflow's token, so they don't start CI
+  by themselves; push again or rerun CI.
+- **No `id-token: write`** in either, so neither can mint a GitHub OIDC token at all. Separately, the
+  AWS `BridgeGitHubDeploy` role only trusts jobs in the `aws-deploy` environment, which only
+  `cloud-deploy.yml` uses and which only accepts main.
+- Actions in these jobs are pinned to commit SHAs.
+
+A workflow edited in a same-repo branch runs with the secrets on that branch's PR. That's GitHub's model:
+anyone who can push a branch can read the secrets, so only give push access to people you'd give them to.
 
 ## What you need to add (once)
 

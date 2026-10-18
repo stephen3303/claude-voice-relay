@@ -1,5 +1,6 @@
 # Deploys Bridge Cloud (cloud/infra) with the BridgeGitHubDeploy role: short-lived credentials from
-# GitHub's OIDC token, no stored AWS keys. The role only trusts this repo's main branch.
+# GitHub's OIDC token, no stored AWS keys. The role only trusts the aws-deploy environment, which only
+# this job uses and which only accepts main (cloud/setup/update-deploy-role.ps1).
 name: Cloud deploy
 on:
   push:
@@ -16,14 +17,15 @@ concurrency: cloud-deploy
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: aws-deploy
     timeout-minutes: 120   # the first domain deploy waits for the Cloudflare validation record
     defaults:
       run:
         working-directory: cloud/infra
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -35,7 +37,7 @@ jobs:
       - name: Claude connector tests
         run: node --test ../api/connector.test.mjs
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: us-east-1

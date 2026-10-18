@@ -1,6 +1,9 @@
 # Mention @claude in a PR or issue comment to have Claude answer or make a change; it can use the
 # subagents in .claude/agents ("@claude ask the security-reviewer to look at auth.mjs").
-# Only the repo owner and collaborators can trigger it, since the repo is public.
+# Only the repo owner and collaborators can trigger it, since the repo is public, and only on their own
+# issues and same-repo PRs, and Claude reads only the owner's comments in the thread: Claude runs code
+# here, so it must not act on a stranger's text or code.
+# No id-token permission, so nothing here can get an OIDC token for the AWS deploy role.
 name: Claude
 on:
   issue_comment:
@@ -16,7 +19,6 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
-  id-token: write
   actions: read
 
 jobs:
@@ -24,7 +26,8 @@ jobs:
     if: >-
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
         github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association) &&
-      contains(github.event.comment.body || github.event.review.body || format('{0} {1}', github.event.issue.title, github.event.issue.body), '@claude')
+      contains(github.event.comment.body || github.event.review.body || format('{0} {1}', github.event.issue.title, github.event.issue.body), '@claude') &&
+      (!github.event.issue || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -47,17 +50,21 @@ jobs:
           fi
           echo "ok=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: steps.gate.outputs.ok
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: steps.gate.outputs.ok
         with:
           node-version: 22
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1.0.252
         if: steps.gate.outputs.ok
         with:
+          github_token: ${{ github.token }}
+          # Anyone can comment on a public issue or PR, so Claude sees only the owner's comments. Not the
+          # Claude review's either: those are model text written from the PR. Add a collaborator here if one joins.
+          include_comments_by_actor: ${{ github.repository_owner }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
