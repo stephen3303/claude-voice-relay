@@ -86,7 +86,7 @@ export function makePro(deps) {
     }
     // A refunded transaction stays refunded, even though the copy on the phone still says it's paid.
     if (e.until) await grant(user, e);
-    const pro = await isPro(user);
+    const pro = Boolean(await plan(user));
     return { status: 200, body: { pro } };
   }
 
@@ -115,10 +115,12 @@ export function makePro(deps) {
     return { status: 200, body: { ok: true } };
   }
 
-  async function isPro(user) {
+  // 'Production' or 'Sandbox' while the user has Pro, else null. Sandbox Pro (App Review, TestFlight) is free,
+  // so voice.mjs gives it smaller daily allowances.
+  async function plan(user) {
     const p = await deps.store.getPro(user);
-    return Boolean(p && p.until > now());
+    return p && p.until > now() ? p.env ?? 'Sandbox' : null;
   }
 
-  return { claim, notify, isPro };
+  return { claim, notify, plan, isPro: async (user) => Boolean(await plan(user)) };
 }
