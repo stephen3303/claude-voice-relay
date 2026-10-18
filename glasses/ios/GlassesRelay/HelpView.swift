@@ -14,7 +14,11 @@ struct HelpView: View {
                     #else
                     HelpItem("2. Connect your PC", "In Settings, choose My PC and enter your relay's address and VOICE_TOKEN, then tap Save and test. Demo gives sample replies so you can try it first.")
                     #endif
+                    #if APP_STORE
+                    HelpItem("3. Start talking", "Tap Talk, say \"Hey Siri, talk to Bridge\", or use the Action Button. Bridge says \"Go ahead\" when it's listening.")
+                    #else
                     HelpItem("3. Start talking", "Say \"Hey Meta, start Bridge\", or tap Talk. Bridge says \"Go ahead\" when it's listening.")
+                    #endif
                 }
                 Section("Talking to your agents") {
                     HelpItem("Start a task", "Begin with \"in\" and the project's name: \"In trading bot, add a stop-loss check.\"")
