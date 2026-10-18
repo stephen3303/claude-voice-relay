@@ -10,6 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
+import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +32,9 @@ const cfg = {
   ttsVoice: process.env.TTS_VOICE || 'coral',
   hookPort: Number(process.env.HOOK_PORT || 47878),
   image: process.env.AGENT_IMAGE || 'claude-voice-agent:latest',
+  githubAppId: process.env.GITHUB_APP_ID || '',
+  githubAppKeyFile: process.env.GITHUB_APP_KEY_FILE || '',
+  agentGhToken: process.env.AGENT_GH_TOKEN || '',
 };
 
 const log = (...a) => {
@@ -51,12 +55,15 @@ if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run
 const VOICE_PROMPT = [
   'You are running unattended in a Docker container with full permissions; the repository is mounted at /work.',
   'The user is away from the screen, often driving, and only hears a spoken summary through headphones.',
-  'When you finish a feature or bug fix, commit and push it.',
+  'When you finish a feature or bug fix, commit it on a branch, push the branch and open a pull request with gh',
+  '(pushes to main may be blocked); if the branch already has an open pull request, just push.',
   "End every final message with a line that starts exactly with 'SPOKEN:' followed by one or two plain sentences for text-to-speech:",
   'no code, file paths, markdown, or symbols that read badly aloud.',
   'If you need a decision, stop and make the SPOKEN line a single yes-or-no question, then continue after the user answers.',
   'Everything above the SPOKEN line may be as detailed as you like; the user reads it later.',
 ].join(' ');
+// Added when a turn has no GitHub token, so the user hears that work wasn't pushed instead of a failed push.
+const NO_GITHUB = 'This turn has no GitHub access: commit locally, do not push or open a pull request, and say in the SPOKEN line that the work is committed but not pushed.';
 
 // ---------- what the relay says ----------
 // Everything said is held for the glasses app, which long-polls /voice/inbox and reads new
@@ -86,13 +93,30 @@ function say(text, { spoken } = {}) {
   for (const wake of [...inboxWaiters]) wake();
 }
 
-// ---------- host values passed into agent containers ----------
+// ---------- GitHub access for agents ----------
+// Agents never get the owner's own GitHub login. Either a GitHub App (preferred: github-app.mjs,
+// set up with setup-github-app.mjs) gives each turn an hour-long token for that agent's repo only,
+// or AGENT_GH_TOKEN holds a fine-grained token. Without either, agents can commit but not push.
 async function hostValue(cmd, args) { try { return (await run(cmd, args)).stdout.trim(); } catch { return ''; } }
-const hostEnv = {
-  GH_TOKEN: await hostValue('gh', ['auth', 'token']),
-  GIT_NAME: await hostValue('git', ['config', '--global', 'user.name']),
-  GIT_EMAIL: await hostValue('git', ['config', '--global', 'user.email']),
+const hostGit = {
+  name: await hostValue('git', ['config', '--global', 'user.name']),
+  email: await hostValue('git', ['config', '--global', 'user.email']),
 };
+let ghApp = null;
+if (cfg.githubAppId && cfg.githubAppKeyFile) {
+  try { ghApp = makeGitHubApp({ appId: cfg.githubAppId, privateKey: fs.readFileSync(cfg.githubAppKeyFile), log }); }
+  catch (e) { log('GitHub App key unreadable:', e.message); }
+}
+if (!ghApp && !cfg.agentGhToken) log('WARNING: no GitHub access for agents (GITHUB_APP_ID or AGENT_GH_TOKEN); they can commit but not push.');
+
+const agentGitHub = makeAgentGitHub({
+  // Outside the repo: the agent working on this repo mounts it and could otherwise rewrite its own pin.
+  ghApp, fallbackToken: cfg.agentGhToken, hostGit, log, pinsFile: path.join(os.homedir(), '.bridge', 'github-pins.json'),
+  getRemote: (repoPath) => hostValue('git', ['-C', repoPath, 'remote', 'get-url', 'origin']),
+});
+
+// Passed to each turn with "docker exec -e", never baked into the container, so a token only lives as long as a turn needs it.
+const GH_ENV = ['GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'];
 
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
@@ -148,30 +172,42 @@ function parseTask(body) {
 }
 
 // ---------- containers ----------
-const PASS_ENV = ['CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'];
+// Agents run with every permission inside their container, so what's mounted is the boundary. Never
+// the relay's own folder (an agent could change the code the host runs, and read .env) or the folder
+// holding the App key, nor any folder above them (an alias pointing at the home folder).
+const PROTECTED = [ROOT, path.join(os.homedir(), '.bridge')];
+// Bumped with agent/Dockerfile's label when the image changes in a way the relay relies on
+// (version 2: git offers the token to github.com only, and gh is installed).
+const AGENT_IMAGE_VERSION = '2';
 async function ensureContainer(a) {
-  const { stdout } = await run('docker', ['ps', '-a', '--filter', `name=^${a.container}$`, '--format', '{{.State}}']);
-  if (stdout.trim() === 'running') return;
-  if (stdout.trim()) await run('docker', ['rm', '-f', a.container]);
+  if (unsafeMount(a.repoPath, PROTECTED)) {
+    await run('docker', ['rm', '-f', a.container]).catch(() => {});
+    throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
+  }
+  // Docker would mount a missing folder as a new empty one.
+  if (!fs.existsSync(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
+  const [imageId, version] = await run('docker', ['image', 'inspect', '--format',
+    '{{.Id}} {{index .Config.Labels "claude-voice-relay.image"}}', cfg.image]).then((r) => r.stdout.trim().split(' '), () => []);
+  if (version !== AGENT_IMAGE_VERSION) throw new Error('The agent image is out of date. On the PC, run npm run build-agent.');
+  // A container from another image (an older build, which may hold the owner's old full token in its
+  // environment) is replaced; sessions survive in the home volume.
+  const [state, image] = await run('docker', ['inspect', '--format', '{{.State.Status}} {{.Image}}', a.container])
+    .then((r) => r.stdout.trim().split(' '), () => []);
+  if (state === 'running' && image === imageId) return;
+  if (state) await run('docker', ['rm', '-f', a.container]);
   // Secrets go through the docker CLI's environment ("-e NAME"), not argv.
-  const env = {
-    ...process.env,
-    CLAUDE_CODE_OAUTH_TOKEN: cfg.oauth || '',
-    GH_TOKEN: hostEnv.GH_TOKEN,
-    GIT_AUTHOR_NAME: hostEnv.GIT_NAME, GIT_COMMITTER_NAME: hostEnv.GIT_NAME,
-    GIT_AUTHOR_EMAIL: hostEnv.GIT_EMAIL, GIT_COMMITTER_EMAIL: hostEnv.GIT_EMAIL,
-  };
   await run('docker', ['run', '-d', '--name', a.container, '--label', 'claude-voice-relay=1',
     '-v', `${a.repoPath}:/work`, '-v', `${a.container}-home:/home/node/.claude`,
-    ...PASS_ENV.flatMap((k) => ['-e', k]), cfg.image], { env });
+    '-e', 'CLAUDE_CODE_OAUTH_TOKEN', cfg.image], { env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: cfg.oauth || '' } });
 }
 
-function runClaude(a, prompt) {
+function runClaude(a, prompt, ghEnv) {
   return new Promise((resolve, reject) => {
-    const args = ['exec', '-i', '-w', '/work', a.container, 'claude', '-p', '--output-format', 'json',
-      '--dangerously-skip-permissions', '--append-system-prompt', VOICE_PROMPT];
+    const args = ['exec', '-i', '-w', '/work', ...GH_ENV.flatMap((k) => ['-e', k]), a.container,
+      'claude', '-p', '--output-format', 'json', '--dangerously-skip-permissions', '--append-system-prompt',
+      ghEnv.GH_TOKEN ? VOICE_PROMPT : `${VOICE_PROMPT} ${NO_GITHUB}`];
     if (a.sessionId) args.push('--resume', a.sessionId);
-    const p = spawn('docker', args, { windowsHide: true });
+    const p = spawn('docker', args, { windowsHide: true, env: { ...process.env, ...ghEnv } });
     let out = '', err = '';
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
@@ -197,13 +233,15 @@ function spoken(result) {
 async function turn(a, prompt, photo) {
   a.busy = true; a.awaiting = false; a.lastAt = Date.now(); save();
   const photoIn = photo && `/tmp/${path.basename(photo)}`;
+  let ghEnv;
   try {
     await ensureContainer(a);
     if (photo) {
       await run('docker', ['cp', photo, `${a.container}:${photoIn}`]);
       fs.rmSync(photo, { force: true });
     }
-    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt);
+    ghEnv = await agentGitHub.env(a);
+    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt, ghEnv);
     a.sessionId = r.session_id || a.sessionId;
     fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
     const line = spoken(r.result);
@@ -216,6 +254,8 @@ async function turn(a, prompt, photo) {
     log(a.name, 'turn failed:', e.message);
     say(`${a.name} failed. ${e.message.slice(0, 200)}`);
   } finally {
+    // Not awaited, so a slow GitHub doesn't keep the agent busy; revoke logs its own failures.
+    agentGitHub.release(ghEnv).catch(() => {});
     if (photo) {
       fs.rmSync(photo, { force: true });
       await run('docker', ['exec', a.container, 'rm', '-f', photoIn]).catch(() => {});
@@ -243,6 +283,11 @@ async function startTask(body) {
   let a = agents.get(name);
   if (a?.busy) return say(`${name} is still working. Say stop ${name} first, or wait for it.`);
   if (!a) { a = { name, repoPath: parsed.repo, container: `claude-agent-${norm(name)}`, queue: [] }; agents.set(name, a); }
+  else if (path.resolve(a.repoPath) !== path.resolve(parsed.repo)) {
+    // The name now leads to another folder (aliases.json changed): its container mounts the old one.
+    await run('docker', ['rm', '-f', a.container]).catch(() => {});
+    a.repoPath = parsed.repo;
+  }
   a.sessionId = null; // a new task gets fresh context
   say(`Starting ${name}.`);
   turn(a, parsed.task);

@@ -1,5 +1,7 @@
 .env
+*.pem
 state.json
+github-pins.json
 outbox.json*
 logs/
 node_modules/

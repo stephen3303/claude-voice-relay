@@ -81,8 +81,52 @@ The phone reaches the relay over HTTPS with `tailscale serve --bg 47879`. In the
 2. `npm run build-agent`
 3. `npm run install-hook`
 4. `npm start` (or let the ClaudeVoiceRelay scheduled task start it at logon)
+5. Give agents their own GitHub access (below).
 
 Tested from my phone: the relay has been verified end to end from an iPhone.
+
+## GitHub access for agents
+Agents push with their own GitHub App, never your login. Each turn the relay hands the agent's
+container a fresh token that only covers that agent's repository, with contents and pull request
+access and nothing else (no workflows, secrets, settings or other repos), and revokes it when the
+turn ends. Their commits and pull requests show as `<app-name>[bot]`. A token also lasts at most an
+hour, so a turn longer than that can't push at the end.
+
+The relay only hands out a token for a repo whose default branch is protected as below, and never
+lets an agent work in the relay's own folder (it could change the code your PC runs) or in a folder
+above it or above `%USERPROFILE%\.bridge`, where the App key is. To have agents work on this repo,
+clone it again into a subfolder, keeping the repo's name (a folder is only matched to the GitHub
+repo of the same name): in your projects folder, `git clone https://github.com/<you>/claude-voice-relay agents\claude-voice-relay`.
+`aliases.json` already sends "voice relay" there.
+
+**In each repo the App will be installed on, first:**
+1. Add a `.github/CODEOWNERS` file containing `* @<your-username>` (this repo has one).
+2. **Settings → Rules → Rulesets → New ruleset → New branch ruleset.** Name `Protect main`,
+   Enforcement **Active**. **Bypass list → Add bypass → Repository admin**, set to **For pull
+   requests only** (so you can still merge your own pull requests); never add the agents App.
+   **Target branches → Add target → Include default branch.** Keep **Restrict deletions** and
+   **Block force pushes** on. Tick **Require a pull request before merging**, set **Required
+   approvals** to 1, and tick **Require review from Code Owners** and **Require approval of the most
+   recent reviewable push**. **Create.**
+3. **New branch ruleset** again. Name `Protect branches`, Enforcement **Active**, **Bypass list →
+   Repository admin**, set to **Always**. **Target branches → Add target → Include all branches.**
+   Keep **Restrict deletions** and **Block force pushes** on, nothing else. **Create.**
+
+Agents then can't push to, rewrite or delete any branch but their own new ones, and the bot's
+approval doesn't count, so nothing merges without you.
+
+**Then, once:**
+1. On the PC, in this folder: `node setup-github-app.mjs`. The browser opens GitHub; click
+   **Create GitHub App**. The private key goes to `%USERPROFILE%\.bridge\` (readable only by you)
+   and `.env` gets `GITHUB_APP_ID` and `GITHUB_APP_KEY_FILE`.
+2. On the install page that opens: **Only select repositories**, pick the repos agents may push to,
+   **Install**. Add more later under GitHub **Settings → Applications → Installed GitHub Apps**.
+3. `npm run build-agent`, then restart the relay. Older agent containers are replaced on their next
+   turn; their sessions are kept.
+
+Without the App you can put a fine-grained token in `AGENT_GH_TOKEN` instead (GitHub **Settings →
+Developer settings → Fine-grained tokens**, only the agents' repos, Contents and Pull requests
+read and write, an expiry). It acts as you, so the rulesets can't tell agents apart; the App is better.
 
 ## Use Bridge from Claude (custom connector)
 Bridge Cloud is also a remote MCP server, so Claude (claude.ai, the Claude apps, Claude Code) can
