@@ -64,6 +64,12 @@ test('the whole export passes its own checks and has the public files', () => {
     assert.ok(!existsSync(join(dest, 'cloud')));
     assert.match(readFileSync(join(dest, 'README.md'), 'utf8'), /## Licence/);
     assert.doesNotMatch(readFileSync(join(dest, 'glasses/ios/GlassesRelay/Store.swift'), 'utf8'), /StoreKit/);
+    // Every local import resolves inside the export, so a new relay module can't be left behind.
+    for (const f of files.filter((f) => f.endsWith('.mjs'))) {
+      for (const [, spec] of readFileSync(join(dest, f), 'utf8').matchAll(/from '(\.{1,2}\/[^']+)'/g)) {
+        assert.ok(existsSync(join(dest, dirname(f), spec)), `${f} imports ${spec}`);
+      }
+    }
   } finally {
     rmSync(dest, { recursive: true, force: true });
   }
