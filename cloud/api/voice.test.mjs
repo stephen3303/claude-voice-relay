@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeHandler } from './voice.mjs';
 
 function setup() {
-  const held = new Map(), msgs = new Map(), started = [], looked = [], devices = new Map(), listening = [], delivered = [];
+  const spoken = [], held = new Map(), msgs = new Map(), started = [], looked = [], devices = new Map(), listening = [], delivered = [];
   let clock = 1_000_000;
   const store = {
     getHeld: async (u) => held.get(u) ?? null,
@@ -22,6 +22,7 @@ function setup() {
       stopListening: async (u) => listening.push(`stop:${u}`),
     },
     deliver: async (u, text, from) => delivered.push({ u, text, from, at: clock }),
+    speak: async (text) => { if (text === 'fail') throw new Error('Polly down'); spoken.push(text); return new Uint8Array([0xff, 0xf3, text.length]); },
     now: () => clock,
     sleep: async (ms) => { clock += ms; },
   });
@@ -29,7 +30,7 @@ function setup() {
     requestContext: { http: { method }, authorizer: user ? { jwt: { claims: { sub: user } } } : undefined },
     rawPath: `/api${path}`, body, isBase64Encoded: !!base64, queryStringParameters: query, headers,
   });
-  return { call, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
+  return { call, spoken, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
 }
 
 test('needs a signed-in user', async () => {
@@ -162,4 +163,19 @@ test('dictation variants of "send it" confirm', async () => {
     assert.equal((await call('POST', '/voice/confirm', { body: `task: ${said}` })).body, 'Sent.', said);
     assert.equal(started.length, 1, said);
   }
+});
+
+test('tts answers MP3 as base64, and a failure is a non-200 so the app falls back', async () => {
+  const { call, spoken } = setup();
+  const r = await call('POST', '/voice/tts', { body: JSON.stringify({ text: ' Hello there. ' }) });
+  assert.equal(r.statusCode, 200);
+  assert.equal(r.headers['content-type'], 'audio/mpeg');
+  assert.equal(r.isBase64Encoded, true);
+  assert.deepEqual([...Buffer.from(r.body, 'base64')], [0xff, 0xf3, 12]);
+  assert.deepEqual(spoken, ['Hello there.']);
+  assert.equal((await call('POST', '/voice/tts', { body: '   ' })).statusCode, 400);
+  assert.equal((await call('POST', '/voice/tts', { body: 'fail' })).statusCode, 500);
+  await call('POST', '/voice/tts', { body: 'x'.repeat(5000) });
+  assert.equal(spoken.at(-1).length, 3000, 'capped at Polly\'s limit');
+  assert.equal((await call('POST', '/voice/tts', { body: 'hi', user: null })).statusCode, 401);
 });

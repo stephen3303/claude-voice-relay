@@ -1,4 +1,4 @@
-// Bridge Cloud voice API: the relay's protocol (/voice/confirm, /voice/inbox, /voice/photo)
+// Bridge Cloud voice API: the relay's protocol (/voice/confirm, /voice/inbox, /voice/photo, /voice/tts)
 // for signed-in Pro users, plus /voice/send (no read-back) and the phone's push registration
 // (push.mjs). One Lambda behind API Gateway, whose Lambda authorizer checks the Bridge session (auth.mjs).
 // Dependencies are passed in, so tests run it with fakes and no AWS.
@@ -15,6 +15,7 @@ const HOLD_MS = 10 * 60_000;          // an unconfirmed task expires, as on the 
 const INBOX_KEEP_S = 7 * 24 * 3600;   // inbox messages are kept a week (DynamoDB TTL)
 const PHOTO_MAX = 10 * 1024 * 1024;
 const TOKEN = /^[0-9a-f]{32,200}$/i;   // APNs device tokens are hex
+const SPEAK_MAX = 3000;               // Polly's SynthesizeSpeech limit, in characters
 const TEST_CALL = 'This is Bridge, checking that I can reach you. Say goodbye to hang up.';
 
 export const LOOK_PROMPT = [
@@ -29,6 +30,7 @@ export const LOOK_PROMPT = [
  * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not)
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
+ * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
  * deps.now() -> ms, deps.sleep(ms)
  */
 export function makeHandler(deps) {
@@ -149,6 +151,15 @@ export function makeHandler(deps) {
         await deps.deliver(user, TEST_CALL, 'Bridge');
         return json(200, { ok: true });
       }
+      if (route === 'POST /voice/tts') {
+        // The line the app is about to speak, as MP3. Any failure is a non-200, so the app uses the phone's voice.
+        let said = raw.toString('utf8');
+        try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
+        said = said.trim().slice(0, SPEAK_MAX);
+        if (!said) return text(400, 'Nothing to say.');
+        const mp3 = await deps.speak(said);
+        return { statusCode: 200, headers: { 'content-type': 'audio/mpeg' }, body: Buffer.from(mp3).toString('base64'), isBase64Encoded: true };
+      }
       if (route === 'POST /voice/photo') {
         let said = '';
         try { said = decodeURIComponent(event.headers?.['x-question'] || '').trim(); } catch { /* keep empty */ }
@@ -157,8 +168,9 @@ export function makeHandler(deps) {
       return text(404, 'Not found.');
     } catch (e) {
       console.error(route, e);
-      // The app retries push registration on a failure, so it must see one; voice routes speak the error instead.
-      if (/^\S+ \/(push\/|voice\/listening)/.test(route)) return json(500, { error: 'Bridge Cloud hit an error.' });
+      // The app retries push registration and falls back to the phone's voice on a failure, so those must see
+      // one; the other voice routes speak the error instead.
+      if (/^\S+ \/(push\/|voice\/listening|voice\/tts)/.test(route)) return json(500, { error: 'Bridge Cloud hit an error.' });
       return text(200, "Sorry, Bridge Cloud hit an error. Try again in a moment.");
     }
   };

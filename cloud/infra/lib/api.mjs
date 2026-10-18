@@ -54,6 +54,9 @@ export class ApiStack extends Stack {
       ],
     }));
 
+    // Spoken replies (/api/voice/tts). Polly has no resource-level permissions for SynthesizeSpeech.
+    voice.addToRolePolicy(new iam.PolicyStatement({ actions: ['polly:SynthesizeSpeech'], resources: ['*'] }));
+
     const api = new apigw.HttpApi(this, 'Http', { apiName: 'bridge-api' });
 
     // Session signing key: RSA in KMS, so the private half can't be read or leaked.
@@ -101,6 +104,7 @@ export class ApiStack extends Stack {
       ['POST', '/api/voice/send', voiceIntegration, sessions],
       ['GET', '/api/voice/inbox', voiceIntegration, sessions],
       ['POST', '/api/voice/photo', voiceIntegration, sessions],
+      ['POST', '/api/voice/tts', voiceIntegration, sessions],
       ['DELETE', '/api/voice/listening', voiceIntegration, sessions],
       ['POST', '/api/push/register', voiceIntegration, sessions],
       ['DELETE', '/api/push/register', voiceIntegration, sessions],

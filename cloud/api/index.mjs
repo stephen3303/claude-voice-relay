@@ -1,8 +1,9 @@
-// Lambda entry point: wires voice.mjs to DynamoDB, Bedrock and APNs (push.mjs). The AWS SDK v3 ships with the
+// Lambda entry point: wires voice.mjs to DynamoDB, Bedrock, Polly and APNs (push.mjs). The AWS SDK v3 ships with the
 // Node.js 22 Lambda runtime, so there is nothing to bundle.
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
+import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 import { KMSClient, SignCommand, GetPublicKeyCommand } from '@aws-sdk/client-kms';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { createHash, createPublicKey } from 'node:crypto';
@@ -14,6 +15,8 @@ const TABLE = process.env.TABLE;
 const LOOK_MODEL = process.env.LOOK_MODEL || 'us.anthropic.claude-haiku-5-5';
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const bedrock = new BedrockRuntimeClient({});
+const polly = new PollyClient({});
+const SPEECH_VOICE = process.env.SPEECH_VOICE || 'Ruth';
 const kms = new KMSClient({});
 
 // Single table. pk USER#<sub>; sk HELD (the task waiting for "send it"), SEQ (message counter),
@@ -141,6 +144,19 @@ async function look(jpeg, said) {
   return r.output?.message?.content?.find((c) => c.text)?.text?.trim() || "I couldn't make out the photo.";
 }
 
+// The app's spoken replies. The generative engine is Polly's most natural; Ruth also has a neural voice,
+// used if the generative one fails (throttling, or a region without it).
+async function speak(text) {
+  const params = { Text: text, VoiceId: SPEECH_VOICE, OutputFormat: 'mp3', SampleRate: '24000' };
+  let r;
+  try { r = await polly.send(new SynthesizeSpeechCommand({ ...params, Engine: 'generative' })); }
+  catch (e) {
+    console.warn('generative speech failed, using neural:', e.name, e.message);
+    r = await polly.send(new SynthesizeSpeechCommand({ ...params, Engine: 'neural' }));
+  }
+  return r.AudioStream.transformToByteArray();
+}
+
 // Cloud agents (Fargate, GitHub App) are build step 4 in cloud/DESIGN.md. Until then a confirmed task
 // is acknowledged honestly instead of pretending to run.
 async function startTask(user, { project, task }) {
@@ -148,7 +164,7 @@ async function startTask(user, { project, task }) {
   return 'Sent.';
 }
 
-export const handler = makeHandler({ store, look, startTask, devices, deliver });
+export const handler = makeHandler({ store, look, startTask, devices, deliver, speak });
 
 // ---------- accounts (auth.mjs): Sign in with Apple, sessions signed by KMS ----------
 let appleKeys = null, appleKeysAt = 0, publicJwk = null;
