@@ -12,6 +12,8 @@ final class Conversation: NSObject, ObservableObject {
     @Published var phase: Phase = .idle
     @Published var transcript: [(who: String, text: String)] = []
     @Published var status = ""
+    /// Takes a photo with the glasses; set by GlassesController.
+    var takePhoto: (() async throws -> Data)?
 
     private let engine = AVAudioEngine()
     private let synth = AVSpeechSynthesizer()
@@ -184,8 +186,17 @@ final class Conversation: NSObject, ObservableObject {
         Task {
             phase = .thinking
             let reply: String
-            do { reply = try await Relay.shared.say(Self.forRelay(text)) }
-            catch { reply = "I couldn't reach your PC. \(error.localizedDescription)" }
+            if Self.wantsPhoto(text), let takePhoto {
+                await say("Taking a picture.")
+                phase = .thinking
+                do { reply = try await Relay.shared.photo(try await takePhoto(), said: text) }
+                catch { reply = error.localizedDescription }
+                // The camera session can disturb the Bluetooth audio route; put the glasses mic back.
+                try? configureAudioForGlasses()
+            } else {
+                do { reply = try await Relay.shared.say(Self.forRelay(text)) }
+                catch { reply = "I couldn't reach your PC. \(error.localizedDescription)" }
+            }
             if reply.hasPrefix("Sent") { awaitingAgent = true }
             transcript.append(("Relay", reply))
             await say(reply)
@@ -197,8 +208,14 @@ final class Conversation: NSObject, ObservableObject {
 
     /// "In trading bot, add a check" starts a task, as the Shortcut's "task:" prefix does.
     /// Anything else (send it, yes, status, an answer to an agent) goes through as said.
-    static func forRelay(_ text: String) -> String {
+    nonisolated static func forRelay(_ text: String) -> String {
         text.range(of: #"^(in|on)\s"#, options: [.regularExpression, .caseInsensitive]) != nil ? "task: \(text)" : text
+    }
+
+    /// "Look at this, ...", "take a picture", "what am I looking at", "send this to <project>, ..."
+    nonisolated static func wantsPhoto(_ text: String) -> Bool {
+        text.range(of: #"^(take a (picture|photo)|look at (this|that)|what am i looking at|what('s| is) (this|that)\b|(send|show|give) (this|it|that)( photo| picture)? to )"#,
+                   options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     // MARK: agent messages

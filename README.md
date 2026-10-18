@@ -48,6 +48,14 @@ whatever your agents say. Say "in <project>, <task>" to start a task, "send it" 
 "yes" to answer an agent, and "goodbye" to hang up. After "Sent." it stays on the line for up to
 15 minutes so you hear the agent's answer.
 
+**Photos:** say "look at this, ..." / "what am I looking at" for a quick answer (`POST /voice/photo`
+runs `claude -p` on the photo), or "send this to <project>, ..." to hand it to that agent. The photo is
+copied into the agent's container `/tmp` (never the repo, so it can't be committed) and deleted
+after the answer. Needs Camera enabled for Bridge in the Wearables Developer Center and
+"Allow camera" tapped once in the app.
+
+**Shortcuts / Siri:** Talk to Bridge, Ask Bridge (text in, reply out) and Look with Bridge.
+
 The phone reaches the relay over HTTPS with `tailscale serve --bg 47879`. In the app, enter that
 `https://<pc>.<tailnet>.ts.net` address and your `VOICE_TOKEN`.
 

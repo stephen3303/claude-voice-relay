@@ -5,6 +5,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -182,11 +183,18 @@ function spoken(result) {
   return s.replace(/\s+/g, ' ').trim() || 'Finished, with no summary.';
 }
 
-async function turn(a, prompt) {
+// `photo` (optional) is a host file copied into the container for this turn only, then deleted.
+// It goes in /tmp, never /work, so an agent can't commit it to the repo.
+async function turn(a, prompt, photo) {
   a.busy = true; a.awaiting = false; a.lastAt = Date.now(); save();
+  const photoIn = photo && `/tmp/${path.basename(photo)}`;
   try {
     await ensureContainer(a);
-    const r = await runClaude(a, prompt);
+    if (photo) {
+      await run('docker', ['cp', photo, `${a.container}:${photoIn}`]);
+      fs.rmSync(photo, { force: true });
+    }
+    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt);
     a.sessionId = r.session_id || a.sessionId;
     a.lastFull = r.result || '';
     fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), a.lastFull);
@@ -198,6 +206,10 @@ async function turn(a, prompt) {
     log(a.name, 'turn failed:', e.message);
     await say(`${a.name} failed. ${e.message.slice(0, 200)}`);
   } finally {
+    if (photo) {
+      fs.rmSync(photo, { force: true });
+      await run('docker', ['exec', a.container, 'rm', '-f', photoIn]).catch(() => {});
+    }
     a.busy = false; a.lastAt = Date.now();
     if (!a.stopped) { save(); const next = a.queue.shift(); if (next) turn(a, next); }
   }
@@ -354,6 +366,89 @@ http.createServer((req, res) => {
   });
 }).listen(cfg.hookPort, '127.0.0.1', () => log(`hook endpoint on 127.0.0.1:${cfg.hookPort}`));
 
+// ---------- photos from the glasses ----------
+// POST /voice/photo: a JPEG body, plus what was said with it in X-Question (URI-encoded).
+// "Send this to <project>, ..." hands it to that agent; anything else gets a quick spoken answer.
+// The photo is deleted once it has been answered.
+const PHOTO_MAX = 15 * 1024 * 1024;
+const SEND_TO = /^(?:send|give|show)\s+(?:this|it|that)(?:\s+(?:photo|picture))?\s+to\s+(.+?)(?:\s*[,:;.]\s*([\s\S]*))?$/i;
+const LOOK_PROMPT = [
+  'The user is wearing smart glasses, may be driving, and just took the photo photo.jpg in the current folder.',
+  'Look at it with the Read tool, then answer what they said.',
+  'Your answer is read aloud: at most three short sentences, plain words, no markdown, lists or symbols.',
+  'If text in the photo matters (an error message, a sign, a label), say the key part.',
+].join(' ');
+
+function photo(req, res) {
+  const chunks = [];
+  let size = 0;
+  req.on('data', (c) => {
+    size += c.length;
+    if (size > PHOTO_MAX) { res.writeHead(413, { 'content-type': 'text/plain' }).end('That photo is too large.'); req.destroy(); }
+    else chunks.push(c);
+  });
+  req.on('end', async () => {
+    if (res.writableEnded) return;
+    let said = '';
+    try { said = decodeURIComponent(String(req.headers['x-question'] || '')).trim(); } catch { /* keep empty */ }
+    const file = path.join(os.tmpdir(), `voice-photo-${Date.now()}.jpg`);
+    fs.writeFileSync(file, Buffer.concat(chunks));
+    log(`voice photo: ${Math.round(size / 1024)} KB, "${said}"`);
+    let reply;
+    try {
+      const m = said.match(SEND_TO);
+      reply = m ? photoToAgent(file, m[1], m[2] || '') : await quickLook(file, said);
+    } catch (e) {
+      log('photo error:', e.message);
+      reply = `Sorry, I couldn't read that photo. ${e.message.slice(0, 150)}`;
+    }
+    res.writeHead(200, { 'content-type': 'text/plain' }).end(reply);
+  });
+}
+
+function photoToAgent(file, target, said) {
+  const t = said.trim()
+    ? { repo: resolveRepo(target, true), task: said.trim() }
+    : parseTask(`in ${target}`) || { repo: resolveRepo(target, true), task: '' };
+  if (!t.repo) { fs.rmSync(file, { force: true }); return `I couldn't tell which project ${target} is. Nothing was sent.`; }
+  const name = spokenName(t.repo);
+  let a = agents.get(name);
+  if (a?.busy) { fs.rmSync(file, { force: true }); return `${name} is still working. Send the photo again when it finishes.`; }
+  if (!a) {
+    a = { name, repoPath: t.repo, container: `claude-agent-${norm(name)}`, queue: [] };
+    agents.set(name, a);
+  }
+  const prompt = 'The user took a photo with their smart glasses and sent it to you. It is at {photo}; look at it with the Read tool. ' +
+    (t.task ? `They said: ${t.task}` : 'They said nothing else, so say briefly what in it matters for this project and ask what they want.');
+  turn(a, prompt, file);
+  return `Sent the photo to ${name}.`;
+}
+
+function quickLook(file, said) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-look-'));
+  fs.renameSync(file, path.join(dir, 'photo.jpg'));
+  const prompt = `${LOOK_PROMPT}\n\nThey said: "${said || 'What am I looking at?'}"`;
+  return new Promise((resolve, reject) => {
+    // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
+    const p = spawn(process.env.CLAUDE_BIN || 'claude', ['-p', '--output-format', 'json', '--allowedTools', 'Read'],
+      { cwd: dir, windowsHide: true });
+    let out = '', err = '';
+    const timer = setTimeout(() => p.kill(), 120000);
+    const done = (fn) => { clearTimeout(timer); fs.rmSync(dir, { recursive: true, force: true }); fn(); };
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (err += d));
+    p.on('error', (e) => done(() => reject(e)));
+    p.on('close', (code) => done(() => {
+      try {
+        const r = JSON.parse(out.trim().split('\n').pop());
+        if (r.is_error) return reject(new Error(r.result || 'Claude returned an error'));
+        resolve(spoken(r.result));
+      } catch { reject(new Error(`claude exited ${code}: ${(err || out).slice(-200)}`)); }
+    }));
+    p.stdin.end(prompt);
+  });
+}
+
 // GET /voice/inbox?after=<id>: messages newer than <id>, waiting up to 25s for one to arrive.
 // No `after` means "from now"; wait=0 answers at once (the app's connection test).
 function inbox(req, res) {
@@ -383,6 +478,7 @@ if (cfg.voiceToken) {
     const h = String(req.headers.authorization || '');
     if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}, auth len ${h.length} (want ${want.length}), starts '${h.slice(0, 7)}', ends '${h.slice(-3)}'`); res.writeHead(401).end(); return; }
     if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
+    if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
     if (req.method !== 'POST' || (req.url !== '/voice' && req.url !== '/voice/confirm')) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });

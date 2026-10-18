@@ -39,6 +39,17 @@ final class Relay {
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// A glasses photo plus what was said with it. Returns the line to speak.
+    func photo(_ jpeg: Data, said: String) async throws -> String {
+        var req = try request("voice/photo", timeout: 150)
+        req.httpMethod = "POST"
+        req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        req.setValue(said.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "", forHTTPHeaderField: "X-Question")
+        req.httpBody = jpeg
+        let data = try await fetch(req)
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Messages after `after` (nil = from now). With `wait`, the relay holds the request up to 25s.
     func inbox(after: Int?, wait: Bool = true) async throws -> Inbox {
         var query: [String] = []

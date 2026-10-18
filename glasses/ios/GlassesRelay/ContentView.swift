@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var url = Relay.shared.baseURL
     @State private var token = Relay.shared.token
     @State private var testResult = ""
+    @State private var photoResult = ""
 
     var body: some View {
         NavigationStack {
@@ -14,6 +15,20 @@ struct ContentView: View {
                     LabeledContent("Meta AI registration", value: glasses.registration)
                     LabeledContent("Connected glasses", value: "\(glasses.deviceCount)")
                     Button("Connect to Meta AI") { Task { await glasses.register() } }
+                    if glasses.cameraAllowed {
+                        Button("Test photo") {
+                            photoResult = "Taking a picture…"
+                            Task {
+                                do {
+                                    let jpeg = try await glasses.capturePhoto()
+                                    photoResult = try await Relay.shared.photo(jpeg, said: "What am I looking at?")
+                                } catch { photoResult = error.localizedDescription }
+                            }
+                        }
+                    } else {
+                        Button("Allow camera") { Task { await glasses.allowCamera() } }
+                    }
+                    if !photoResult.isEmpty { Text(photoResult).font(.footnote) }
                     if let e = glasses.lastError { Text(e).font(.footnote).foregroundStyle(.red) }
                 }
                 Section {

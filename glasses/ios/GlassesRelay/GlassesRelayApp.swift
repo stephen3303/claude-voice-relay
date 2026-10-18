@@ -3,7 +3,7 @@ import MWDATCore
 
 @main
 struct GlassesRelayApp: App {
-    @StateObject private var glasses = GlassesController()
+    @StateObject private var glasses = GlassesController.shared
 
     init() {
         // The toolkit must be configured once, before anything touches Wearables.shared.

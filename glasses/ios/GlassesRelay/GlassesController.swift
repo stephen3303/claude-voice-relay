@@ -1,13 +1,18 @@
 import Foundation
 import MWDATCore
+import MWDATCamera
 
 /// Registers with Meta AI and listens for "Hey Meta, start Bridge".
 /// Modeled on the toolkit's BirdSpotter sample (DatGlassesVoiceRepository): wait for registration,
 /// open the voice channel, follow the device list, and reopen the channel whenever it drops.
 @MainActor
 final class GlassesController: ObservableObject {
+    /// One per app, shared with the Shortcuts actions.
+    static let shared = GlassesController()
+
     @Published var registration = "Unknown"
     @Published var deviceCount = 0
+    @Published var cameraAllowed = false
     @Published var lastError: String?
 
     let conversation = Conversation()
@@ -15,11 +20,22 @@ final class GlassesController: ObservableObject {
     private var stream: VoiceInvocationsStream?
     private var listeningOn: DeviceIdentifier?
     private var devices: [DeviceIdentifier] = []
+    private var started = false
+
+    private init() {
+        conversation.takePhoto = { [weak self] in
+            guard let self else { throw PhotoFailure.noGlasses }
+            return try await self.capturePhoto()
+        }
+    }
 
     func start() async {
+        guard !started else { return }
+        started = true
         registration = "\(Wearables.shared.registrationState)"
         Task { for await state in Wearables.shared.registrationStateStream() { registration = "\(state)" } }
         Task { await followDevices() }
+        Task { await awaitRegistered(); await refreshCameraPermission() }
         await keepVoiceChannelOpen()
     }
 
@@ -88,6 +104,104 @@ final class GlassesController: ObservableObject {
         listeningOn = nil
         do { try stream.start(deviceIdentifier: preferred); listeningOn = preferred; lastError = nil }
         catch { lastError = "Waiting for glasses: \(error)" }
+    }
+
+    // MARK: camera
+
+    enum PhotoFailure: LocalizedError {
+        case noGlasses, notAllowed, timedOut, failed(String)
+        var errorDescription: String? {   // spoken aloud, so plain words
+            switch self {
+            case .noGlasses: return "I can't see your glasses. Check they're on and connected."
+            case .notAllowed: return "The camera isn't allowed yet. Open Bridge and tap Allow camera."
+            case .timedOut: return "The photo took too long. Try again."
+            case .failed(let why): return "The photo didn't work. \(why)"
+            }
+        }
+    }
+
+    func refreshCameraPermission() async {
+        cameraAllowed = (try? await Wearables.shared.checkPermissionStatus(.camera)) == .granted
+    }
+
+    /// Opens the Meta AI app to ask; only call this from a tap.
+    func allowCamera() async {
+        do { cameraAllowed = try await Wearables.shared.requestPermission(.camera) == .granted }
+        catch { lastError = "Camera permission: \(error)" }
+    }
+
+    /// One photo from the glasses camera, as JPEG. A device session is opened just for the shot and
+    /// closed after, so the camera isn't held (or the battery drained) between photos.
+    /// Order per Meta's sample: session started → camera stream streaming → photo started → stream
+    /// stopped so the shutter has the sensor to itself → capture.
+    func capturePhoto() async throws -> Data {
+        // Launched from a Shortcut, the device list can arrive a beat after the app opens.
+        for _ in 0..<10 where devices.isEmpty { try await Task.sleep(for: .milliseconds(500)) }
+        guard let device = devices.first else { throw PhotoFailure.noGlasses }
+        guard (try? await Wearables.shared.checkPermissionStatus(.camera)) == .granted else {
+            cameraAllowed = false
+            throw PhotoFailure.notAllowed
+        }
+
+        let session = try Wearables.shared.createSession(deviceSelector: SpecificDeviceSelector(device: device))
+        defer { session.stop() }
+        try session.start()
+        try await withTimeout(15) {
+            for await state in session.stateStream() {
+                if case .started = state { return }
+                if case .stopped = state { throw PhotoFailure.failed("The glasses ended the session.") }
+            }
+        }
+
+        guard let camera = try session.addCamera(config: StreamConfiguration(
+            videoCodec: .hvc1, audioCodec: nil, resolution: .low, frameRate: 7))
+        else { throw PhotoFailure.failed("The camera would not start.") }
+
+        enum Event { case streaming, photoReady, photo(Data), error(String) }
+        let (events, emit) = AsyncStream<Event>.makeStream()
+        let tokens = ListenerTokenBag()
+        defer { Task { await tokens.cancelAll() } }
+        camera.stream.statePublisher.listen { state in
+            if case .streaming = state { emit.yield(.streaming) }
+        }.store(in: tokens)
+        camera.photo.statePublisher.listen { state in
+            if case .started = state { emit.yield(.photoReady) }
+        }.store(in: tokens)
+        camera.photo.photoDataPublisher.listen { data in emit.yield(.photo(data.imageData)) }.store(in: tokens)
+        camera.photo.errorPublisher.listen { error in emit.yield(.error(error.description)) }.store(in: tokens)
+
+        camera.stream.start()
+        return try await withTimeout(30) {
+            var asked = false
+            for await event in events {
+                switch event {
+                case .streaming:
+                    camera.photo.start()
+                case .photoReady where !asked:
+                    asked = true
+                    camera.stream.stop()
+                    // Medium keeps the Bluetooth transfer quick; plenty for Claude to read a screen or sign.
+                    camera.photo.capturePhoto(resolution: .medium, quality: .medium)
+                case .photoReady:
+                    break
+                case .photo(let jpeg):
+                    camera.photo.stop()
+                    return jpeg
+                case .error(let why):
+                    throw PhotoFailure.failed(why)
+                }
+            }
+            throw PhotoFailure.timedOut
+        }
+    }
+
+    private func withTimeout<T>(_ seconds: Double, _ work: @escaping @MainActor () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await work() }
+            group.addTask { try await Task.sleep(for: .seconds(seconds)); throw PhotoFailure.timedOut }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
     }
 
     private func followDevices() async {

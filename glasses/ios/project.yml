@@ -17,6 +17,8 @@ targets:
     dependencies:
       - package: MWDAT
         product: MWDATCore
+      - package: MWDAT
+        product: MWDATCamera
     info:
       path: GlassesRelay/Info.plist
       properties:
@@ -42,6 +44,7 @@ targets:
         NSLocalNetworkUsageDescription: Lets your phone find and connect to your glasses over Wi-Fi.
         NSBonjourServices: [_bonjour._tcp]
         NSMicrophoneUsageDescription: Hears you through the glasses microphone.
+        NSCameraUsageDescription: Takes photos with your glasses camera when you ask, for Claude to look at.
         NSSpeechRecognitionUsageDescription: Turns what you say into text for your Claude agents.
     settings:
       base:
