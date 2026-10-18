@@ -225,6 +225,23 @@ final class Conversation: NSObject, ObservableObject {
         }
     }
 
+    /// The main screen's Look button: one photo and its spoken answer, outside a conversation.
+    func look(question: String = "What am I looking at?") {
+        guard phase == .idle else { return }
+        guard Store.shared.isPro else { status = Store.Locked.needsPro.localizedDescription; return }
+        guard let takePhoto else { status = "The glasses camera isn't ready."; return }
+        phase = .thinking
+        Task {
+            let reply: String
+            do { reply = try await Relay.shared.photo(try await takePhoto(), said: question) }
+            catch { reply = error.localizedDescription }
+            transcript.append(("You", question))
+            transcript.append(("Relay", reply))
+            await say(reply)
+            phase = .idle
+        }
+    }
+
     /// "In trading bot, add a check" starts a task, as the Shortcut's "task:" prefix does.
     /// Anything else (send it, yes, status, an answer to an agent) goes through as said.
     nonisolated static func forRelay(_ text: String) -> String {

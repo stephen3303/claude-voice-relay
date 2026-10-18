@@ -52,8 +52,8 @@ jobs:
           xcrun simctl install "$UDID" "$APP"
           for look in light dark; do
             xcrun simctl ui "$UDID" appearance $look
-            for view in settings conversation; do
-              EXTRA=(); [ $view = conversation ] && EXTRA=(-scroll-conversation)
+            for view in home settings; do
+              EXTRA=(); [ $view = settings ] && EXTRA=(-show-settings)
               xcrun simctl terminate "$UDID" com.smitherman.glassesrelay 2>/dev/null || true
               xcrun simctl launch --stdout="$PWD/shots/console-$look-$view.txt" --stderr="$PWD/shots/console-$look-$view.txt" \
                 "$UDID" com.smitherman.glassesrelay -screenshots "${EXTRA[@]}"

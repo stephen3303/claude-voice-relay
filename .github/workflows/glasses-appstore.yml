@@ -52,7 +52,7 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$ASC_KEY_ID.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic CODE_SIGN_ENTITLEMENTS=AppStore.entitlements \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             META_APP_ID="$META_APP_ID" CLIENT_TOKEN="$META_CLIENT_TOKEN" \
             'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) APP_STORE' \

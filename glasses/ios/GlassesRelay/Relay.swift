@@ -22,7 +22,7 @@ final class Relay {
         case notConfigured, http(Int)
         var errorDescription: String? {
             switch self {
-            case .notConfigured: return "Open the app and set your relay address and token."
+            case .notConfigured: return "Open Bridge settings and choose how to connect."
             case .http(401): return "The relay rejected the token."
             case .http(let code): return "The relay answered with error \(code)."
             }
@@ -32,6 +32,9 @@ final class Relay {
     /// "Use demo" sets this address: sample replies, no PC needed (for trying the app, and App Review).
     static let demoAddress = "demo"
     var isDemo: Bool { baseURL == Self.demoAddress }
+    /// "Bridge Cloud" sets this address: the signed-in account's cloud API instead of a PC (App Store build).
+    static let cloudAddress = "cloud"
+    var isCloud: Bool { baseURL == Self.cloudAddress }
     private var demoHeld: String?
 
     /// One utterance through the read-back step, or straight to the agents with `readBack` off.
@@ -48,7 +51,7 @@ final class Relay {
 
     /// MP3 of `text` in the relay's cloud voice. Throws when the relay has no TTS key or the call fails.
     func speech(_ text: String) async throws -> Data {
-        if isDemo { throw Failure.http(503) }
+        if isDemo || isCloud { throw Failure.http(503) }   // phone voice
         var req = try request("voice/tts", timeout: 20)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -98,11 +101,19 @@ final class Relay {
     }
 
     private func request(_ path: String, timeout: TimeInterval) throws -> URLRequest {
-        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
-        guard !base.isEmpty, !token.isEmpty, let url = URL(string: "\(base)/\(path)") else { throw Failure.notConfigured }
+        let base: String, bearer: String
+        if isCloud {
+            // Same protocol under /api, with the Bridge session instead of the relay's token.
+            base = Account.cloudURL + "/api"
+            bearer = Keychain.read(Account.sessionKey) ?? ""
+        } else {
+            base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+            bearer = token
+        }
+        guard !base.isEmpty, !bearer.isEmpty, let url = URL(string: "\(base)/\(path)") else { throw Failure.notConfigured }
         var req = URLRequest(url: url)
         req.timeoutInterval = timeout
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         return req
     }
 
@@ -122,6 +133,9 @@ enum Keychain {
         add[kSecValueData as String] = Data(value.utf8)
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock  // readable while the phone is locked in your pocket
         SecItemAdd(add as CFDictionary, nil)
+    }
+    static func delete(_ key: String) {
+        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key] as CFDictionary)
     }
     static func read(_ key: String) -> String? {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key,
