@@ -10,6 +10,7 @@ struct GlassesRelayApp: App {
 
     init() {
         ErrorReporting.start()
+        Conversation.noteNaturalVoiceBefore()
         // The toolkit must be configured once, before anything touches Wearables.shared.
         // If it fails (or on the simulator), Wearables.shared must never be touched: the toolkit
         // traps on access. The app still works for voice; the glasses features say why they're off.

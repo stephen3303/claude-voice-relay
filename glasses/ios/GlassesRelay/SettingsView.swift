@@ -75,7 +75,10 @@ struct SettingsView: View {
                     }
                     if mode.wrappedValue != .demo {
                         Toggle("Natural voice", isOn: $natural)
-                            .onChange(of: natural) { _, on in Conversation.naturalVoice = on }
+                            // Saved only when it differs from the current value, so the refresh below isn't saved as a choice.
+                            .onChange(of: natural) { _, on in if on != Conversation.naturalVoice { Conversation.naturalVoice = on } }
+                            // An upgraded Pro install's default depends on Pro, which StoreKit reports after launch.
+                            .onChange(of: store.isPro) { _, _ in natural = Conversation.naturalVoice }
                     }
                     Toggle("High-quality speech", isOn: $hiFi)
                         .onChange(of: hiFi) { _, on in Conversation.hiFiSpeech = on }
