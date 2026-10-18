@@ -52,9 +52,6 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
   steps, or a script he runs that prompts for values, so secrets never pass through chat.
 
 ## Current blockers (update as they clear)
-- Cloud deploy needs Stephen to run `cloud/setup/update-deploy-role.ps1` once (creates the `aws-deploy`
-  environment, main only, and narrows the BridgeGitHubDeploy role's trust to it). Until then it fails at
-  the AWS sign-in step; rerun Cloud deploy afterwards.
 - AWS account verification: blocks CloudFront (talktobridge.com) and Bedrock (photo answers in the
   cloud). Once it clears, rerun Cloud deploy and give Stephen the Cloudflare CNAMEs (DNS only) for
   talktobridge.com and www, pointing at the `CloudFrontTarget` output.
