@@ -18,6 +18,11 @@ const TOKEN = /^[0-9a-f]{32,200}$/i;   // APNs device tokens are hex
 const SPEAK_MAX = 3000;               // Polly's SynthesizeSpeech limit, in characters
 const SPEECH_USER_DAY = 60_000;       // characters of natural voice per account per day (about $1.80 of Polly)
 const SPEECH_ALL_DAY = 1_000_000;     // and across every account (about $30): a hard ceiling on the bill
+// Sandbox Pro is free (App Review and TestFlight buy in the sandbox), so it gets much less: enough to try it.
+const SPEECH_SANDBOX_USER_DAY = 5_000;     // about 15 cents of Polly per account per day
+const SPEECH_SANDBOX_ALL_DAY = 100_000;    // about $3 across every sandbox account
+const PHOTOS_SANDBOX_USER_DAY = 5;         // Bedrock photo answers per sandbox account per day
+const PHOTOS_SANDBOX_ALL_DAY = 50;
 const TEST_CALL = 'This is Bridge, checking that I can reach you. Say goodbye to hang up.';
 
 export const LOOK_PROMPT = [
@@ -33,8 +38,9 @@ export const LOOK_PROMPT = [
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
- * deps.store.spendSpeech(key, day, chars, max) -> false when that would take key's total for day past max
- * deps.pro: { claim(user, jws) -> { status, body }, isPro(user) } (storekit.mjs)
+ * deps.store.spendSpeech(key, day, n, max) -> false when that would take key's total for day past max
+ *   (a daily counter: characters of speech, or photos under PHOTO# keys)
+ * deps.pro: { claim(user, jws) -> { status, body }, plan(user) -> 'Production' | 'Sandbox' | null } (storekit.mjs)
  * deps.now() -> ms, deps.sleep(ms)
  */
 // What was said: the body's JSON "text", or the plain-text body. null for JSON without a string "text".
@@ -111,13 +117,31 @@ export function makeHandler(deps) {
     return json(200, { ok: true });
   }
 
+  // Spends n of each [key, max] in turn for today; if one is full, gives back what was spent and returns false.
+  async function spend(limits, n) {
+    const day = new Date(now()).toISOString().slice(0, 10);
+    const done = [];
+    // A negative spend with a huge max always passes (MAX_SAFE_INTEGER would overflow the marshaller).
+    const refund = () => Promise.all(done.map((key) => deps.store.spendSpeech(key, day, -n, 1e15).catch((e) => console.error('refund', e))));
+    for (const [key, max] of limits) {
+      if (!await deps.store.spendSpeech(key, day, n, max)) { await refund(); return null; }
+      done.push(key);
+    }
+    return refund;
+  }
+
   async function photo(user, jpeg, said) {
-    if (!await deps.pro.isPro(user)) return 'Photos need Bridge Pro. Open Bridge to start a free trial.';
+    const plan = await deps.pro.plan(user);
+    if (!plan) return 'Photos need Bridge Pro. Open Bridge to start a free trial.';
     if (!jpeg?.length) return 'The photo was empty. Try again.';
     if (jpeg.length > PHOTO_MAX) return 'That photo is too large.';
     const m = said.match(SEND_TO);
     if (m) return deps.startTask(user, { project: m[1].trim(), task: (m[2] || '').trim(), photo: jpeg });
-    return deps.look(jpeg, said || 'What am I looking at?');
+    if (plan === 'Production') return deps.look(jpeg, said || 'What am I looking at?');
+    const refund = await spend([[`PHOTO#${user}`, PHOTOS_SANDBOX_USER_DAY], ['PHOTO#SANDBOX', PHOTOS_SANDBOX_ALL_DAY]], 1);
+    if (!refund) return "That's all the photo answers for test accounts today. Try again tomorrow.";
+    try { return await deps.look(jpeg, said || 'What am I looking at?'); }
+    catch (e) { await refund(); throw e; }   // nothing was answered
   }
 
   return async function handler(event) {
@@ -163,20 +187,18 @@ export function makeHandler(deps) {
         const said = saidOf(raw);
         if (!said) return text(400, 'Nothing to say.');
         // The natural voice is part of Bridge Pro, as Apple's signed transaction says, not as the app says.
-        if (!await deps.pro.isPro(user)) return text(402, 'The natural voice needs Bridge Pro.');
+        const plan = await deps.pro.plan(user);
+        if (!plan) return text(402, 'The natural voice needs Bridge Pro.');
         const chars = [...said].length;
         if (chars > SPEAK_MAX) return text(413, 'Too long for the cloud voice.');
-        const day = new Date(now()).toISOString().slice(0, 10);
-        // A negative spend with a huge max always passes (MAX_SAFE_INTEGER would overflow the marshaller).
-        const refund = (key) => deps.store.spendSpeech(key, day, -chars, 1e15).catch((e) => console.error('refund', e));
-        if (!await deps.store.spendSpeech(`SPEECH#${user}`, day, chars, SPEECH_USER_DAY)) return text(429, 'Cloud voice budget used up today.');
-        if (!await deps.store.spendSpeech('ALL', day, chars, SPEECH_ALL_DAY)) {
-          await refund(`SPEECH#${user}`);
-          return text(429, 'Cloud voice budget used up today.');
-        }
+        const limits = plan === 'Production'
+          ? [[`SPEECH#${user}`, SPEECH_USER_DAY]]
+          : [[`SPEECH#${user}`, SPEECH_SANDBOX_USER_DAY], ['SANDBOX', SPEECH_SANDBOX_ALL_DAY]];
+        const refund = await spend([...limits, ['ALL', SPEECH_ALL_DAY]], chars);
+        if (!refund) return text(429, 'Cloud voice budget used up today.');
         let mp3;
         try { mp3 = await deps.speak(said); }
-        catch (e) { await Promise.all([refund(`SPEECH#${user}`), refund('ALL')]); throw e; }   // nothing was spoken
+        catch (e) { await refund(); throw e; }   // nothing was spoken
         return { statusCode: 200, headers: { 'content-type': 'audio/mpeg' }, body: Buffer.from(mp3).toString('base64'), isBase64Encoded: true };
       }
       if (route === 'POST /pro') {

@@ -4,7 +4,7 @@ import { makeHandler } from './voice.mjs';
 
 function setup() {
   const budget = new Map(), spoken = [], held = new Map(), msgs = new Map(), started = [], looked = [], devices = new Map(), listening = [], delivered = [];
-  const pros = new Set(['u1', 'u2', 'u3']), claims = [];
+  const pros = new Set(['u1', 'u2', 'u3']), sandbox = new Set(), claims = [];
   let clock = 1_000_000;
   const store = {
     getHeld: async (u) => held.get(u) ?? null,
@@ -19,7 +19,7 @@ function setup() {
   };
   const handler = makeHandler({
     store,
-    look: async (jpeg, said) => { looked.push({ size: jpeg.length, said }); return 'A whiteboard with a diagram.'; },
+    look: async (jpeg, said) => { if (said === 'fail') throw new Error('Bedrock down'); looked.push({ size: jpeg.length, said }); return 'A whiteboard with a diagram.'; },
     startTask: async (u, t) => { started.push(t); return 'Sent.'; },
     devices: {
       save: async (u, d) => devices.set(`${u}/${d.device}`, d),
@@ -30,7 +30,7 @@ function setup() {
     deliver: async (u, text, from) => delivered.push({ u, text, from, at: clock }),
     speak: async (text) => { if (text === 'fail') throw new Error('Polly down'); spoken.push(text); return new Uint8Array([0xff, 0xf3, text.length]); },
     pro: {
-      isPro: async (u) => pros.has(u),
+      plan: async (u) => (pros.has(u) ? (sandbox.has(u) ? 'Sandbox' : 'Production') : null),
       claim: async (u, jws) => { claims.push({ u, jws }); return jws === 'good' ? { status: 200, body: { pro: true } } : { status: 400, body: { error: 'no' } }; },
     },
     now: () => clock,
@@ -40,7 +40,7 @@ function setup() {
     requestContext: { http: { method }, authorizer: user ? { jwt: { claims: { sub: user } } } : undefined },
     rawPath: `/api${path}`, body, isBase64Encoded: !!base64, queryStringParameters: query, headers,
   });
-  return { call, pros, claims, budget, spoken, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
+  return { call, pros, sandbox, claims, budget, spoken, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
 }
 
 test('needs a signed-in user', async () => {
@@ -259,4 +259,35 @@ test('photos are for Bridge Pro too: Bedrock is never called without it', async 
   const r = await call('POST', '/voice/photo', { body: Buffer.from('jpegjpg').toString('base64'), base64: true });
   assert.match(r.body, /need Bridge Pro/);
   assert.equal(looked.length + started.length, 0);
+});
+
+test('sandbox Pro (App Review, TestFlight) gets a small natural-voice allowance', async () => {
+  const { call, sandbox, budget, spoken } = setup();
+  sandbox.add('u1'); sandbox.add('u2');
+  const line = 'y'.repeat(2500);
+  assert.equal((await call('POST', '/voice/tts', { body: line })).statusCode, 200);
+  assert.equal((await call('POST', '/voice/tts', { body: line })).statusCode, 200);
+  assert.equal((await call('POST', '/voice/tts', { body: 'hi' })).statusCode, 429, 'u1 used 5,000 today');
+  assert.equal((await call('POST', '/voice/tts', { body: line, user: 'u3' })).statusCode, 200, 'paid Pro is unaffected');
+  const day = new Date(1_000_000).toISOString().slice(0, 10);
+  assert.equal(budget.get(`ALL/${day}`), 7500, 'sandbox counts toward the overall cap too');
+  budget.set(`SANDBOX/${day}`, 100_000);
+  assert.equal((await call('POST', '/voice/tts', { body: 'hi', user: 'u2' })).statusCode, 429, 'the sandbox total holds');
+  assert.equal(budget.get(`SPEECH#u2/${day}`), 0, 'and refunds what it took from u2');
+  assert.equal((await call('POST', '/voice/tts', { body: 'hi', user: 'u3' })).statusCode, 200, 'paid Pro still speaks');
+  assert.equal(spoken.length, 4);
+});
+
+test('sandbox Pro gets a few photo answers a day; paid Pro has no photo cap', async () => {
+  const { call, sandbox, looked, budget } = setup();
+  sandbox.add('u1');
+  const photo = (user, q = 'What is this?') => call('POST', '/voice/photo', { user, body: Buffer.from('jpegjpg').toString('base64'), base64: true, headers: { 'x-question': q } });
+  assert.match((await photo('u1', 'fail')).body, /hit an error/);
+  const day = new Date(1_000_000).toISOString().slice(0, 10);
+  assert.equal(budget.get(`PHOTO#u1/${day}`), 0, 'a failed answer is not counted');
+  for (let i = 0; i < 5; i++) assert.match((await photo('u1')).body, /whiteboard/);
+  assert.match((await photo('u1')).body, /test accounts today/);
+  assert.equal(looked.length, 5);
+  for (let i = 0; i < 7; i++) assert.match((await photo('u2')).body, /whiteboard/);
+  assert.equal(budget.has(`PHOTO#u2/${day}`), false);
 });

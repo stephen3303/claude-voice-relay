@@ -214,7 +214,7 @@ const proStore = {
       ConditionExpression: 'transactionId = :id', ExpressionAttributeValues: { ':id': transactionId } }));
   },
 };
-const pro = makePro({ store: proStore, bundleId: process.env.BUNDLE_ID, sandbox: process.env.SANDBOX_PRO !== 'false' });
+const pro = makePro({ store: proStore, bundleId: process.env.BUNDLE_ID });
 
 // Cloud agents (Fargate, GitHub App) are build step 4 in cloud/DESIGN.md. Until then a confirmed task
 // is acknowledged honestly instead of pretending to run.

@@ -66,6 +66,4 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
   Bridge Pro purchase record the app sends to Bridge Cloud (`/api/pro`); today it
   covers self-hosting only. Also set App Store Server Notifications (Version 2, production and sandbox URLs)
   to the `AppStoreNotificationsUrl` output, so renewals and refunds reach Bridge Pro's cloud check (`cloud/api/storekit.mjs`).
-  Once App Review approves the app, set `SANDBOX_PRO = false` in `cloud/infra/lib/api.mjs` (Stephen's decision:
-  free sandbox/TestFlight purchases stop counting as Pro after review).
 - Cloud agents (Fargate + GitHub App) aren't built yet; the cloud API answers tasks honestly.

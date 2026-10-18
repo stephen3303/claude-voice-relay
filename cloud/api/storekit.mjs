@@ -11,6 +11,7 @@ export const APPLE_ROOT_CA_G3 = '63:34:3A:BF:B8:9A:6A:03:EB:B5:7E:9B:3F:5F:A7:BE
 export const LEAF_OID = Buffer.from('060a2a864886f76364060b01', 'hex');
 export const INTERMEDIATE_OID = Buffer.from('060a2a864886f76364060201', 'hex');
 const PRO_PRODUCT = /^com\.smitherman\.glassesrelay\.pro\./;
+const ENVIRONMENTS = new Set(['Production', 'Sandbox']);   // App Review and TestFlight buy in the sandbox
 
 const parse = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
 
@@ -49,17 +50,15 @@ export function verifyAppleJws(jws, { root = APPLE_ROOT_CA_G3, now = Date.now() 
  *   dropPro(user, transactionId)   (only while that transaction is the stored one)
  * }
  * deps.verify(jws, { now }) -> payload (verifyAppleJws), deps.now() -> ms
- * deps.sandbox: false once App Review is done, so free test purchases (App Review, TestFlight) stop counting
  */
 export function makePro(deps) {
   const now = deps.now ?? Date.now;
   const verify = deps.verify ?? verifyAppleJws;
-  const environments = new Set(deps.sandbox === false ? ['Production'] : ['Production', 'Sandbox']);
 
   function entitlement(t) {
     if (t.bundleId !== deps.bundleId) throw new Error('another app');
     if (!PRO_PRODUCT.test(t.productId ?? '')) throw new Error('not Bridge Pro');
-    if (!environments.has(t.environment)) throw new Error(`${t.environment} purchases don't count`);
+    if (!ENVIRONMENTS.has(t.environment)) throw new Error('unexpected environment');
     if (!t.originalTransactionId || !t.transactionId) throw new Error('no transaction ID');
     return {
       tx: String(t.originalTransactionId), transactionId: String(t.transactionId), product: t.productId,
@@ -87,7 +86,7 @@ export function makePro(deps) {
     }
     // A refunded transaction stays refunded, even though the copy on the phone still says it's paid.
     if (e.until) await grant(user, e);
-    const pro = await isPro(user);
+    const pro = Boolean(await plan(user));
     return { status: 200, body: { pro } };
   }
 
@@ -116,11 +115,12 @@ export function makePro(deps) {
     return { status: 200, body: { ok: true } };
   }
 
-  async function isPro(user) {
+  // 'Production' or 'Sandbox' while the user has Pro, else null. Sandbox Pro (App Review, TestFlight) is free,
+  // so voice.mjs gives it smaller daily allowances.
+  async function plan(user) {
     const p = await deps.store.getPro(user);
-    // Pro a sandbox purchase granted ends when sandbox purchases stop counting.
-    return Boolean(p && p.until > now() && environments.has(p.env));
+    return p && p.until > now() ? p.env ?? 'Sandbox' : null;
   }
 
-  return { claim, notify, isPro };
+  return { claim, notify, plan, isPro: async (user) => Boolean(await plan(user)) };
 }
