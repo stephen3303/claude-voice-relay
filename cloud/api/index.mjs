@@ -1,19 +1,23 @@
-// Lambda entry point: wires voice.mjs to DynamoDB, Bedrock and APNs (push.mjs). The AWS SDK v3 ships with the
+// Lambda entry point: wires voice.mjs to DynamoDB, Bedrock, Polly and APNs (push.mjs). The AWS SDK v3 ships with the
 // Node.js 22 Lambda runtime, so there is nothing to bundle.
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
+import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 import { KMSClient, SignCommand, GetPublicKeyCommand } from '@aws-sdk/client-kms';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { createHash, createPublicKey } from 'node:crypto';
 import { makeHandler, LOOK_PROMPT, INBOX_KEEP_S } from './voice.mjs';
 import { makeAuth } from './auth.mjs';
 import { makeApns, makeNotifier, http2Send } from './push.mjs';
+import { makeSpeak } from './speech.mjs';
 
 const TABLE = process.env.TABLE;
 const LOOK_MODEL = process.env.LOOK_MODEL || 'us.anthropic.claude-haiku-5-5';
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const bedrock = new BedrockRuntimeClient({});
+const polly = new PollyClient({});
+const SPEECH_VOICE = 'Ruth';   // Polly's en-US voice with both generative and neural engines
 const kms = new KMSClient({});
 
 // Single table. pk USER#<sub>; sk HELD (the task waiting for "send it"), SEQ (message counter),
@@ -38,6 +42,22 @@ const store = {
       expires: Math.floor(Date.now() / 1000) + INBOX_KEEP_S,
     } }));
     return id;
+  },
+  // Natural-voice characters spent today, per account (pk SPEECH#<sub>, outside USER#<sub> so deleting and
+  // recreating an account doesn't reset it; it expires in 3 days) and in total (pk ALL). Refused past max.
+  async spendSpeech(key, day, chars, max) {
+    try {
+      await db.send(new UpdateCommand({
+        TableName: TABLE, Key: { pk: key, sk: `SPEECH#${day}` },
+        UpdateExpression: 'ADD n :c SET expires = if_not_exists(expires, :exp)',
+        ConditionExpression: 'attribute_not_exists(n) OR n <= :room',
+        ExpressionAttributeValues: { ':c': chars, ':room': max - chars, ':exp': Math.floor(Date.now() / 1000) + 3 * 86400 },
+      }));
+      return true;
+    } catch (e) {
+      if (e.name === 'ConditionalCheckFailedException') return false;
+      throw e;
+    }
   },
   async messagesAfter(user, after) {
     const r = await db.send(new QueryCommand({
@@ -141,6 +161,12 @@ async function look(jpeg, said) {
   return r.output?.message?.content?.find((c) => c.text)?.text?.trim() || "I couldn't make out the photo.";
 }
 
+// The app's spoken replies (speech.mjs).
+const speak = makeSpeak({
+  voice: SPEECH_VOICE,
+  synth: async (params, options) => (await polly.send(new SynthesizeSpeechCommand(params), options)).AudioStream.transformToByteArray(),
+});
+
 // Cloud agents (Fargate, GitHub App) are build step 4 in cloud/DESIGN.md. Until then a confirmed task
 // is acknowledged honestly instead of pretending to run.
 async function startTask(user, { project, task }) {
@@ -148,7 +174,7 @@ async function startTask(user, { project, task }) {
   return 'Sent.';
 }
 
-export const handler = makeHandler({ store, look, startTask, devices, deliver });
+export const handler = makeHandler({ store, look, startTask, devices, deliver, speak });
 
 // ---------- accounts (auth.mjs): Sign in with Apple, sessions signed by KMS ----------
 let appleKeys = null, appleKeysAt = 0, publicJwk = null;

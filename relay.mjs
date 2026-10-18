@@ -523,7 +523,10 @@ if (cfg.voiceToken) {
   // timeout) instead of being retried. Keep idle connections open longer than a turn takes.
   server.keepAliveTimeout = 120_000;
   server.headersTimeout = 125_000;
-  server.listen(cfg.voicePort, '0.0.0.0', () => log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`));
+  server.listen(cfg.voicePort, '0.0.0.0', () => {
+    log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`);
+    log(cfg.openaiKey ? `natural voice on (${cfg.ttsVoice})` : 'natural voice off: no OPENAI_API_KEY, so the app speaks with the phone voice');
+  });
 } else log('VOICE_TOKEN not set; voice endpoint disabled.');
 
 load();

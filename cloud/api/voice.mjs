@@ -1,4 +1,4 @@
-// Bridge Cloud voice API: the relay's protocol (/voice/confirm, /voice/inbox, /voice/photo)
+// Bridge Cloud voice API: the relay's protocol (/voice/confirm, /voice/inbox, /voice/photo, /voice/tts)
 // for signed-in Pro users, plus /voice/send (no read-back) and the phone's push registration
 // (push.mjs). One Lambda behind API Gateway, whose Lambda authorizer checks the Bridge session (auth.mjs).
 // Dependencies are passed in, so tests run it with fakes and no AWS.
@@ -15,6 +15,9 @@ const HOLD_MS = 10 * 60_000;          // an unconfirmed task expires, as on the 
 const INBOX_KEEP_S = 7 * 24 * 3600;   // inbox messages are kept a week (DynamoDB TTL)
 const PHOTO_MAX = 10 * 1024 * 1024;
 const TOKEN = /^[0-9a-f]{32,200}$/i;   // APNs device tokens are hex
+const SPEAK_MAX = 3000;               // Polly's SynthesizeSpeech limit, in characters
+const SPEECH_USER_DAY = 60_000;       // characters of natural voice per account per day (about $1.80 of Polly)
+const SPEECH_ALL_DAY = 1_000_000;     // and across every account (about $30): a hard ceiling on the bill
 const TEST_CALL = 'This is Bridge, checking that I can reach you. Say goodbye to hang up.';
 
 export const LOOK_PROMPT = [
@@ -29,8 +32,19 @@ export const LOOK_PROMPT = [
  * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not)
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
+ * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
+ * deps.store.spendSpeech(key, day, chars, max) -> false when that would take key's total for day past max
  * deps.now() -> ms, deps.sleep(ms)
  */
+// What was said: the body's JSON "text", or the plain-text body. null for JSON without a string "text".
+function saidOf(raw) {
+  const body = raw.toString('utf8');
+  let j;
+  try { j = JSON.parse(body); } catch { return body.trim(); }
+  if (j === null || typeof j === 'object') return typeof j?.text === 'string' ? j.text.trim() : null;
+  return body.trim();   // a bare number or string that happens to parse as JSON
+}
+
 export function makeHandler(deps) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -110,16 +124,8 @@ export function makeHandler(deps) {
     const route = `${event.requestContext.http.method} ${event.rawPath.replace(/^\/api/, '')}`;
     const raw = event.body ? Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8') : Buffer.alloc(0);
     try {
-      if (route === 'POST /voice/confirm') {
-        let said = raw.toString('utf8');
-        try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
-        return text(200, await confirm(user, said.trim()));
-      }
-      if (route === 'POST /voice/send') {
-        let said = raw.toString('utf8');
-        try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
-        return text(200, await send(user, said.trim()));
-      }
+      if (route === 'POST /voice/confirm') return text(200, await confirm(user, saidOf(raw) ?? ''));
+      if (route === 'POST /voice/send') return text(200, await send(user, saidOf(raw) ?? ''));
       if (route === 'GET /voice/inbox') {
         // A conversation is open while the app long-polls, so agents' messages need no push.
         // A one-off check (wait=0, e.g. Settings > Test connection) isn't a conversation.
@@ -149,6 +155,26 @@ export function makeHandler(deps) {
         await deps.deliver(user, TEST_CALL, 'Bridge');
         return json(200, { ok: true });
       }
+      if (route === 'POST /voice/tts') {
+        // The line the app is about to speak, as MP3. Anything but a 200 makes the app use the phone's voice,
+        // so a line too long for one Polly call, or past the day's budget, is read whole by the phone instead.
+        const said = saidOf(raw);
+        if (!said) return text(400, 'Nothing to say.');
+        const chars = [...said].length;
+        if (chars > SPEAK_MAX) return text(413, 'Too long for the cloud voice.');
+        const day = new Date(now()).toISOString().slice(0, 10);
+        // A negative spend with a huge max always passes (MAX_SAFE_INTEGER would overflow the marshaller).
+        const refund = (key) => deps.store.spendSpeech(key, day, -chars, 1e15).catch((e) => console.error('refund', e));
+        if (!await deps.store.spendSpeech(`SPEECH#${user}`, day, chars, SPEECH_USER_DAY)) return text(429, 'Cloud voice budget used up today.');
+        if (!await deps.store.spendSpeech('ALL', day, chars, SPEECH_ALL_DAY)) {
+          await refund(`SPEECH#${user}`);
+          return text(429, 'Cloud voice budget used up today.');
+        }
+        let mp3;
+        try { mp3 = await deps.speak(said); }
+        catch (e) { await Promise.all([refund(`SPEECH#${user}`), refund('ALL')]); throw e; }   // nothing was spoken
+        return { statusCode: 200, headers: { 'content-type': 'audio/mpeg' }, body: Buffer.from(mp3).toString('base64'), isBase64Encoded: true };
+      }
       if (route === 'POST /voice/photo') {
         let said = '';
         try { said = decodeURIComponent(event.headers?.['x-question'] || '').trim(); } catch { /* keep empty */ }
@@ -157,8 +183,9 @@ export function makeHandler(deps) {
       return text(404, 'Not found.');
     } catch (e) {
       console.error(route, e);
-      // The app retries push registration on a failure, so it must see one; voice routes speak the error instead.
-      if (/^\S+ \/(push\/|voice\/listening)/.test(route)) return json(500, { error: 'Bridge Cloud hit an error.' });
+      // The app retries push registration and falls back to the phone's voice on a failure, so those must see
+      // one; the other voice routes speak the error instead.
+      if (/^\S+ \/(push\/|voice\/listening|voice\/tts)/.test(route)) return json(500, { error: 'Bridge Cloud hit an error.' });
       return text(200, "Sorry, Bridge Cloud hit an error. Try again in a moment.");
     }
   };

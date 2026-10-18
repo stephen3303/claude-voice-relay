@@ -66,9 +66,10 @@ final class Relay {
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// MP3 of `text` in the relay's cloud voice. Throws when the relay has no TTS key or the call fails.
+    /// MP3 of `text` in a natural voice: Bridge Cloud's (Amazon Polly), or the relay's when it has a TTS key.
+    /// Throws when there is none or the call fails, and the phone's own voice speaks instead.
     func speech(_ text: String) async throws -> Data {
-        if isDemo || isCloud { throw Failure.http(503) }   // phone voice
+        if isDemo { throw Failure.http(503) }   // phone voice
         var req = try request("voice/tts", timeout: 20)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

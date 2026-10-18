@@ -3,13 +3,18 @@ import assert from 'node:assert/strict';
 import { makeHandler } from './voice.mjs';
 
 function setup() {
-  const held = new Map(), msgs = new Map(), started = [], looked = [], devices = new Map(), listening = [], delivered = [];
+  const budget = new Map(), spoken = [], held = new Map(), msgs = new Map(), started = [], looked = [], devices = new Map(), listening = [], delivered = [];
   let clock = 1_000_000;
   const store = {
     getHeld: async (u) => held.get(u) ?? null,
     setHeld: async (u, h) => (h ? held.set(u, h) : held.delete(u)),
     addMessage: async (u, text) => { const l = msgs.get(u) ?? []; l.push({ id: l.length + 1, text, at: clock }); msgs.set(u, l); },
     messagesAfter: async (u, after) => (msgs.get(u) ?? []).filter((m) => m.id > after),
+    spendSpeech: async (key, day, chars, max) => {
+      const k = `${key}/${day}`, n = budget.get(k) ?? 0;
+      if (n + chars > max) return false;
+      budget.set(k, n + chars); return true;
+    },
   };
   const handler = makeHandler({
     store,
@@ -22,6 +27,7 @@ function setup() {
       stopListening: async (u) => listening.push(`stop:${u}`),
     },
     deliver: async (u, text, from) => delivered.push({ u, text, from, at: clock }),
+    speak: async (text) => { if (text === 'fail') throw new Error('Polly down'); spoken.push(text); return new Uint8Array([0xff, 0xf3, text.length]); },
     now: () => clock,
     sleep: async (ms) => { clock += ms; },
   });
@@ -29,7 +35,7 @@ function setup() {
     requestContext: { http: { method }, authorizer: user ? { jwt: { claims: { sub: user } } } : undefined },
     rawPath: `/api${path}`, body, isBase64Encoded: !!base64, queryStringParameters: query, headers,
   });
-  return { call, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
+  return { call, budget, spoken, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
 }
 
 test('needs a signed-in user', async () => {
@@ -162,4 +168,63 @@ test('dictation variants of "send it" confirm', async () => {
     assert.equal((await call('POST', '/voice/confirm', { body: `task: ${said}` })).body, 'Sent.', said);
     assert.equal(started.length, 1, said);
   }
+});
+
+test('tts answers MP3 as base64, and a failure is a non-200 so the app falls back', async () => {
+  const { call, spoken } = setup();
+  const r = await call('POST', '/voice/tts', { body: JSON.stringify({ text: ' Hello there. ' }) });
+  assert.equal(r.statusCode, 200);
+  assert.equal(r.headers['content-type'], 'audio/mpeg');
+  assert.equal(r.isBase64Encoded, true);
+  assert.deepEqual([...Buffer.from(r.body, 'base64')], [0xff, 0xf3, 12]);
+  assert.deepEqual(spoken, ['Hello there.']);
+  assert.equal((await call('POST', '/voice/tts', { body: '   ' })).statusCode, 400);
+  assert.equal((await call('POST', '/voice/tts', { body: 'fail' })).statusCode, 500);
+  assert.equal((await call('POST', '/voice/tts', { body: 'hi', user: null })).statusCode, 401);
+});
+
+test('tts refunds the budget when nothing was spoken', async () => {
+  const { call, budget, now } = setup();
+  const day = new Date(now()).toISOString().slice(0, 10);
+  await call('POST', '/voice/tts', { body: 'fail' });
+  assert.equal(budget.get(`SPEECH#u1/${day}`), 0);
+  assert.equal(budget.get(`ALL/${day}`), 0);
+  budget.set(`ALL/${day}`, 1_000_000);
+  assert.equal((await call('POST', '/voice/tts', { body: 'hello' })).statusCode, 429);
+  assert.equal(budget.get(`SPEECH#u1/${day}`), 0, 'the total cap refused it, so u1 is not charged');
+});
+
+test('tts refuses JSON without a text string instead of reading it out', async () => {
+  const { call, spoken } = setup();
+  assert.equal((await call('POST', '/voice/tts', { body: '{"text":null}' })).statusCode, 400);
+  assert.equal((await call('POST', '/voice/tts', { body: '{"msg":"hi"}' })).statusCode, 400);
+  assert.deepEqual(spoken, []);
+});
+
+test('confirm and send treat JSON without a text string as nothing said', async () => {
+  const { call, started } = setup();
+  assert.match((await call('POST', '/voice/send', { body: '{"msg":"x"}' })).body, /didn't catch that/);
+  assert.match((await call('POST', '/voice/confirm', { body: '{"text":null}' })).body, /didn't catch that/);
+  assert.match((await call('POST', '/voice/send', { body: 'null' })).body, /didn't catch that/);
+  assert.equal(started.length, 0);
+});
+
+test('a line over Polly\'s limit is refused whole, so the phone reads all of it', async () => {
+  const { call, spoken } = setup();
+  assert.equal((await call('POST', '/voice/tts', { body: 'x'.repeat(3001) })).statusCode, 413);
+  assert.equal((await call('POST', '/voice/tts', { body: '😀'.repeat(3000) })).statusCode, 200, 'counted in characters, not UTF-16 units');
+  assert.equal(spoken.length, 1);
+});
+
+test('tts has a daily budget per account and in total', async () => {
+  const { call, spoken, budget, advance } = setup();
+  const line = 'y'.repeat(3000);
+  for (let i = 0; i < 20; i++) assert.equal((await call('POST', '/voice/tts', { body: line })).statusCode, 200);
+  assert.equal((await call('POST', '/voice/tts', { body: line })).statusCode, 429, 'u1 used 60,000 today');
+  assert.equal((await call('POST', '/voice/tts', { body: line, user: 'u2' })).statusCode, 200, 'others are unaffected');
+  assert.equal(spoken.length, 21);
+  advance(24 * 3600_000);
+  assert.equal((await call('POST', '/voice/tts', { body: line })).statusCode, 200, 'a new day, a new budget');
+  budget.set(`ALL/${new Date(1_000_000 + 24 * 3600_000).toISOString().slice(0, 10)}`, 1_000_000);
+  assert.equal((await call('POST', '/voice/tts', { body: 'hi', user: 'u3' })).statusCode, 429, 'the total cap holds for everyone');
 });
