@@ -161,6 +161,7 @@ test('notifications without a transaction are fine, and forged ones are refused'
   assert.equal((await pro.notify(JSON.stringify({ signedPayload: jws({ notificationType: 'TEST', signedDate: NOW, data: {} }) }))).status, 200);
   assert.equal((await pro.notify('{"signedPayload":"x.y.z"}')).status, 400);
   assert.equal((await pro.notify('nope')).status, 400);
+  assert.equal((await pro.notify(JSON.stringify({ signedPayload: 'x'.repeat(70_000) }))).status, 400);
 });
 
 test('a refund that lands while the app is reporting the same transaction still ends Pro', async () => {

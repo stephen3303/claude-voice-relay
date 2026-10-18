@@ -180,6 +180,8 @@ const proStore = {
       await db.send(new UpdateCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' },
         UpdateExpression: 'SET #user = :user', ConditionExpression: 'attribute_not_exists(#user) OR #user = :user',
         ExpressionAttributeNames: { '#user': 'user' }, ExpressionAttributeValues: { ':user': user } }));
+      // Under the account too, so deleting it (deleteUser) frees the subscription even with no Pro left.
+      await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `USER#${user}`, sk: `PROTX#${tx}`, tx } }));
       return true;
     } catch (e) {
       if (e.name === 'ConditionalCheckFailedException') return false;
@@ -233,10 +235,11 @@ export async function appStore(event) {
 let appleKeys = null, appleKeysAt = 0, publicJwk = null;
 
 async function deleteUser(sub) {
-  // The subscription is free to join another account; its refunds stay on record.
-  const p = await proStore.getPro(sub);
-  if (p?.tx) {
-    await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `PRO#${p.tx}`, sk: 'OWNER' }, UpdateExpression: 'REMOVE #user',
+  // Its subscriptions are free to join another account; their refunds stay on record.
+  const claimed = await db.send(new QueryCommand({ TableName: TABLE, KeyConditionExpression: 'pk = :pk AND begins_with(sk, :t)',
+    ExpressionAttributeValues: { ':pk': `USER#${sub}`, ':t': 'PROTX#' } }));
+  for (const { tx } of claimed.Items ?? []) {
+    await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' }, UpdateExpression: 'REMOVE #user',
       ConditionExpression: '#user = :sub', ExpressionAttributeNames: { '#user': 'user' }, ExpressionAttributeValues: { ':sub': sub } }));
   }
   for (;;) {

@@ -70,6 +70,7 @@ final class Relay {
     /// Throws when there is none or the call fails, and the phone's own voice speaks instead.
     func speech(_ text: String) async throws -> Data {
         if isDemo { throw Failure.http(503) }   // phone voice
+        if isCloud { await Store.shared.reportIfNeeded() }   // the cloud's own Bridge Pro check
         var req = try request("voice/tts", timeout: 20)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -80,6 +81,7 @@ final class Relay {
     /// A glasses photo plus what was said with it. Returns the line to speak.
     func photo(_ jpeg: Data, said: String) async throws -> String {
         if isDemo { return "Demo mode: on your PC, Claude would look at this photo and answer. The photo was \(jpeg.count / 1024) kilobytes." }
+        if isCloud { await Store.shared.reportIfNeeded() }
         var req = try request("voice/photo", timeout: 150)
         req.httpMethod = "POST"
         req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")

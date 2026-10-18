@@ -41,10 +41,20 @@ final class Store: ObservableObject {
             }
         }
         isPro = active
-        // Bridge Cloud checks Apple's signature on the transaction itself before it unlocks the natural voice.
-        if let latest, Account.shared.signedIn {
-            try? await Relay.shared.cloud("POST", "api/pro", body: ["transaction": latest.jws])
-        }
+        latestTransaction = latest?.jws
+        await reportIfNeeded()
+        #endif
+    }
+
+    private var latestTransaction: String?
+    private var reported: String?
+
+    /// Bridge Cloud checks Apple's signature on the transaction itself before it unlocks the natural voice and photos.
+    /// Until it has accepted this one (offline, signed out, a timeout), every cloud voice or photo call tries again.
+    func reportIfNeeded() async {
+        #if APP_STORE
+        guard let jws = latestTransaction, jws != reported, Account.shared.signedIn else { return }
+        if (try? await Relay.shared.cloud("POST", "api/pro", body: ["transaction": jws])) != nil { reported = jws }
         #endif
     }
 

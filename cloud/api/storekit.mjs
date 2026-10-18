@@ -89,6 +89,8 @@ export function makePro(deps) {
   /** App Store Server Notifications v2: renewals extend Pro, refunds and revocations end it. */
   async function notify(body) {
     let n, t;
+    // Apple's notifications are a few kilobytes; anything else is refused before any certificate is parsed.
+    if (typeof body !== 'string' || body.length > 64 * 1024) return { status: 400, body: { error: 'not a notification' } };
     try {
       n = verify(JSON.parse(body).signedPayload, { now: now() });
       if (!n.data?.signedTransactionInfo) return { status: 200, body: { ignored: n.notificationType } };   // TEST, and others with no transaction
