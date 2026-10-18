@@ -2,7 +2,7 @@
   "name": "claude-voice-relay",
   "private": true,
   "type": "module",
-  "description": "Hands-free Claude Code agents over Telegram + AirPods",
+  "description": "Hands-free Claude Code agents by voice: Ray-Ban Meta glasses, AirPods, Siri",
   "scripts": {
     "start": "node --env-file=.env relay.mjs",
     "build-agent": "docker build -t claude-voice-agent:latest agent",
