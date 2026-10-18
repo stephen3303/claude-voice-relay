@@ -45,7 +45,8 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
     };
     if (auth) headers.Authorization = `Bearer ${appJwt(appId, key, now())}`;
     if (body) headers['Content-Type'] = 'application/json';
-    const res = await fetch(`${API}${url}`, { method, headers, body: body && JSON.stringify(body) });
+    // A stalled GitHub must not hold the turn: callers treat the error as no token.
+    const res = await fetch(`${API}${url}`, { method, headers, body: body && JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const e = new Error(`GitHub ${method} ${url}: ${res.status} ${data.message || ''}`.trim());

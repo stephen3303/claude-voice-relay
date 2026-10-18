@@ -102,7 +102,7 @@ Set up the `main` ruleset (below) first: until it exists an agent's token can pu
 Keep agents off `main` with a ruleset in each repo the App is installed on: **Settings → Rules → Rulesets → New ruleset →
 New branch ruleset**. Name `Protect main`, Enforcement **Active**. Under **Bypass list → Add bypass**
 pick **Repository admin** and set it to **For pull requests only** (so you can still merge your own
-pull requests). **Target branches → Add target → Include default branch.** Leave **Restrict
+pull requests); never add the agents App there. **Target branches → Add target → Include default branch.** Leave **Restrict
 deletions** and **Block force pushes** on, tick **Require a pull request before merging** with
 **Required approvals** 1, then **Create**. An agent's push to `main` is now refused, and its pull
 requests need your approval before they merge (on this repo, merging deploys to AWS).
