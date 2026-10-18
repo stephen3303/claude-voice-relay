@@ -46,7 +46,11 @@ struct HelpView: View {
                     HelpItem("\"Couldn't reach your PC\"", "Check that the relay is running and that your phone is on the same Tailscale network. Then use Save and test in Settings.")
                     #endif
                     HelpItem("Photos don't work", "In Settings, tap Allow camera, then Test photo. The glasses must be on and nearby.")
+                    #if APP_STORE
                     Link("More help on the website", destination: URL(string: "https://talktobridge.com/support.html")!)
+                    #else
+                    Link("More help on GitHub", destination: URL(string: "https://github.com/stephen3303/claude-voice-relay#readme")!)
+                    #endif
                 }
             }
             .navigationTitle("Help")
