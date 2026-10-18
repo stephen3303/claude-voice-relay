@@ -2,7 +2,7 @@
 
 Talk to Claude Code agents hands-free: "Hey Meta, start Bridge" on Ray-Ban Meta glasses (or Siri,
 Shortcuts), hear the answers out loud. Owner: Stephen (Windows 11 PC "powerspec", iPhone,
-no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`, `outbox.json`, `github-pins.json`, `*.pem` or logs.
+no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`, `outbox.json`, `*.pem` or logs.
 
 ## Layout
 - `relay.mjs` — the PC relay (Node, no deps). Docker agents (one container per repo,
@@ -24,7 +24,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
 - `site/` — the website (privacy, terms, support), on GitHub Pages now; talktobridge.com later.
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.
 - `github-app.mjs` — agents push as a GitHub App (`setup-github-app.mjs` creates it): each turn gets an hour-long
-  token for that agent's repo only, passed with `docker exec -e`. Agents never get Stephen's own GitHub login.
+  token for that agent's repo only, passed with `docker exec -e`. Agents never get Stephen's own GitHub login. The App key and each folder's
+  pinned repo (`github-pins.json`) live in `%USERPROFILE%\.bridge`, outside every repo an agent can mount.
 
 ## Build, test, run
 - Relay: `start.ps1` runs it and restarts it if it exits, so to reload after editing `relay.mjs`,

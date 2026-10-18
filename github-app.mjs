@@ -111,6 +111,7 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
       // Write then rename, so a crash mid-write can't leave a file that blocks every token.
       // A failed save (a locked file) keeps the pin in memory for this run rather than failing the turn.
       try {
+        fs.mkdirSync(path.dirname(pinsFile), { recursive: true });
         fs.writeFileSync(`${pinsFile}.tmp`, JSON.stringify(pins, null, 2));
         fs.renameSync(`${pinsFile}.tmp`, pinsFile);
       } catch (e) { log(`WARNING: couldn't save ${pinsFile}: ${e.message}`); }

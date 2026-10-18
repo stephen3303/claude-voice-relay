@@ -110,7 +110,8 @@ if (cfg.githubAppId && cfg.githubAppKeyFile) {
 if (!ghApp && !cfg.agentGhToken) log('WARNING: no GitHub access for agents (GITHUB_APP_ID or AGENT_GH_TOKEN); they can commit but not push.');
 
 const agentGitHub = makeAgentGitHub({
-  ghApp, fallbackToken: cfg.agentGhToken, hostGit, log, pinsFile: path.join(ROOT, 'github-pins.json'),
+  // Outside the repo: the agent working on this repo mounts it and could otherwise rewrite its own pin.
+  ghApp, fallbackToken: cfg.agentGhToken, hostGit, log, pinsFile: path.join(os.homedir(), '.bridge', 'github-pins.json'),
   getRemote: (repoPath) => hostValue('git', ['-C', repoPath, 'remote', 'get-url', 'origin']),
 });
 
