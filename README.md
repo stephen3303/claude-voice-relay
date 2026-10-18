@@ -39,6 +39,18 @@ The read-back also names the project it resolved, so a misheard project gets cau
 the agent starts. Any reply that is waiting on you contains "again"; "Sent." and "Cancelled." don't, which is what ends the loop.
 An unconfirmed task expires after 10 minutes.
 
+## Ray-Ban Meta glasses ("Hey Meta, start Bridge")
+`glasses/ios` is an iPhone app, Bridge, built on GitHub Actions (`Glasses iOS build`) and sideloaded
+with Sideloadly. Meta AI opens it on "Hey Meta, start Bridge"; it listens through the glasses
+microphone, sends what you say to `/voice/confirm` (the same read-back as the Shortcut), and speaks
+the answer. While the conversation is open it also long-polls `GET /voice/inbox` and reads out
+whatever your agents say. Say "in <project>, <task>" to start a task, "send it" to confirm,
+"yes" to answer an agent, and "goodbye" to hang up. After "Sent." it stays on the line for up to
+15 minutes so you hear the agent's answer.
+
+The phone reaches the relay over HTTPS with `tailscale serve --bg 47879`. In the app, enter that
+`https://<pc>.<tailnet>.ts.net` address and your `VOICE_TOKEN`.
+
 ## Setup
 1. `copy .env.example .env` and fill it in.
 2. `npm run build-agent`

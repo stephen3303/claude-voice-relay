@@ -1,0 +1,52 @@
+# XcodeGen spec: generates GlassesRelay.xcodeproj (CI runs `xcodegen generate`).
+# Info.plist keys follow the toolkit's getting-started guide for meta-wearables-dat-ios 1.0.1.
+name: GlassesRelay
+options:
+  bundleIdPrefix: com.smitherman
+  deploymentTarget:
+    iOS: "17.2"
+packages:
+  MWDAT:
+    url: https://github.com/facebook/meta-wearables-dat-ios
+    exactVersion: "1.0.1"
+targets:
+  GlassesRelay:
+    type: application
+    platform: iOS
+    sources: [GlassesRelay]
+    dependencies:
+      - package: MWDAT
+        product: MWDATCore
+    info:
+      path: GlassesRelay/Info.plist
+      properties:
+        CFBundleDisplayName: Bridge          # must match the app name in the Wearables Developer Center
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: com.smitherman.glassesrelay
+            CFBundleURLSchemes: [glassesrelay]
+        MWDAT:
+          AppLinkURLScheme: "glassesrelay://"
+          MetaAppID: "0"                     # "0" = Developer Mode, no attestation
+          ClientToken: "0"
+          TeamID: $(DEVELOPMENT_TEAM)
+          Analytics: { OptOut: true }
+          CrashReporting: { OptOut: true }
+        # bluetooth/external-accessory: links the toolkit uses; audio: keeps the conversation alive in your pocket
+        UIBackgroundModes: [audio, bluetooth-central, bluetooth-peripheral, external-accessory]
+        UISupportedExternalAccessoryProtocols: [com.meta.ar.wearable]
+        NSBluetoothAlwaysUsageDescription: Connects to your Meta glasses.
+        NSLocalNetworkUsageDescription: Lets your phone find and connect to your glasses over Wi-Fi.
+        NSBonjourServices: [_bonjour._tcp]
+        NSMicrophoneUsageDescription: Hears you through the glasses microphone.
+        NSSpeechRecognitionUsageDescription: Turns what you say into text for your Claude agents.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.smitherman.glassesrelay
+        SWIFT_VERSION: "5"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO

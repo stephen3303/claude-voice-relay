@@ -59,7 +59,18 @@ async function tg(method, body) {
   if (!json.ok) throw new Error(`${method}: ${json.description}`);
   return json.result;
 }
-async function say(text) {
+// Everything said is also held briefly for the glasses app, which long-polls /voice/inbox
+// and reads new messages aloud. Ids restart with the relay, so replies carry BOOT too.
+const BOOT = Date.now();
+const outbox = []; // { id, at, text }
+let outboxId = 0;
+const inboxWaiters = new Set();
+async function say(text, { voice = true } = {}) {
+  if (voice) {
+    outbox.push({ id: ++outboxId, at: Date.now(), text: String(text) });
+    if (outbox.length > 50) outbox.shift();
+    for (const wake of [...inboxWaiters]) wake();
+  }
   if (!cfg.chatId) return log('(no TELEGRAM_CHAT_ID yet) would send:', text);
   try { await tg('sendMessage', { chat_id: cfg.chatId, text: String(text).slice(0, 4000) }); }
   catch (e) { log('send failed:', e.message); }
@@ -250,7 +261,7 @@ async function stopAgent(text) {
 async function full(text) {
   const a = findAgentPrefix(text) || [...agents.values()].sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0))[0];
   if (!a?.lastFull) return say('Nothing to show yet.');
-  say(a.lastFull);
+  say(a.lastFull, { voice: false }); // screen-only: too long to read aloud
 }
 
 async function onMessage(m) {
@@ -286,7 +297,15 @@ function confirmStep(raw) {
   const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
   if (!body) return "I didn't catch that. Say the task again.";
   if (SEND.test(body)) {
-    if (!pending) return 'Nothing is waiting to send. Say the task again.';
+    if (!pending) {
+      // With nothing held, a bare "yes" answers an agent's yes-or-no question.
+      if (YES.test(body) && [...agents.values()].some((a) => a.awaiting)) {
+        log('voice answer: yes');
+        dispatch('yes').catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
+        return 'Sent.';
+      }
+      return 'Nothing is waiting to send. Say the task again.';
+    }
     const { text } = pending;
     pending = null;
     log('voice confirmed:', text);
@@ -335,6 +354,26 @@ http.createServer((req, res) => {
   });
 }).listen(cfg.hookPort, '127.0.0.1', () => log(`hook endpoint on 127.0.0.1:${cfg.hookPort}`));
 
+// GET /voice/inbox?after=<id>: messages newer than <id>, waiting up to 25s for one to arrive.
+// No `after` means "from now"; wait=0 answers at once (the app's connection test).
+function inbox(req, res) {
+  const q = new URL(req.url, 'http://relay').searchParams;
+  const after = q.has('after') ? Number(q.get('after')) || 0 : outboxId;
+  const fresh = () => outbox.filter((m) => m.id > after);
+  let timer;
+  const answer = () => {
+    clearTimeout(timer);
+    inboxWaiters.delete(answer);
+    if (res.writableEnded) return;
+    const messages = fresh().map(({ id, at, text }) => ({ id, text, age: Math.round((Date.now() - at) / 1000) }));
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ boot: BOOT, last: outboxId, messages }));
+  };
+  if (fresh().length || q.get('wait') === '0') return answer();
+  timer = setTimeout(answer, 25000);
+  inboxWaiters.add(answer);
+  res.on('close', () => { clearTimeout(timer); inboxWaiters.delete(answer); });
+}
+
 // ---------- voice endpoint for the iPhone Shortcut (firewalled to Tailscale) ----------
 if (cfg.voiceToken) {
   const want = Buffer.from(`Bearer ${cfg.voiceToken}`);
@@ -343,6 +382,7 @@ if (cfg.voiceToken) {
     const ok = got.length === want.length && crypto.timingSafeEqual(got, want);
     const h = String(req.headers.authorization || '');
     if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}, auth len ${h.length} (want ${want.length}), starts '${h.slice(0, 7)}', ends '${h.slice(-3)}'`); res.writeHead(401).end(); return; }
+    if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
     if (req.method !== 'POST' || (req.url !== '/voice' && req.url !== '/voice/confirm')) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });
