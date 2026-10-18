@@ -48,6 +48,8 @@ struct GlassesRelayApp: App {
                 .environmentObject(glasses)
                 .environmentObject(glasses.conversation)
                 .task { await glasses.start() }
+                // Renew the Bridge Cloud session in its last week, or sign out if the Apple ID was revoked.
+                .task { await Account.shared.check() }
                 // Meta AI calls back into the app after registration; only its links go to the toolkit.
                 .onOpenURL { url in
                     guard URLComponents(url: url, resolvingAgainstBaseURL: false)?

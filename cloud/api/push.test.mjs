@@ -129,3 +129,18 @@ test('a phone whose tokens are all dead is removed; a corrected environment is k
   await moved.notify('u1', { text: 'done', id: 1 });
   assert.equal(moved.saved[0].env, 'sandbox');
 });
+
+test('a connection failure for one phone still lets the others get the message', async () => {
+  const pushes = [];
+  const notify = makeNotifier({
+    now: () => 1_000_000_000,
+    devices: { list: async () => [phone({ device: 'p1' }), phone({ device: 'p2', headset: false })], save: async () => {}, remove: async () => {}, lastListened: async () => 0 },
+    apns: async (token, env, kind) => {
+      pushes.push(kind);
+      if (kind === 'call') throw new Error('stream reset');
+      return { result: 'ok', env };
+    },
+  });
+  assert.deepEqual(await notify('u1', { text: 'done', id: 1 }), [{ device: 'p1', got: 'alert' }, { device: 'p2', got: 'alert' }]);
+  assert.deepEqual(pushes, ['call', 'alert', 'alert']);
+});

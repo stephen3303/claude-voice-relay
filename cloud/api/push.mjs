@@ -75,6 +75,9 @@ export function makeApns(deps) {
  */
 export function makeNotifier(deps) {
   const now = deps.now ?? Date.now;
+  // A connection failure for one phone mustn't stop the others getting the message.
+  const apns = (token, env, kind, payload) =>
+    deps.apns(token, env, kind, payload).catch((e) => ({ result: 'error', env, reason: e.message }));
 
   /** An agent's message for the user. Returns what each phone got, for logs and tests. */
   return async function notify(user, { text, from, id }) {
@@ -85,13 +88,13 @@ export function makeNotifier(deps) {
     for (const d of await deps.devices.list(user)) {
       let device = d, got = null;
       if (d.voipToken && d.calls && d.headset) {
-        const r = await deps.apns(d.voipToken, d.env, 'call', { from: title, text: body, id });
+        const r = await apns(d.voipToken, d.env, 'call', { from: title, text: body, id });
         if (r.result === 'ok') got = 'call';
         if (r.result === 'gone') device = { ...device, voipToken: undefined };
         if (r.env !== d.env && r.result !== 'error') device = { ...device, env: r.env };
       }
       if (!got && device.token) {
-        const r = await deps.apns(device.token, device.env, 'alert', {
+        const r = await apns(device.token, device.env, 'alert', {
           aps: { alert: { title, body }, sound: 'default', 'interruption-level': 'time-sensitive',
             category: 'AGENT_MESSAGE', 'thread-id': title },
           id,

@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var photoResult = ""
     @State private var showPaywall = false
     @State private var readBack = Conversation.readBack
+    @State private var confirmDelete = false
     @ObservedObject private var store = Store.shared
     @ObservedObject private var account = Account.shared
     @ObservedObject private var push = Push.shared
@@ -78,6 +79,13 @@ struct ContentView: View {
                             }
                         }
                         Button("Sign out") { account.signOut(); url = Relay.shared.baseURL }
+                        Button("Delete account", role: .destructive) { confirmDelete = true }
+                            .confirmationDialog("Delete your Bridge Cloud account and everything stored for it?",
+                                                isPresented: $confirmDelete, titleVisibility: .visible) {
+                                Button("Delete account", role: .destructive) {
+                                    Task { await account.deleteAccount(); url = Relay.shared.baseURL }
+                                }
+                            }
                     } else {
                         SignInWithAppleButton(.signIn) { $0.requestedScopes = [.fullName] } onCompletion: { result in
                             Task { await account.completed(result) }
