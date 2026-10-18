@@ -85,8 +85,9 @@ Not affiliated with Anthropic or Meta. Ray-Ban is a trademark of Luxottica.
 
 Bridge is a voice front end for the user's Claude agents, which run in Bridge Cloud. To review it:
 
-1. Sign in with Apple in Settings > Account, which selects Bridge Cloud. Or, without signing in,
-   choose Settings > Connection > Demo for sample replies.
+1. Open Settings > Connection > Demo for sample replies (no account needed). Signing in with Apple
+   in Settings > Account selects Bridge Cloud. Don't submit until Bridge Cloud agents are live
+   (cloud/DESIGN.md build step 4); until then a cloud task only answers that agents aren't on yet.
 2. Tap "Talk now" and allow the microphone and speech recognition.
 3. Say "in demo, write a test". Bridge reads it back. Say "send it". Then say "goodbye".
 
@@ -106,11 +107,12 @@ Must match https://talktobridge.com/privacy.html and `PrivacyInfo.xcprivacy`. No
 - **Purchases > Purchase history:** linked, app functionality (Bridge Pro transactions checked by Bridge Cloud).
 - **User content > Photos:** linked, app functionality (photos the user asks about or sends to an agent).
 - **User content > Other user content:** linked, app functionality (task text and agents' messages).
+- **Identifiers > Device ID:** linked, app functionality (the app's per-install ID and push tokens, to deliver agents' calls and notifications).
 - **Usage data > Product interaction:** linked, app functionality (daily natural-voice characters and photo answers, kept 3 days, for limits).
 - **Diagnostics > Crash data, Performance data, Other diagnostic data:** not linked, app functionality (Sentry).
 
 Not collected: contact info (no email is requested; the first name stays on the phone), audio,
-location. Push tokens are only used to deliver the user's own calls and notifications.
+location.
 
 ## Screenshots
 
