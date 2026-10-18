@@ -186,7 +186,7 @@ final class GlassesController: ObservableObject {
             videoCodec: .hvc1, audioCodec: nil, resolution: .medium, frameRate: 7))
         else { throw PhotoFailure.failed("The camera would not start.") }
 
-        enum Event { case streaming, streamStopped, photoReady, photoStopped, progress(UInt64, UInt64), photo(Data), error(String), photoError(String), timeout(Int, PhotoFailure) }
+        enum Event { case streaming, streamStopped, photoReady, photoStopped, progress(UInt64, UInt64), photo(Data), error(String), photoError(String, detail: String), timeout(Int, PhotoFailure) }
         let (events, emit) = AsyncStream<Event>.makeStream()
         let tokens = ListenerTokenBag()
         defer { Task { await tokens.cancelAll() } }
@@ -212,9 +212,10 @@ final class GlassesController: ObservableObject {
             // description is only the case name; the underlying error is what says why.
             switch error {
             case .captureFailure(let underlying?), .sessionSetupFailed(let underlying?):
-                emit.yield(.photoError("\(error.description): \(underlying)"))
+                // The detail is for the home screen note only; the spoken error stays plain words.
+                emit.yield(.photoError(error.description, detail: "\(error.description): \(underlying)"))
             default:
-                emit.yield(.photoError(error.description))
+                emit.yield(.photoError(error.description, detail: error.description))
             }
         }.store(in: tokens)
         camera.photo.transferProgressPublisher.listen { p in emit.yield(.progress(p.bytesReceived, p.totalBytes)) }.store(in: tokens)
@@ -302,9 +303,9 @@ final class GlassesController: ObservableObject {
                 if case .progress(let received, let total) = event {
                     bytes = (received, total)
                     arm(15, .photoNeverArrived)   // bytes are still crossing; keep waiting
-                } else if case .photoError(let message) = event, fired {
-                    fallBack(message)
-                } else if case .photoError(let message) = event {
+                } else if case .photoError(_, let detail) = event, fired {
+                    fallBack(detail)
+                } else if case .photoError(let message, _) = event {
                     throw PhotoFailure.failed(message)
                 }
             #endif
@@ -353,7 +354,7 @@ final class GlassesController: ObservableObject {
                 return jpeg
             case .error(let message):
                 #if !APP_STORE
-                streamError = " (stream error: \(message))"
+                streamError = " (stream error: \(message.trimmingCharacters(in: CharacterSet(charactersIn: "."))))"
                 #endif
                 throw PhotoFailure.failed(message)
             case .timeout(let gen, let failure) where gen == generation:
