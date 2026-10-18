@@ -20,9 +20,9 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
 2. **App Store Connect > Business:** accept the Paid Apps agreement, and add tax and banking details.
    Subscriptions can't be sold until this is done.
 3. **Bundle ID:** in Certificates, Identifiers & Profiles, register `com.talktobridge.bridge`.
-   If Apple says it's taken (the free team claimed it through Sideloadly), it frees up after the
-   free provisioning expires. Otherwise use a new one and change it in `project.yml`, `Store.swift`
-   and the Wearables Developer Center.
+   Do it before sideloading a build with this ID, or Sideloadly's free team may claim it first. If you
+   ever need a different ID, change it in `project.yml`, `Store.swift`, `cloud/infra/lib/api.mjs`,
+   `cloud/api/storekit.mjs`, `glasses/asc-subscriptions.mjs` and the Wearables Developer Center.
 4. **App record:** App Store Connect > Apps > + New App: iOS, the name below, that bundle ID, SKU `bridge-ios`.
 5. **Subscription:** the app > Monetization > Subscriptions > new group "Bridge Pro", then two
    auto-renewable subscriptions:
