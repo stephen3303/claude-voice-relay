@@ -1,0 +1,3 @@
+# Code owner review is what keeps the agents App from approving and merging pull requests on its own
+# (README: GitHub access for agents). Its approval never counts as a code owner's.
+* @stephen3303

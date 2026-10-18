@@ -1,4 +1,6 @@
 FROM node:22-bookworm-slim
+# relay.mjs refuses older images (AGENT_IMAGE_VERSION); bump both together.
+LABEL claude-voice-relay.image="2"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates curl ripgrep python3 python3-pip python3-venv \
  && mkdir -p -m 755 /etc/apt/keyrings \

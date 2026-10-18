@@ -80,6 +80,12 @@ const server = http.createServer(async (req, res) => {
     fs.mkdirSync(dir, { recursive: true });
     const keyFile = path.join(dir, `${app.slug}.pem`);
     fs.writeFileSync(keyFile, app.pem, { mode: 0o600 });
+    // Windows ignores the mode, so the key would inherit the home folder's access: limit it to this user.
+    if (process.platform === 'win32') {
+      try { execFileSync('icacls', [keyFile, '/inheritance:r', '/grant:r', `${os.userInfo().username}:R`], { stdio: 'ignore' }); }
+      catch { console.warn(`Couldn't restrict access to ${keyFile}; do it in its Properties > Security.`); }
+      if (/onedrive/i.test(keyFile)) console.warn(`${keyFile} is in a OneDrive folder, so the key will sync to the cloud. Move it and update GITHUB_APP_KEY_FILE.`);
+    }
     let env = '';
     try { env = fs.readFileSync(ENV_FILE, 'utf8'); } catch { /* new file */ }
     env = setEnv(setEnv(env, 'GITHUB_APP_ID', app.id), 'GITHUB_APP_KEY_FILE', keyFile);

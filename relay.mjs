@@ -10,7 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
-import { makeGitHubApp, makeAgentGitHub } from './github-app.mjs';
+import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -172,17 +172,29 @@ function parseTask(body) {
 }
 
 // ---------- containers ----------
-// Containers made before GitHub credentials moved to each turn hold the owner's full token in their
-// environment; the label marks the new kind, and any container without it is replaced (sessions survive in the volume).
-const GH_LABEL = 'claude-voice-relay.gh', GH_LABEL_VALUE = 'per-turn';
+// Agents run with every permission inside their container, so what's mounted is the boundary. Never
+// the relay's own folder (an agent could change the code the host runs, and read .env) or the folder
+// holding the App key, nor any folder above them (an alias pointing at the home folder).
+const PROTECTED = [ROOT, path.join(os.homedir(), '.bridge')];
+// Bumped with agent/Dockerfile's label when the image changes in a way the relay relies on
+// (version 2: git offers the token to github.com only, and gh is installed).
+const AGENT_IMAGE_VERSION = '2';
 async function ensureContainer(a) {
-  const { stdout } = await run('docker', ['ps', '-a', '--filter', `name=^${a.container}$`,
-    '--format', `{{.State}} {{.Label "${GH_LABEL}"}}`]);
-  const [state, gh] = stdout.trim().split(' ');
-  if (state === 'running' && gh === GH_LABEL_VALUE) return;
+  if (unsafeMount(a.repoPath, PROTECTED)) {
+    await run('docker', ['rm', '-f', a.container]).catch(() => {});
+    throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
+  }
+  const [imageId, version] = await run('docker', ['image', 'inspect', '--format',
+    '{{.Id}} {{index .Config.Labels "claude-voice-relay.image"}}', cfg.image]).then((r) => r.stdout.trim().split(' '), () => []);
+  if (version !== AGENT_IMAGE_VERSION) throw new Error('The agent image is out of date. On the PC, run npm run build-agent.');
+  // A container from another image (an older build, which may hold the owner's old full token in its
+  // environment) is replaced; sessions survive in the home volume.
+  const [state, image] = await run('docker', ['inspect', '--format', '{{.State.Status}} {{.Image}}', a.container])
+    .then((r) => r.stdout.trim().split(' '), () => []);
+  if (state === 'running' && image === imageId) return;
   if (state) await run('docker', ['rm', '-f', a.container]);
   // Secrets go through the docker CLI's environment ("-e NAME"), not argv.
-  await run('docker', ['run', '-d', '--name', a.container, '--label', 'claude-voice-relay=1', '--label', `${GH_LABEL}=${GH_LABEL_VALUE}`,
+  await run('docker', ['run', '-d', '--name', a.container, '--label', 'claude-voice-relay=1',
     '-v', `${a.repoPath}:/work`, '-v', `${a.container}-home:/home/node/.claude`,
     '-e', 'CLAUDE_CODE_OAUTH_TOKEN', cfg.image], { env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: cfg.oauth || '' } });
 }
@@ -219,13 +231,15 @@ function spoken(result) {
 async function turn(a, prompt, photo) {
   a.busy = true; a.awaiting = false; a.lastAt = Date.now(); save();
   const photoIn = photo && `/tmp/${path.basename(photo)}`;
+  let ghEnv;
   try {
     await ensureContainer(a);
     if (photo) {
       await run('docker', ['cp', photo, `${a.container}:${photoIn}`]);
       fs.rmSync(photo, { force: true });
     }
-    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt, await agentGitHub.env(a));
+    ghEnv = await agentGitHub.env(a);
+    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt, ghEnv);
     a.sessionId = r.session_id || a.sessionId;
     fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
     const line = spoken(r.result);
@@ -238,6 +252,7 @@ async function turn(a, prompt, photo) {
     log(a.name, 'turn failed:', e.message);
     say(`${a.name} failed. ${e.message.slice(0, 200)}`);
   } finally {
+    await agentGitHub.release(ghEnv);
     if (photo) {
       fs.rmSync(photo, { force: true });
       await run('docker', ['exec', a.container, 'rm', '-f', photoIn]).catch(() => {});

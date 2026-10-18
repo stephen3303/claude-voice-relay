@@ -1,17 +1,31 @@
 // GitHub access for agent containers, as a GitHub App instead of the owner's own login.
-// The relay holds the App's private key; each agent turn gets an installation token that lasts an
-// hour and covers only that agent's repository, with only the App's permissions (contents and pull
-// requests; no workflows, secrets or admin). A token that leaks from a container is soon useless.
+// The relay holds the App's private key; each agent turn gets a fresh installation token that covers
+// only that agent's repository, with only contents and pull request access (no workflows, secrets or
+// admin), and only when that repo's default branch is protected. It's revoked when the turn ends.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const API = 'https://api.github.com';
-// Reuse a token only while it has nearly its full hour left, so every turn gets about 55 minutes.
-// A turn that runs longer than that gets a 401 on its next push.
-const REUSE_MS = 55 * 60_000;
 // Asked for explicitly, so widening the App later doesn't widen agent tokens.
 const TOKEN_PERMISSIONS = { contents: 'write', pull_requests: 'write', metadata: 'read' };
+
+// The default branch's rules must stop the bot merging or rewriting it alone: a pull request needing a
+// code owner's approval (the bot's own approval doesn't count), and no force pushes or deletion.
+export function branchProtected(rules) {
+  if (!Array.isArray(rules)) return false;
+  const has = (type, ok = () => true) => rules.some((r) => r.type === type && ok(r.parameters || {}));
+  return has('pull_request', (p) => p.require_code_owner_review === true && p.required_approving_review_count >= 1)
+    && has('non_fast_forward') && has('deletion');
+}
+
+// True when mounting `repoPath` into a container would expose one of `protectedPaths` (the relay's own
+// code, which runs on the host, or the folder holding the App key), because one contains the other.
+export function unsafeMount(repoPath, protectedPaths) {
+  const norm = (p) => path.resolve(p).toLowerCase().replace(/[\\/]+$/, '') + path.sep;
+  const r = norm(repoPath);
+  return protectedPaths.some((p) => { const q = norm(p); return r.startsWith(q) || q.startsWith(r); });
+}
 
 // owner/repo from a GitHub remote: https://github.com/o/r(.git), git@github.com:o/r.git, ssh://git@github.com/o/r.
 // Only GitHub's own name characters, so a crafted remote can't steer the App's API calls to another path.
@@ -35,41 +49,58 @@ export function appJwt(appId, key, nowMs = Date.now()) {
 
 export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now = Date.now, log = () => {} }) {
   const key = crypto.createPrivateKey(privateKey);
-  const cache = new Map(); // "owner/repo" -> { token, expires }
+  const e = encodeURIComponent;
 
-  async function call(method, url, { auth = true, body } = {}) {
+  // auth: 'app' (the App's JWT), an installation token, or false.
+  async function call(method, url, { auth = 'app', body } = {}) {
     const headers = {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
       'User-Agent': 'claude-voice-relay',
     };
-    if (auth) headers.Authorization = `Bearer ${appJwt(appId, key, now())}`;
+    if (auth) headers.Authorization = `Bearer ${auth === 'app' ? appJwt(appId, key, now()) : auth}`;
     if (body) headers['Content-Type'] = 'application/json';
     // A stalled GitHub must not hold the turn: callers treat the error as no token.
     const res = await fetch(`${API}${url}`, { method, headers, body: body && JSON.stringify(body), signal: AbortSignal.timeout(15_000) });
-    const data = await res.json().catch(() => ({}));
+    const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
     if (!res.ok) {
-      const e = new Error(`GitHub ${method} ${url}: ${res.status} ${data.message || ''}`.trim());
-      e.status = res.status;
-      throw e;
+      const err = new Error(`GitHub ${method} ${url}: ${res.status} ${data.message || ''}`.trim());
+      err.status = res.status;
+      throw err;
     }
     return data;
   }
 
-  // A token for one repository, or null when the App isn't installed there (or GitHub is unreachable).
+  // Ends a token now rather than at its hour, so nothing the agent left running can keep using it.
+  async function revoke(token) {
+    try { await call('DELETE', '/installation/token', { auth: token }); }
+    catch (err) { log(`GitHub token revoke failed: ${err.message}`); }
+  }
+
+  // A token for one repository, or null when the App isn't installed there, the default branch isn't
+  // protected, or GitHub is unreachable.
   async function tokenFor(owner, repo) {
-    const id = `${owner}/${repo}`.toLowerCase();
-    const hit = cache.get(id);
-    if (hit && hit.expires - now() > REUSE_MS) return hit.token;
+    let probe;
     try {
-      const inst = await call('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/installation`);
-      const t = await call('POST', `/app/installations/${inst.id}/access_tokens`, { body: { repositories: [repo], permissions: TOKEN_PERMISSIONS } });
-      cache.set(id, { token: t.token, expires: Date.parse(t.expires_at) });
+      const inst = await call('GET', `/repos/${e(owner)}/${e(repo)}/installation`);
+      // A metadata-only token looks the repo up: its current name and id (the remote may predate a
+      // rename, which would make a token request by name fail) and its default branch's rules.
+      probe = (await call('POST', `/app/installations/${inst.id}/access_tokens`, { body: { permissions: { metadata: 'read' } } })).token;
+      const info = await call('GET', `/repos/${e(owner)}/${e(repo)}`, { auth: probe });
+      const rules = await call('GET', `/repos/${e(info.owner.login)}/${e(info.name)}/rules/branches/${e(info.default_branch)}`, { auth: probe });
+      if (!branchProtected(rules)) {
+        log(`${info.full_name}'s ${info.default_branch} branch isn't protected (see README: GitHub access for agents); no token.`);
+        return null;
+      }
+      const t = await call('POST', `/app/installations/${inst.id}/access_tokens`,
+        { body: { repository_ids: [info.id], permissions: TOKEN_PERMISSIONS } });
       return t.token;
-    } catch (e) {
-      log(e.status === 404 ? `GitHub App is not installed on ${owner}/${repo}; the agent can't push there.`
-        : `GitHub App token for ${owner}/${repo} failed: ${e.message}`);
+    } catch (err) {
+      log(err.status === 404 ? `GitHub App is not installed on ${owner}/${repo}; the agent can't push there.`
+        : `GitHub App token for ${owner}/${repo} failed: ${err.message}`);
       return null;
+    } finally {
+      if (probe) await revoke(probe);
     }
   }
 
@@ -79,13 +110,13 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
     if (who) return who;
     try {
       const app = await call('GET', '/app');
-      const user = await call('GET', `/users/${encodeURIComponent(`${app.slug}[bot]`)}`, { auth: false });
+      const user = await call('GET', `/users/${e(`${app.slug}[bot]`)}`, { auth: false });
       who = { name: `${app.slug}[bot]`, email: `${user.id}+${app.slug}[bot]@users.noreply.github.com` };
-    } catch (e) { log(`GitHub App identity lookup failed: ${e.message}`); return null; }
+    } catch (err) { log(`GitHub App identity lookup failed: ${err.message}`); return null; }
     return who;
   }
 
-  return { tokenFor, identity };
+  return { tokenFor, revoke, identity };
 }
 
 // What each agent turn gets: GH_TOKEN plus the git identity to commit as. Agents never get the owner's
@@ -95,6 +126,8 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
 // first time it's read (before any agent has run there) and kept across agents and restarts: a changed
 // origin must not get a token for another repo the App is installed on. A pins file that exists but
 // can't be read stops all tokens rather than being rebuilt from live config.
+const AGENT_FALLBACK = { name: 'Bridge agent', email: 'bridge-agent@users.noreply.github.com' };
+
 export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote, pinsFile, log = () => {} }) {
   let pins = {};
   try { pins = JSON.parse(fs.readFileSync(pinsFile, 'utf8')); }
@@ -128,16 +161,20 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     return pins[key];
   }
 
+  const issued = new Set(); // App tokens handed to turns that haven't ended
+
   async function env(a) {
     let token = fallbackToken, who = hostGit;
     if (ghApp) {
+      // Never the owner's identity on the App's pushes: without the bot's, the turn gets no token.
+      who = (await ghApp.identity()) || AGENT_FALLBACK;
       const remote = parseRemote(await getRemote(a.repoPath));
       const slug = remote && `${remote.owner}/${remote.repo}`.toLowerCase();
       const pinned = slug && pin(a, slug);
       if (!slug) log(`${a.name} has no GitHub origin remote, so no GitHub token.`);
       else if (pinned && slug !== pinned) log(`${a.name}: origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in ${path.basename(pinsFile)} if that was you.`);
-      token = slug && slug === pinned ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
-      who = (await ghApp.identity()) || hostGit;
+      token = slug && slug === pinned && who !== AGENT_FALLBACK ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
+      if (token) issued.add(token);
     }
     return {
       GH_TOKEN: token || '',
@@ -146,5 +183,11 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     };
   }
 
-  return { env, isPinned: (repoPath) => !!pins?.[keyOf(repoPath)] };
+  // Called when the turn ends: its App token is revoked (AGENT_GH_TOKEN is the owner's to manage).
+  async function release(vars) {
+    if (!issued.delete(vars?.GH_TOKEN)) return;
+    await ghApp.revoke(vars.GH_TOKEN);
+  }
+
+  return { env, release, isPinned: (repoPath) => !!pins?.[keyOf(repoPath)] };
 }

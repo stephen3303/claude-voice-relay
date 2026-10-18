@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseRemote, appJwt, makeGitHubApp, makeAgentGitHub } from './github-app.mjs';
+import { parseRemote, appJwt, makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
 const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -36,47 +36,86 @@ test('appJwt is an RS256 JWT for the App, valid for under ten minutes', () => {
   assert.ok(crypto.verify('sha256', Buffer.from(`${h}.${b}`), publicKey, Buffer.from(s, 'base64url')));
 });
 
-function fakeGitHub({ installed = true } = {}) {
+const PROTECTED_RULES = [
+  { type: 'pull_request', parameters: { require_code_owner_review: true, required_approving_review_count: 1 } },
+  { type: 'non_fast_forward' },
+  { type: 'deletion' },
+];
+
+function fakeGitHub({ installed = true, rules = PROTECTED_RULES, canonical = 'claude-voice-relay' } = {}) {
   const calls = [];
   let n = 0;
   const fetch = async (url, opts) => {
     calls.push({ url, ...opts, body: opts.body && JSON.parse(opts.body) });
     const reply = (status, data) => ({ ok: status < 300, status, json: async () => data });
-    if (url.endsWith('/installation')) return installed ? reply(200, { id: 42 }) : reply(404, { message: 'Not Found' });
-    if (url.endsWith('/app/installations/42/access_tokens')) {
-      return reply(201, { token: `ghs_${++n}`, expires_at: new Date(clock + 3600_000).toISOString() });
+    const path = url.replace('https://api.github.com', '');
+    if (path.endsWith('/installation') && opts.method === 'GET') return installed ? reply(200, { id: 42 }) : reply(404, { message: 'Not Found' });
+    if (path === '/installation/token' && opts.method === 'DELETE') return reply(204);
+    if (path === '/app/installations/42/access_tokens') return reply(201, { token: `ghs_${++n}` });
+    if (path.startsWith('/repos/stephen3303/') && path.includes('/rules/branches/main')) return reply(200, rules);
+    if (/^\/repos\/stephen3303\/[\w.-]+$/.test(path)) {
+      return reply(200, { id: 5, name: canonical, full_name: `stephen3303/${canonical}`, owner: { login: 'stephen3303' }, default_branch: 'main' });
     }
-    if (url.endsWith('/app')) return reply(200, { slug: 'bridge-agents' });
-    if (url.includes('/users/bridge-agents%5Bbot%5D')) return reply(200, { id: 999 });
+    if (path === '/app') return reply(200, { slug: 'bridge-agents' });
+    if (path === '/users/bridge-agents%5Bbot%5D') return reply(200, { id: 999 });
     return reply(404, {});
   };
-  let clock = 1_700_000_000_000;
   const logs = [];
-  const app = makeGitHubApp({ appId: 7, privateKey: pem, fetch, now: () => clock, log: (m) => logs.push(m) });
-  return { app, calls, logs, advance: (ms) => (clock += ms) };
+  const app = makeGitHubApp({ appId: 7, privateKey: pem, fetch, log: (m) => logs.push(m) });
+  return { app, calls, logs };
 }
+const mints = (calls) => calls.filter((c) => c.url.endsWith('/access_tokens'));
+const revokes = (calls) => calls.filter((c) => c.method === 'DELETE').map((c) => c.headers.Authorization);
 
-test('tokenFor asks for a token scoped to the one repository, and reuses it while fresh', async () => {
-  const { app, calls, advance } = fakeGitHub();
-  assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_1');
-  const mint = calls.find((c) => c.url.endsWith('/access_tokens'));
-  assert.equal(mint.method, 'POST');
-  assert.deepEqual(mint.body, {
-    repositories: ['claude-voice-relay'],
+test('tokenFor mints a token for the one repository by id, and revokes the lookup token', async () => {
+  const { app, calls } = fakeGitHub();
+  assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_2');
+  const [probe, real] = mints(calls);
+  assert.deepEqual(probe.body, { permissions: { metadata: 'read' } });
+  assert.match(probe.headers.Authorization, /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/); // the App's JWT
+  assert.deepEqual(real.body, {
+    repository_ids: [5],
     permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
   });
-  assert.match(mint.headers.Authorization, /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
+  assert.deepEqual(revokes(calls), ['Bearer ghs_1']);
+  // Each turn gets its own token.
+  assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_4');
+});
 
-  advance(4 * 60_000);
-  assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_1');
-  advance(2 * 60_000); // 54 minutes left: a long turn could outlive it
+test('tokenFor follows a renamed repository to its current name', async () => {
+  const { app, calls } = fakeGitHub({ canonical: 'bridge' });
   assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_2');
+  assert.ok(calls.some((c) => c.url.endsWith('/repos/stephen3303/bridge/rules/branches/main')));
+});
+
+test('tokenFor refuses a repository whose default branch is not protected', async () => {
+  for (const rules of [[], PROTECTED_RULES.slice(1),
+    [{ type: 'pull_request', parameters: { require_code_owner_review: false, required_approving_review_count: 1 } }, ...PROTECTED_RULES.slice(1)],
+    PROTECTED_RULES.filter((r) => r.type !== 'deletion')]) {
+    const { app, calls, logs } = fakeGitHub({ rules });
+    assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), null);
+    assert.equal(mints(calls).length, 1); // only the lookup token, which is revoked
+    assert.deepEqual(revokes(calls), ['Bearer ghs_1']);
+    assert.match(logs.at(-1), /isn't protected/);
+  }
 });
 
 test('tokenFor returns null when the App is not installed on the repository', async () => {
   const { app, logs } = fakeGitHub({ installed: false });
   assert.equal(await app.tokenFor('stephen3303', 'other'), null);
   assert.match(logs[0], /not installed on stephen3303\/other/);
+});
+
+test('unsafeMount refuses the relay, the key folder and anything above them', () => {
+  const guarded = ['/home/s/Projects/claude-voice-relay', '/home/s/.bridge'];
+  assert.equal(unsafeMount('/home/s/Projects/trading-bot', guarded), false);
+  assert.equal(unsafeMount('/home/s/Projects/voice-relay-work', guarded), false);
+  assert.equal(unsafeMount('/home/s/Projects/claude-voice-relay', guarded), true);
+  assert.equal(unsafeMount('/home/s/Projects/Claude-Voice-Relay/', guarded), true);
+  assert.equal(unsafeMount('/home/s/Projects/claude-voice-relay/glasses', guarded), true);
+  assert.equal(unsafeMount('/home/s/Projects', guarded), true);
+  assert.equal(unsafeMount('/home/s', guarded), true);
+  assert.equal(unsafeMount('/home/s/.bridge', guarded), true);
 });
 
 test('identity is the App bot user, with its noreply address', async () => {
@@ -88,14 +127,15 @@ test('identity is the App bot user, with its noreply address', async () => {
   assert.equal(calls.length, 2); // looked up once
 });
 
-function agentGitHub({ remote = 'https://github.com/stephen3303/claude-voice-relay.git', pinsJson, ghApp, fallbackToken } = {}) {
+function agentGitHub({ remote = 'https://github.com/stephen3303/claude-voice-relay.git', pinsJson, ghApp, fallbackToken, noIdentity } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pins-'));
   const pinsFile = path.join(dir, 'github-pins.json');
   if (pinsJson !== undefined) fs.writeFileSync(pinsFile, pinsJson);
-  const minted = [];
+  const minted = [], revoked = [];
   const app = ghApp === null ? null : {
     tokenFor: async (owner, repo) => { minted.push(`${owner}/${repo}`); return 'ghs_x'; },
-    identity: async () => ({ name: 'bridge-agents[bot]', email: '9+bridge-agents[bot]@users.noreply.github.com' }),
+    revoke: async (t) => { revoked.push(t); },
+    identity: async () => (noIdentity ? null : { name: 'bridge-agents[bot]', email: '9+bridge-agents[bot]@users.noreply.github.com' }),
   };
   const logs = [];
   const state = { remote };
@@ -103,7 +143,7 @@ function agentGitHub({ remote = 'https://github.com/stephen3303/claude-voice-rel
     ghApp: app, fallbackToken, hostGit: { name: 'Stephen', email: 's@example.com' },
     getRemote: async () => state.remote, pinsFile, log: (m) => logs.push(m),
   });
-  return { gh, minted, logs, state, pinsFile };
+  return { gh, minted, revoked, logs, state, pinsFile };
 }
 const agent = { name: 'voice relay', repoPath: '/p/claude-voice-relay' };
 
@@ -154,7 +194,7 @@ test('pins survive a restart', async () => {
   await first.gh.env(agent);
   const logs = [], minted = [];
   const restarted = makeAgentGitHub({
-    ghApp: { tokenFor: async (o, r) => { minted.push(`${o}/${r}`); return 'ghs_y'; }, identity: async () => null },
+    ghApp: { tokenFor: async (o, r) => { minted.push(`${o}/${r}`); return 'ghs_y'; }, identity: async () => ({ name: 'b[bot]', email: 'b@x' }) },
     hostGit: { name: 'Stephen', email: 's@example.com' },
     getRemote: async () => 'https://github.com/stephen3303/other-repo.git',
     pinsFile: first.pinsFile, log: (m) => logs.push(m),
@@ -177,7 +217,7 @@ test('a pin that cannot be saved still holds for this run', async () => {
   fs.mkdirSync(`${pinsFile}.tmp`); // a folder where the temp file goes, so the save fails
   const logs = [];
   const gh = makeAgentGitHub({
-    ghApp: { tokenFor: async () => 'ghs_x', identity: async () => null },
+    ghApp: { tokenFor: async () => 'ghs_x', identity: async () => ({ name: 'b[bot]', email: 'b@x' }) },
     hostGit: { name: 'Stephen', email: 's@example.com' },
     getRemote: async () => 'https://github.com/stephen3303/claude-voice-relay.git',
     pinsFile,
@@ -186,4 +226,23 @@ test('a pin that cannot be saved still holds for this run', async () => {
   assert.equal((await gh.env(agent)).GH_TOKEN, 'ghs_x');
   assert.ok(logs.some((m) => /couldn't save/.test(m)));
   assert.ok(gh.isPinned(agent.repoPath));
+});
+
+test('an App token is revoked when the turn ends; AGENT_GH_TOKEN is left alone', async () => {
+  const { gh, revoked } = agentGitHub();
+  const vars = await gh.env(agent);
+  await gh.release(vars);
+  await gh.release(vars); // once only
+  assert.deepEqual(revoked, ['ghs_x']);
+  const pat = agentGitHub({ ghApp: null, fallbackToken: 'github_pat_x' });
+  await pat.gh.release(await pat.gh.env(agent));
+  await pat.gh.release(undefined); // a turn that failed before getting one
+});
+
+test('without the bot identity, a turn gets no token and never commits as the owner', async () => {
+  const { gh, minted } = agentGitHub({ noIdentity: true });
+  const vars = await gh.env(agent);
+  assert.equal(vars.GH_TOKEN, '');
+  assert.deepEqual(minted, []);
+  assert.notEqual(vars.GIT_AUTHOR_NAME, 'Stephen');
 });
