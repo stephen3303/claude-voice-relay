@@ -1,6 +1,6 @@
 .env
 state.json
-outbox.json
+outbox.json*
 logs/
 node_modules/
 

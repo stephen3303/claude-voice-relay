@@ -77,7 +77,11 @@ function say(text, { spoken } = {}) {
   log('say:', text);
   outbox.push({ id: ++outboxId, at: Date.now(), text: String(spoken ?? text) });
   if (outbox.length > 50) outbox.shift();
-  try { fs.writeFileSync(OUTBOX_FILE, JSON.stringify({ boot: BOOT, last: outboxId, messages: outbox })); }
+  // Write then rename, so stopping the relay mid-write can't leave a truncated file.
+  try {
+    fs.writeFileSync(OUTBOX_FILE + '.tmp', JSON.stringify({ boot: BOOT, last: outboxId, messages: outbox }));
+    fs.renameSync(OUTBOX_FILE + '.tmp', OUTBOX_FILE);
+  }
   catch (e) { log('outbox save failed:', e.message); }
   for (const wake of [...inboxWaiters]) wake();
 }
@@ -280,8 +284,10 @@ async function stopAgent(text) {
 // Shared by the Bridge app and the iPhone Shortcut.
 async function dispatch(text) {
   if (TASK_PREFIX.test(text)) return startTask(text.replace(TASK_PREFIX, ''));
-  if (/^status\b/i.test(text)) return status();
-  if (/^(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^(stop|kill)\s*/i, ''));
+  if (/^\/?status\b/i.test(text)) return status();
+  if (/^\/?(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^\/?(stop|kill)\s*/i, ''));
+  // "full" used to show the whole reply in Telegram; keep it from reaching an agent as a prompt.
+  if (/^\/?full\b/i.test(text)) return say('The full reply is in the logs folder on your PC.');
   return reply(text);
 }
 
