@@ -125,7 +125,7 @@ li + li { margin-top: var(--s2); }
 .skip:focus { top: var(--s4); }
 
 /* On the navy and indigo bands the orange ring reads in both schemes */
-.site-header, .hero, .page-head, .site-footer { --focus: var(--brand-orange); }
+.skip, .site-header, .hero, .page-head, .site-footer { --focus: var(--brand-orange); }
 
 .wrap {
   width: 100%;
