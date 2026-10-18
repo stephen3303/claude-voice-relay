@@ -6,8 +6,11 @@
 import { userOf } from './auth.mjs';
 
 // "send it" and what dictation tends to make of it ("sent it", "send it please"), as in confirm.mjs.
-const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
-const CANCEL = /^(?:cancel|never ?mind|forget it|stop)[\s.!]*$/i;
+const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go ahead|do it|yes|yep|yeah)[\s.!]*$/i;
+const CANCEL = /^(?:cancel(?: it)?|never ?mind|forget it|stop)[\s.!]*$/i;
+const CHANGE = /^(?:(?:no|nope)[\s,]+)?(?:change(?: it| that| the message| the task)?|edit(?: it)?)[\s.!]*$/i;
+const NO = /^(?:no|nope|nah|don'?t(?: send(?: it)?)?)[\s.!]*$/i;
+const ASK = 'What do you want to send?';
 const TASK_PREFIX = /^(new\s+)?task\b\s*[:,.]?\s*/i;
 const PROJECT = /^(?:in|on|for)\s+(.+?)\s*[,:;]\s*([\s\S]+)$/i;
 const SEND_TO = /^(?:send|give|show)\s+(?:this|it|that)(?:\s+(?:photo|picture))?\s+to\s+(.+?)(?:\s*[,:;.]\s*([\s\S]*))?$/i;
@@ -50,30 +53,42 @@ export function makeHandler(deps) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 
+  // Worded like Siri reading back a text, as in confirm.mjs: "Here's your message to <project>: <task>.
+  // Ready to send it?" "Send" or "yes" sends, "change it" asks for new words, "cancel" or "no" drops it.
   async function confirm(user, raw) {
     let held = await deps.store.getHeld(user);
     const expired = held && now() - held.at > HOLD_MS;
     if (expired) { held = null; await deps.store.setHeld(user, null); }
     const isTask = TASK_PREFIX.test(raw);
     const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
-    if (!body) return "I didn't catch that. Say the task again.";
+    if (!body) return `I didn't catch that. ${ASK}`;
     if (SEND.test(body)) {
-      if (!held) return expired ? 'That task waited over ten minutes, so I dropped it. Say the task again.' : 'Nothing is waiting to send. Say the task again.';
+      if (held?.project) return `What do you want to tell ${held.project}?`;
+      if (!held) return expired ? `That message waited over ten minutes, so I didn't send it. ${ASK}` : `There's nothing to send yet. ${ASK}`;
       await deps.store.setHeld(user, null);
       return deps.startTask(user, held.parsed ?? { project: null, task: held.text });
     }
-    if (CANCEL.test(body)) { await deps.store.setHeld(user, null); return 'Cancelled. Nothing sent.'; }
-    if (isTask) {
-      const m = body.match(PROJECT);
-      if (!m) {
+    if (CANCEL.test(body) || (held && NO.test(body))) { await deps.store.setHeld(user, null); return "OK, I won't send it."; }
+    if (held && CHANGE.test(body)) {
+      // Keep the project, so the new words go where the old ones were going.
+      const project = held.project ?? held.parsed?.project;
+      await deps.store.setHeld(user, project ? { project, at: now() } : null);
+      return project ? `OK. What do you want to tell ${project}?` : `OK. ${ASK}`;
+    }
+    const m = body.match(PROJECT);
+    if (isTask || held?.project) {
+      // After "change it", the next words are the task for the project that was held, whatever they
+      // start with: "for the README, fix typos" must not re-target it. "Cancel" lets you pick another.
+      const parsed = held?.project ? { project: held.project, task: body } : m ? { project: m[1].trim(), task: m[2].trim() } : null;
+      if (!parsed) {
         await deps.store.setHeld(user, null);
-        return `I heard: ${body}. I can't tell which project that's for. Say the task again, starting with in and the project name.`;
+        return `I can't tell which project "${body}" is for. Start with in and the project name. ${ASK}`;
       }
-      await deps.store.setHeld(user, { text: body, parsed: { project: m[1].trim(), task: m[2].trim() }, at: now() });
-      return `I heard: ${m[2].trim()}. That goes to ${m[1].trim()}. Say send it, or say the task again.`;
+      await deps.store.setHeld(user, { text: body, parsed, at: now() });
+      return `Here's your message to ${parsed.project}: ${parsed.task}. Ready to send it?`;
     }
     await deps.store.setHeld(user, { text: body, at: now() });
-    return `I heard: ${body}. Say send it, or say it again.`;
+    return `Here's your message: ${body}. Ready to send it?`;
   }
 
   // Read-back off in the app: start the task as said.

@@ -1,11 +1,19 @@
 // Read-back loop for the iPhone Shortcut and the glasses app (/voice/confirm).
-// Each utterance is held and read back until the user says "send it". Every reply that expects
-// another utterance contains the word "again"; the Shortcut's loop stops listening otherwise.
+// Worded like Siri reading back a text: "Here's your message to <project>: <task>. Ready to send it?"
+// Each utterance is held until the user says "send" or "yes"; "change it" asks for new words, and
+// "cancel" or "no" drops it. Nothing is sent on silence. Every reply that expects another utterance
+// is a question (contains "?"); the Shortcut's loop stops listening otherwise.
 // Dependencies are passed in, so tests run it without Docker or the projects folder.
 
-// "send it" and what dictation tends to make of it ("sent it", "send it please").
-export const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
-export const CANCEL = /^(?:cancel|never ?mind|forget it|stop)[\s.!]*$/i;
+// "send it" and what dictation tends to make of it ("sent it", "send it please"). Not a bare "go":
+// it is easily misheard from "no", the other natural answer to "Ready to send it?".
+export const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go ahead|do it|yes|yep|yeah)[\s.!]*$/i;
+export const CANCEL = /^(?:cancel(?: it)?|never ?mind|forget it|stop)[\s.!]*$/i;
+// Siri's "Change it": the next utterance replaces the held words. With nothing held it is a message.
+export const CHANGE = /^(?:(?:no|nope)[\s,]+)?(?:change(?: it| that| the message| the task)?|edit(?: it)?)[\s.!]*$/i;
+// A plain "no" to "Ready to send it?" drops the message. With nothing held it is an answer to an agent.
+const NO = /^(?:no|nope|nah|don'?t(?: send(?: it)?)?)[\s.!]*$/i;
+const ASK = 'What do you want to send?';
 export const TASK_PREFIX = /^(new\s+)?task\b\s*[:,.]?\s*/i;
 const PROJECT_ONLY = /^(?:in|on|for)\s+(.+)$/i;
 const PROJECT_SAID = /^(?:in|on|for)\s+(.+?)\s*[,:;]\s*([\s\S]+)$/i;
@@ -30,6 +38,9 @@ export function makeConfirm(deps) {
     Promise.resolve().then(() => deps.dispatch(text)).catch((e) => log('handler error:', e.message));
     return 'Sent.';
   }
+  const readBack = (task, repo) => repo
+    ? `Here's your message to ${deps.spokenName(repo)}: ${task}. Ready to send it?`
+    : `Here's your message: ${task}. Ready to send it?`;
 
   return function confirmStep(raw) {
     raw = String(raw ?? '').trim();
@@ -37,18 +48,25 @@ export function makeConfirm(deps) {
     if (expired) pending = null;
     const isTask = TASK_PREFIX.test(raw);
     const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
-    if (!body) return "I didn't catch that. Say the task again.";
+    if (!body) return `I didn't catch that. ${ASK}`;
 
     if (SEND.test(body)) {
       if (pending?.text) { const { text } = pending; pending = null; return send(text); }
-      if (pending?.repo) return `I still need the task for ${deps.spokenName(pending.repo)}. Say it again.`;
+      if (pending?.repo) return `What do you want to tell ${deps.spokenName(pending.repo)}?`;
       // Meant for the task that just expired, so it must not approve an agent's question instead.
-      if (expired) return 'That task waited over ten minutes, so I dropped it. Say the task again.';
+      if (expired) return `That message waited over ten minutes, so I didn't send it. ${ASK}`;
       // With nothing held, "yes" or "go ahead" (not "send it") answers an agent's yes-or-no question.
       if (!/^(?:\S+\s+)?sen[dt]\b/i.test(body) && deps.agentAwaiting()) { log('voice answer: yes'); return send('yes'); }
-      return 'Nothing is waiting to send. Say the task again.';
+      return `There's nothing to send yet. ${ASK}`;
     }
-    if (CANCEL.test(body)) { pending = null; return 'Cancelled. Nothing sent.'; }
+    if (CANCEL.test(body) || (pending && NO.test(body))) { pending = null; return "OK, I won't send it."; }
+    if (pending && CHANGE.test(body)) {
+      // Keep the project, so the new words go where the old ones were going.
+      const repo = pending?.repo ?? pending?.text?.repo;
+      if (repo) { pending = { repo, at: now() }; return `OK. What do you want to tell ${deps.spokenName(repo)}?`; }
+      pending = null;
+      return `OK. ${ASK}`;
+    }
 
     // Once a project is held, the next utterance is its task, prefixed or not: the glasses app
     // only adds "task:" to what starts with "in" or "on".
@@ -61,26 +79,26 @@ export function makeConfirm(deps) {
       if (parsed?.task) {
         // Hold the resolved repo, so "send it" starts exactly what was read back.
         pending = { text: { repo: parsed.repo, task: parsed.task }, at: now() };
-        return `I heard: ${parsed.task}. That goes to ${deps.spokenName(parsed.repo)}. Say send it, or say the task again.`;
+        return readBack(parsed.task, parsed.repo);
       }
       // Dictation stopped after the project name: keep the project and ask for the task.
       const alone = body.match(PROJECT_ONLY);
       const repo = alone && deps.resolveProject(alone[1]);
       if (repo) {
         pending = { repo, at: now() };
-        return `That goes to ${deps.spokenName(repo)}. What should it do? Say the task again.`;
+        return `What do you want to tell ${deps.spokenName(repo)}?`;
       }
       // The task that follows a project named on its own.
       if (pending?.repo) {
         const { repo: held } = pending;
         pending = { text: { repo: held, task: body }, at: now() };
-        return `I heard: ${body}. That goes to ${deps.spokenName(held)}. Say send it, or say the task again.`;
+        return readBack(body, held);
       }
       pending = null;
-      return `I heard: ${body}. I can't tell which project that's for. Say the task again, starting with in and the project name.`;
+      return `I can't tell which project "${body}" is for. Start with in and the project name. ${ASK}`;
     }
     pending = { text: raw, at: now() };
-    return `I heard: ${body}. Say send it, or say it again.`;
+    return readBack(body);
   };
 }
 

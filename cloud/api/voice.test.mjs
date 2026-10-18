@@ -51,7 +51,7 @@ test('needs a signed-in user', async () => {
 test('a task is read back with its project, then "send it" starts it', async () => {
   const { call, started } = setup();
   const r1 = await call('POST', '/voice/confirm', { body: JSON.stringify({ text: 'task: in trading bot, add a stop-loss check' }) });
-  assert.match(r1.body, /^I heard: add a stop-loss check\. That goes to trading bot\./);
+  assert.equal(r1.body, "Here's your message to trading bot: add a stop-loss check. Ready to send it?");
   const r2 = await call('POST', '/voice/confirm', { body: 'Send it.' });
   assert.equal(r2.body, 'Sent.');
   assert.deepEqual(started, [{ project: 'trading bot', task: 'add a stop-loss check' }]);
@@ -59,26 +59,70 @@ test('a task is read back with its project, then "send it" starts it', async () 
 
 test('"send it" with nothing held, cancel, and expiry', async () => {
   const { call, started, advance } = setup();
-  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /Nothing is waiting/);
+  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /nothing to send/);
   await call('POST', '/voice/confirm', { body: 'task: in app, fix login' });
-  assert.match((await call('POST', '/voice/confirm', { body: 'cancel' })).body, /Cancelled/);
+  assert.match((await call('POST', '/voice/confirm', { body: 'cancel' })).body, /won't send it/);
   await call('POST', '/voice/confirm', { body: 'task: in app, fix login' });
   advance(11 * 60_000);
   assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /waited over ten minutes/);
-  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /Nothing is waiting/, 'the expired hold is cleared');
+  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /nothing to send/, 'the expired hold is cleared');
   assert.equal(started.length, 0);
 });
 
 test('a task without a project is not held', async () => {
   const { call } = setup();
   assert.match((await call('POST', '/voice/confirm', { body: 'task: fix the bug' })).body, /can't tell which project/);
-  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /Nothing is waiting/);
+  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /nothing to send/);
+});
+
+test('"change it" keeps the project for the new words, and "no" drops the message', async () => {
+  const { call, started } = setup();
+  await call('POST', '/voice/confirm', { body: 'task: in app, fix login' });
+  assert.equal((await call('POST', '/voice/confirm', { body: 'Change it.' })).body, 'OK. What do you want to tell app?');
+  assert.equal((await call('POST', '/voice/confirm', { body: 'send it' })).body, 'What do you want to tell app?');
+  assert.equal((await call('POST', '/voice/confirm', { body: 'fix the signup page' })).body,
+    "Here's your message to app: fix the signup page. Ready to send it?");
+  assert.equal((await call('POST', '/voice/confirm', { body: 'yes' })).body, 'Sent.');
+  assert.deepEqual(started, [{ project: 'app', task: 'fix the signup page' }]);
+
+  await call('POST', '/voice/confirm', { body: 'looks good' });
+  assert.equal((await call('POST', '/voice/confirm', { body: 'no' })).body, "OK, I won't send it.");
+  assert.equal((await call('POST', '/voice/confirm', { body: 'no' })).body, "Here's your message: no. Ready to send it?");
+  assert.equal(started.length, 1);
+});
+
+test('cloud: every reply that waits is a question, and change it with no project asks for new words', async () => {
+  const { call, started } = setup();
+  const say = async (body) => (await call('POST', '/voice/confirm', { body })).body;
+  for (const r of [await say(''), await say('send it'), await say('task: fix the bug'), await say('task: in app, fix login'),
+    await say('change it'), await say('yes')]) {
+    assert.match(r, /\?/);
+  }
+  assert.equal(await say('fix the signup page'), "Here's your message to app: fix the signup page. Ready to send it?");
+  assert.equal(await say('nope'), "OK, I won't send it.");
+  await say('hello there');
+  assert.equal(await say('Change that.'), 'OK. What do you want to send?');
+  assert.equal(await say('send it'), "There's nothing to send yet. What do you want to send?");
+  assert.equal(await say('change it'), "Here's your message: change it. Ready to send it?", 'with nothing held it is a message');
+  assert.doesNotMatch(await say('cancel it'), /\?/);
+  assert.equal(started.length, 0);
+});
+
+test('cloud: a bare "go" never sends, and a held project is not re-targeted by "for ..."', async () => {
+  const { call, started } = setup();
+  const say = async (body) => (await call('POST', '/voice/confirm', { body })).body;
+  await say('task: in app, fix login');
+  assert.equal(await say('go'), "Here's your message: go. Ready to send it?");
+  assert.equal(started.length, 0);
+  await say('task: in app, fix login');
+  await say('change it');
+  assert.equal(await say('task: for the README, fix typos'), "Here's your message to app: for the README, fix typos. Ready to send it?");
 });
 
 test('users are kept apart', async () => {
   const { call } = setup();
   await call('POST', '/voice/confirm', { body: 'task: in app, fix login', user: 'a' });
-  assert.match((await call('POST', '/voice/confirm', { body: 'send it', user: 'b' })).body, /Nothing is waiting/);
+  assert.match((await call('POST', '/voice/confirm', { body: 'send it', user: 'b' })).body, /nothing to send/);
 });
 
 test('inbox returns new messages, and waits when there are none', async () => {

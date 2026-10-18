@@ -46,7 +46,7 @@ final class Conversation: NSObject, ObservableObject {
     /// Set after "Sent.": an agent is working, so stay on the line for its answer.
     private var awaitingAgent = false
 
-    /// Settings > "Read back what I said". On: the relay repeats your words and waits for "send it".
+    /// Settings > "Read back what I said". On: the relay reads your words back ("Ready to send it?") and waits for a yes.
     /// Off: your words go straight to the agents, so wait for a longer pause before sending.
     static var readBack: Bool {
         get { UserDefaults.standard.object(forKey: "readBack") as? Bool ?? true }

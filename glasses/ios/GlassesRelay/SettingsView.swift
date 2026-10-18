@@ -68,7 +68,7 @@ struct SettingsView: View {
                         .onChange(of: hiFi) { _, on in Conversation.hiFiSpeech = on }
                 } header: { Text("Voice") } footer: {
                     Text((readBack
-                          ? "Bridge repeats what it heard and waits for \"send it\"."
+                          ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
                           : "Bridge sends what you say after a 2-second pause, without repeating it.")
                          + " The phone voice speaks when the natural voice isn't available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
                          + " High-quality speech plays replies over the glasses' music link, which sounds much better, but each reply starts and listening resumes about a second later.")
