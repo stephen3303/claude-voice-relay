@@ -66,6 +66,8 @@ final class Conversation: NSObject, ObservableObject {
     /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
     private var onHiFi = false
     private var micRetries = 0
+    /// Switched back from A2DP, but the glasses' HFP link may not be up yet: don't listen on a stale route.
+    private var awaitingHFP = false
     /// Between begin and end. A photo answer (look) speaks outside a conversation, on whatever session iOS has.
     private var conversing = false
     private var retry: Task<Void, Never>?
@@ -83,7 +85,11 @@ final class Conversation: NSObject, ObservableObject {
         synth.delegate = self
         NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             // A route change (e.g. HFP renegotiating 8k↔16k) stops the engine; rebuild the tap on the new format.
-            Task { @MainActor in if self?.phase == .listening { self?.restartListening() } }
+            // Once something was heard, send it rather than throw it away with a restart.
+            Task { @MainActor in
+                guard let self, self.phase == .listening else { return }
+                if self.heard.isEmpty { self.restartListening() } else { self.finishTurn() }
+            }
         }
     }
 
@@ -95,6 +101,7 @@ final class Conversation: NSObject, ObservableObject {
         self.trigger = trigger
         micRetries = 0
         onHiFi = false
+        awaitingHFP = false
         conversing = true
         Task {
             guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; end(saying: nil); return }
@@ -153,16 +160,26 @@ final class Conversation: NSObject, ObservableObject {
     }
 
     /// Playback only, so iOS routes to the glasses over A2DP. Not in an agent call: CallKit owns that session.
-    private func useHiFiOutput() {
+    private func useHiFiOutput() async {
         guard Self.hiFiSpeech, conversing, trigger != .call, !onHiFi else { return }
         // Only with the glasses' mic connected: without it there's nothing to switch back to, and the phone's speaker
         // or mic is already full quality.
         let session = AVAudioSession.sharedInstance()
         guard session.availableInputs?.contains(where: { $0.portType == .bluetoothHFP }) == true else { return }
         do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+            try session.setCategory(.playback, mode: .spokenAudio)
             onHiFi = true
+            // setCategory returns before the A2DP stream runs; speaking now would clip a short line.
+            await Self.awaitRoute(timeout: 1.5) { route in route.outputs.contains { $0.portType == .bluetoothA2DP } }
         } catch { status = "High-quality speech failed: \(error.localizedDescription)" }
+    }
+
+    /// Waits until the current route passes `ready`, checking every 100 ms, or until the timeout.
+    private static func awaitRoute(timeout: TimeInterval, _ ready: (AVAudioSessionRouteDescription) -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !ready(AVAudioSession.sharedInstance().currentRoute), Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
 
     // MARK: listening
@@ -179,8 +196,20 @@ final class Conversation: NSObject, ObservableObject {
 
         if onHiFi {
             try? useGlassesMic(report: false)
+            if !onHiFi { awaitingHFP = true }
             // Still no glasses mic after a few tries (none connected): listen on the phone instead.
             if onHiFi && micRetries >= 3 { onHiFi = false; status = "Glasses mic not found — using phone mic" }
+        }
+        // The glasses are listed as an input before their HFP link is up, and until it is the engine reports the
+        // old route's format. Listening then would be restarted by the route change just as you start talking.
+        if awaitingHFP {
+            if AVAudioSession.sharedInstance().currentRoute.inputs.contains(where: { $0.portType == .bluetoothHFP }) || micRetries >= 8 {
+                awaitingHFP = false
+                micRetries = 0
+            } else {
+                micRetries += 1
+                restartSoon(after: 0.25); return
+            }
         }
         let input = engine.inputNode
         // Right after switching back from A2DP the glasses' mic can briefly be missing or have no format; retry soon.
@@ -223,10 +252,10 @@ final class Conversation: NSObject, ObservableObject {
         startListening()
     }
 
-    private func restartSoon() {
+    private func restartSoon(after delay: TimeInterval = 1) {
         stopListening()
         retry = Task {
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: .seconds(delay))
             if !Task.isCancelled, phase == .listening { startListening() }
         }
     }
@@ -377,7 +406,7 @@ final class Conversation: NSObject, ObservableObject {
 
     private func say(_ text: String) async {
         phase = .speaking
-        useHiFiOutput()
+        await useHiFiOutput()
         // Natural voice from the relay when it has a key, or from Bridge Cloud with Bridge Pro; otherwise (or on any
         // failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
         if !Relay.shared.isCloud || Store.shared.isPro,
