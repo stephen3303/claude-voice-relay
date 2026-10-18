@@ -1,0 +1,50 @@
+# One-time: lets GitHub Actions deploy Bridge Cloud with short-lived credentials (no stored AWS keys).
+# Only workflows on the main branch of stephen3303/claude-voice-relay can assume the role, and the role
+# can only hand off to the CDK bootstrap roles (which do the actual deploy) and test Bedrock.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: GitHub OIDC deploy role for Bridge Cloud
+
+Parameters:
+  Repo:
+    Type: String
+    Default: stephen3303/claude-voice-relay
+
+Resources:
+  GitHubOidc:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: BridgeGitHubDeploy
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidc }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${Repo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: cdk-deploy-and-bedrock-check
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: UseCdkBootstrapRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/cdk-hnb659fds-*
+              - Sid: CheckBedrockAccess
+                Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:ListFoundationModels]
+                Resource: "*"
+
+Outputs:
+  RoleArn:
+    Value: !GetAtt DeployRole.Arn
