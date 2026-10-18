@@ -121,7 +121,7 @@ struct HomeView: View {
                     Spacer()
                     NavigationLink("History") { HistoryView() }.font(.subheadline)
                 }
-                ForEach(Array(conversation.transcript.suffix(6).enumerated()), id: \.offset) { _, line in
+                ForEach(Array(conversation.transcript.suffix(6).reversed().enumerated()), id: \.offset) { _, line in
                     TranscriptLine(who: line.who, text: line.text)
                 }
             }
@@ -159,7 +159,7 @@ struct TranscriptLine: View {
     }
 }
 
-/// Every saved line, newest last, with Clear.
+/// Every saved line, newest first, with Clear.
 struct HistoryView: View {
     @EnvironmentObject var conversation: Conversation
     @State private var confirmClear = false
@@ -169,7 +169,7 @@ struct HistoryView: View {
             if conversation.transcript.isEmpty {
                 Text("Nothing yet. Your conversations appear here.").foregroundStyle(.secondary)
             }
-            ForEach(Array(conversation.transcript.enumerated()), id: \.offset) { _, line in
+            ForEach(Array(conversation.transcript.reversed().enumerated()), id: \.offset) { _, line in
                 TranscriptLine(who: line.who, text: line.text)
             }
         }
