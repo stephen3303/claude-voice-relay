@@ -3,7 +3,8 @@
 // authorizer checks the Bridge session (auth.mjs).
 // Dependencies are passed in, so tests run it with fakes and no AWS.
 
-const SEND = /^(?:(?:yes|yeah|ok(?:ay)?)[\s,]+)?(?:send(?: it)?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
+// "send it" and what dictation tends to make of it ("sent it", "send it please"), as in confirm.mjs.
+const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
 const CANCEL = /^(?:cancel|never ?mind|forget it|stop)[\s.!]*$/i;
 const TASK_PREFIX = /^(new\s+)?task\b\s*[:,.]?\s*/i;
 const PROJECT = /^(?:in|on|for)\s+(.+?)\s*[,:;]\s*([\s\S]+)$/i;
@@ -30,12 +31,13 @@ export function makeHandler(deps) {
 
   async function confirm(user, raw) {
     let held = await deps.store.getHeld(user);
-    if (held && now() - held.at > HOLD_MS) held = null;
+    const expired = held && now() - held.at > HOLD_MS;
+    if (expired) held = null;
     const isTask = TASK_PREFIX.test(raw);
     const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
     if (!body) return "I didn't catch that. Say the task again.";
     if (SEND.test(body)) {
-      if (!held) return 'Nothing is waiting to send. Say the task again.';
+      if (!held) return expired ? 'That task waited over ten minutes, so I dropped it. Say the task again.' : 'Nothing is waiting to send. Say the task again.';
       await deps.store.setHeld(user, null);
       return deps.startTask(user, held.parsed ?? { project: null, task: held.text });
     }
