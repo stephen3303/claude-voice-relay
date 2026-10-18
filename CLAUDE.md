@@ -25,11 +25,14 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json` 
 - Relay: `start.ps1` runs it and restarts it if it exits, so to reload after editing `relay.mjs`,
   stop the `node ... relay.mjs` process and it comes back in ~10 s. Check `logs/relay.log`.
   Syntax check: `node --check relay.mjs`.
-- Cloud API tests: `node --test cloud/api/` (no AWS needed). Synth: `cd cloud/infra && npx cdk synth -q`.
+- Tests: `node --test` from the repo root runs every `*.test.mjs` (no AWS needed). Synth: `cd cloud/infra && npx cdk synth -q`.
 - The iOS app can't be built here (no Mac). Push and let CI build it; read failures with
   `gh run view <id> --log-failed`.
 
 ## CI (GitHub Actions)
+See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and the secrets they need.
+- `ci.yml` — every PR and main: syntax check, `node --test`, CDK synth.
+- `claude-review.yml` — Claude reviews ready PRs with the subagents; `claude.yml` answers `@claude` comments.
 - `glasses-ios.yml` — builds both flavours on push to `glasses/**`; the personal IPA is the artifact.
 - `glasses-screenshots.yml` — simulator screenshots (home and settings, light and dark), manual.
 - `glasses-subscriptions.yml` — creates the Bridge Pro subscriptions in App Store Connect, manual.

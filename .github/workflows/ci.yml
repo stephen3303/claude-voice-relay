@@ -1,0 +1,46 @@
+# Checks on every PR and on main: syntax of every .mjs, every node:test suite, and a CDK synth of Bridge
+# Cloud (no AWS credentials needed). The iOS app is built by glasses-ios.yml; deploys are cloud-deploy.yml.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        run: git ls-files '*.mjs' | xargs -n1 node --check
+      # No arguments: node finds every *.test.mjs outside node_modules, so new suites run without editing this.
+      - name: Tests
+        run: node --test
+
+  synth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: cloud/infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cloud/infra/package-lock.json
+      - run: npm ci
+      - name: CDK synth
+        run: npx cdk synth -q
