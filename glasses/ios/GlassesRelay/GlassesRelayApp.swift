@@ -24,6 +24,7 @@ struct GlassesRelayApp: App {
     @MainActor private static func seedScreenshots() {
         // The simulator has no glasses or toolkit, so show the state a set-up user sees.
         GlassesController.screenshotMode = true
+        UserDefaults.standard.set(true, forKey: "welcomed")
         Relay.shared.baseURL = "https://my-pc.tail1234.ts.net"
         Relay.shared.token = "screenshot-token"
         let glasses = GlassesController.shared
@@ -36,17 +37,18 @@ struct GlassesRelayApp: App {
             ("Relay", "I heard: add a stop-loss check to the order router. That goes to trading bot. Say send it, or say the task again."),
             ("You", "Send it"),
             ("Relay", "Sent."),
-            ("Agent", "trading bot: Added the stop-loss check and a test for it, and pushed. Want me to lower the default to two percent?"),
+            ("Agent", "Added the stop-loss check and a test for it, and pushed. Want me to lower the default to two percent?"),
             ("You", "Yes"),
         ]
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environmentObject(glasses)
                 .environmentObject(glasses.conversation)
                 .task { await glasses.start() }
+                .task { await Account.shared.check() }
                 // Meta AI calls back into the app after registration; only its links go to the toolkit.
                 .onOpenURL { url in
                     guard URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -58,5 +60,18 @@ struct GlassesRelayApp: App {
                     }
                 }
         }
+    }
+}
+
+/// The main screen, after the App Store build's one-time welcome (Sign in with Apple).
+struct RootView: View {
+    @AppStorage("welcomed") private var welcomed = false
+
+    var body: some View {
+        #if APP_STORE
+        if welcomed { HomeView() } else { WelcomeView { welcomed = true } }
+        #else
+        HomeView()
+        #endif
     }
 }

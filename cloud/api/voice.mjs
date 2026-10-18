@@ -1,7 +1,9 @@
 // Bridge Cloud voice API: the relay's protocol (/voice/confirm, /voice/inbox, /voice/photo)
-// for signed-in Pro users, plus /voice/send (no read-back). One Lambda behind API Gateway, whose JWT
-// authorizer checks the Bridge session (auth.mjs).
+// for signed-in Pro users, plus /voice/send (no read-back). One Lambda behind API Gateway, whose
+// Lambda authorizer checks the Bridge session (auth.mjs).
 // Dependencies are passed in, so tests run it with fakes and no AWS.
+
+import { userOf } from './auth.mjs';
 
 // "send it" and what dictation tends to make of it ("sent it", "send it please"), as in confirm.mjs.
 const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
@@ -86,7 +88,7 @@ export function makeHandler(deps) {
   }
 
   return async function handler(event) {
-    const user = event.requestContext?.authorizer?.jwt?.claims?.sub;
+    const user = userOf(event);
     if (!user) return text(401, 'Sign in to Bridge first.');
     const route = `${event.requestContext.http.method} ${event.rawPath.replace(/^\/api/, '')}`;
     const raw = event.body ? Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8') : Buffer.alloc(0);

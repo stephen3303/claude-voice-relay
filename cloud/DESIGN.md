@@ -20,7 +20,7 @@ The cloud speaks the same protocol as the relay, so the app only switches its ba
 ```
 iPhone app ──HTTPS──> CloudFront (bridge domain)
                         ├── /            S3: website (landing, privacy, terms, support, account)
-                        └── /api/*       API Gateway (HTTP API, JWT authorizer on Bridge sessions) ──> Lambda (Node 22)
+                        └── /api/*       API Gateway (HTTP API, Lambda authorizer on Bridge sessions) ──> Lambda (Node 22)
                                               │  DynamoDB: users, plans, usage, projects, tasks, inbox
                                               │  S3: photos (1-day lifecycle), Files workspaces
                                               ├──> Bedrock (Claude Haiku 5.5): read-back parsing, quick photo answers
@@ -29,7 +29,7 @@ iPhone app ──HTTPS──> CloudFront (bridge domain)
                                                      user's own Anthropic key (BYO plan)
                                                      clone repo via GitHub App token → branch → PR
                                                      posts SPOKEN line to the inbox via the API
-Accounts: Sign in with Apple only (App Store 4.8). The app sends Apple's identity token to /api/auth/apple, which answers with a 30-day session signed by a KMS key; API Gateway checks it. No Cognito.
+Accounts: Sign in with Apple only (App Store 4.8). The app sends Apple's identity token to /api/auth/apple, which answers with a 30-day session signed by a KMS key; a Lambda authorizer checks it. No Cognito.
 App Store Server Notifications v2 ──> Lambda: subscription state per user
 GitHub App webhooks ──> Lambda: which repos each user installed it on
 ```

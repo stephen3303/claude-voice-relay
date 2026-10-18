@@ -26,7 +26,9 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)   # CI sets this to the run number
         ITSAppUsesNonExemptEncryption: false          # HTTPS only: exempt, so no export paperwork per upload
-        UILaunchScreen: {}
+        UILaunchScreen:                     # navy, with the icon in the middle (Assets.xcassets)
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
             CFBundleURLName: com.smitherman.glassesrelay
@@ -55,9 +57,11 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         META_APP_ID: "0"
         CLIENT_TOKEN: "0"
         # The App Store flavour (no experimental Meta features, Pro sold via StoreKit) is selected with
-        # SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) APP_STORE" on the xcodebuild command line.
+        # SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) APP_STORE" on the xcodebuild command line,
+        # and signed with CODE_SIGN_ENTITLEMENTS=AppStore.entitlements (Sign in with Apple).
