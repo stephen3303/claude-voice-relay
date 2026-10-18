@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
-import { runCloud, makeCloudTurn } from './cloud-agents.mjs';
+import { runCloud, makeCloudTurn, resolveClaude } from './cloud-agents.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -288,7 +288,7 @@ function speakResult(a, r) {
 // AGENT_MODE=cloud: the turn runs in a claude.ai cloud session (cloud-agents.mjs) on the folder's GitHub
 // remote, so it shows in the Claude app. The session pushes and opens its own pull request.
 const cloudTurn = makeCloudTurn({
-  run: (o) => runCloud({ spawn, claudeBin: process.env.CLAUDE_BIN || 'claude', env: process.env, ...o }),
+  run: (o) => runCloud({ spawn, claudeBin: resolveClaude({ bin: process.env.CLAUDE_BIN || 'claude' }), env: process.env, ...o }),
   // The session pushes through the Claude GitHub app, not the relay, so the repo must pass the check the
   // relay's GitHub App runs before it pushes (protected default branch, CODEOWNERS; README: GitHub access
   // for agents). AGENT_GH_TOKEN skips that check, so cloud mode needs the App.

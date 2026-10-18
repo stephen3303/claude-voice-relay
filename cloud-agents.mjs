@@ -20,6 +20,33 @@ export const CLOUD_PROMPT = [
   'When you finish a feature or bug fix, commit it on a new branch (never the default branch), push it and open a pull request.',
 ].join(' ');
 
+import path from 'node:path';
+import fs from 'node:fs';
+
+// The CLI starts in the project folder, and on Windows a bare command name is looked up in the current
+// folder before PATH: a claude.exe left in the repo would run on the host. So it's started by full path,
+// found on PATH only (or CLAUDE_BIN, which must be absolute), and never from inside the project folder.
+export function resolveClaude({ bin = 'claude', env = process.env, platform = process.platform, isFile = defaultIsFile } = {}) {
+  if (path.isAbsolute(bin)) return isFile(bin) ? bin : null;
+  if (bin.includes('/') || bin.includes('\\')) return null;
+  const p = platform === 'win32' ? path.win32 : path.posix;
+  const pathVar = Object.entries(env).find(([k]) => k.toUpperCase() === 'PATH')?.[1] || '';
+  const exts = platform === 'win32' ? ['.exe', '.com'] : [''];
+  for (const dir of pathVar.split(platform === 'win32' ? ';' : ':')) {
+    if (!dir || !p.isAbsolute(dir)) continue; // a relative PATH entry would be the project folder again
+    for (const ext of exts) {
+      const f = p.join(dir, bin + ext);
+      if (isFile(f)) return f;
+    }
+  }
+  return null;
+}
+function defaultIsFile(f) { try { return fs.statSync(f).isFile(); } catch { return false; } }
+export const insideFolder = (file, folder) => {
+  const rel = path.relative(path.resolve(folder), path.resolve(file));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
 // argv only ever holds fixed flags and a session id from Claude's own output: what was said goes over stdin.
 // The CLI runs on the host in the project folder, so it loads user settings only: a .claude/settings.json in
 // the folder (hooks, apiKeyHelper, env) would otherwise run on the PC, outside any container.
@@ -61,8 +88,11 @@ export function parseCloud(out, err, code) {
 export const CLOUD_TIMEOUT_MS = 60 * 60_000;
 // A failure after the session was created carries its id (e.sessionId, e.url): the CLI notes
 // "Cloud session: <id> (<url>)" on stderr as soon as it exists, so a reply can still reach it.
-export function runCloud({ spawn, claudeBin = 'claude', env, cwd, sessionId, prompt, timeoutMs = CLOUD_TIMEOUT_MS }) {
+export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeoutMs = CLOUD_TIMEOUT_MS }) {
   return new Promise((resolve, reject) => {
+    if (!claudeBin || !path.isAbsolute(claudeBin) || insideFolder(claudeBin, cwd)) {
+      return reject(new Error("Claude Code wasn't found on this PC's PATH, outside the project folder. Install it, or set CLAUDE_BIN to claude.exe's full path."));
+    }
     const p = spawn(claudeBin, cloudArgs(sessionId), { cwd, windowsHide: true, env: cloudEnv(env) });
     let out = '', err = '', timedOut = false, created = null;
     const timer = setTimeout(() => { timedOut = true; p.kill(); }, timeoutMs);

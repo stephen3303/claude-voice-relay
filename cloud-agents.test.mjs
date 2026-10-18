@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { cloudArgs, cloudEnv, parseCloud, runCloud, makeCloudTurn, CLOUD_PROMPT } from './cloud-agents.mjs';
+import { cloudArgs, cloudEnv, parseCloud, runCloud, makeCloudTurn, resolveClaude, CLOUD_PROMPT } from './cloud-agents.mjs';
 
 function fakeSpawn({ stdout = '', stderr = '', code = 0, hang = false } = {}) {
   const calls = [];
@@ -53,11 +53,11 @@ test('parseCloud reads a waited-for reply, a queued follow-up and failures', () 
 
 test('runCloud sends the prompt over stdin from the project folder and returns the reply', async () => {
   const { spawn, calls } = fakeSpawn({ stdout: JSON.stringify({ is_error: false, result: 'SPOKEN: Hi.', session_id: 'cse_9' }) });
-  const r = await runCloud({ spawn, claudeBin: 'claude', env: { CLAUDE_CODE_OAUTH_TOKEN: 't', HOME: '/h' },
+  const r = await runCloud({ spawn, claudeBin: '/usr/bin/claude', env: { CLAUDE_CODE_OAUTH_TOKEN: 't', HOME: '/h' },
     cwd: '/p/trading-bot', sessionId: null, prompt: 'add a stop-loss --dangerously "check"' });
   assert.equal(r.session_id, 'cse_9');
   const [c] = calls;
-  assert.equal(c.cmd, 'claude');
+  assert.equal(c.cmd, '/usr/bin/claude');
   assert.equal(c.opts.cwd, '/p/trading-bot');
   assert.deepEqual(c.opts.env, { HOME: '/h' });
   assert.equal(c.input, 'add a stop-loss --dangerously "check"');
@@ -66,12 +66,12 @@ test('runCloud sends the prompt over stdin from the project folder and returns t
 
 test('runCloud rejects when the CLI fails', async () => {
   const { spawn } = fakeSpawn({ stderr: 'Error: Unable to get organization UUID', code: 1 });
-  await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x' }), /organization UUID/);
+  await assert.rejects(runCloud({ spawn, claudeBin: '/usr/bin/claude', env: {}, cwd: '/p', prompt: 'x' }), /organization UUID/);
 });
 
 test('runCloud kills a CLI that never answers', async () => {
   const { spawn, calls } = fakeSpawn({ hang: true });
-  await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x', timeoutMs: 20 }), /no answer after .*Claude app/);
+  await assert.rejects(runCloud({ spawn, claudeBin: '/usr/bin/claude', env: {}, cwd: '/p', prompt: 'x', timeoutMs: 20 }), /no answer after .*Claude app/);
   assert.equal(calls.killed, true);
 });
 
@@ -82,7 +82,7 @@ test('runCloud rejects when claude is not installed', async () => {
     p.stdin.end = () => setImmediate(() => p.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' })));
     return p;
   };
-  await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x', timeoutMs: 1000 }), /ENOENT/);
+  await assert.rejects(runCloud({ spawn, claudeBin: '/usr/bin/claude', env: {}, cwd: '/p', prompt: 'x', timeoutMs: 1000 }), /ENOENT/);
 });
 
 function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true, unsafe = false } = {}) {
@@ -156,7 +156,7 @@ test('cloudTurn refuses a folder that does not exist', async () => {
 
 test('a CLI failure after the session exists keeps its id, so a reply can reach it', async () => {
   const { spawn } = fakeSpawn({ stderr: 'Cloud session: cse_7 (https://claude.ai/code/cse_7)\nError: the cloud session stopped before it produced a result', code: 1 });
-  const e = await runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x' }).catch((x) => x);
+  const e = await runCloud({ spawn, claudeBin: '/usr/bin/claude', env: {}, cwd: '/p', prompt: 'x' }).catch((x) => x);
   assert.match(e.message, /stopped before/);
   assert.equal(e.sessionId, 'cse_7');
   assert.equal(e.url, 'https://claude.ai/code/cse_7');
@@ -173,4 +173,23 @@ test('cloudTurn refuses the relay\'s own folder, before any check or session', a
   const h = turnHarness({ unsafe: true });
   await assert.rejects(h.cloudTurn(newAgent(), 'x'), /holds the relay or its keys/);
   assert.equal(h.checked.length + h.runs.length, 0);
+});
+
+test('resolveClaude finds claude by full path on PATH only, never in the current folder', () => {
+  const files = new Set(['C:\\Users\\steph\\.local\\bin\\claude.exe', '/usr/local/bin/claude']);
+  const isFile = (f) => files.has(f);
+  assert.equal(resolveClaude({ env: { Path: '.;relative;C:\\Users\\steph\\.local\\bin' }, platform: 'win32', isFile }),
+    'C:\\Users\\steph\\.local\\bin\\claude.exe');
+  assert.equal(resolveClaude({ env: { PATH: '/usr/local/bin' }, platform: 'linux', isFile }), '/usr/local/bin/claude');
+  assert.equal(resolveClaude({ env: { PATH: '.' }, platform: 'linux', isFile }), null);
+  assert.equal(resolveClaude({ bin: './claude', env: {}, platform: 'linux', isFile }), null);
+  assert.equal(resolveClaude({ bin: '/usr/local/bin/claude', env: {}, platform: 'linux', isFile }), '/usr/local/bin/claude');
+});
+
+test('runCloud refuses a claude that is not a full path, or lives in the project folder', async () => {
+  const { spawn, calls } = fakeSpawn({ stdout: '{}' });
+  for (const claudeBin of [null, 'claude', '/p/trading-bot/claude', '/p/trading-bot/bin/claude']) {
+    await assert.rejects(runCloud({ spawn, claudeBin, env: {}, cwd: '/p/trading-bot', prompt: 'x' }), /CLAUDE_BIN/, String(claudeBin));
+  }
+  assert.equal(calls.length, 0);
 });
