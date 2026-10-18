@@ -34,8 +34,15 @@ final class Push: NSObject, ObservableObject {
         get { UserDefaults.standard.string(forKey: "pushUploaded") }
         set { UserDefaults.standard.set(newValue, forKey: "pushUploaded") }
     }
-    /// The agent call in progress, if any.
+    /// The agent call in progress, if any, whether it was answered, and what it carries (shown as a
+    /// notification if nobody answers).
     private var call: UUID?
+    private var answered = false
+    private var ringing: (from: String, text: String)?
+    /// An unanswered call rings this long, then becomes a notification.
+    private static let ringTimeout: TimeInterval = 30
+    private var uploading = false
+    private var uploadAgain = false
     private var started = false
 
     /// Identifies this phone to the cloud, so a reinstall or a second phone gets its own entry.
@@ -103,36 +110,44 @@ final class Push: NSObject, ObservableObject {
     }
 
     /// Sends this phone's tokens and headset state to the cloud when they change; removes the phone
-    /// when not using Bridge Cloud.
+    /// when not using Bridge Cloud. One request at a time, always for the latest state, so a register
+    /// and an unregister can't arrive out of order.
     func upload() {
-        guard let session = Keychain.read(Account.sessionKey) else { return }
-        let wanted = Account.shared.signedIn && Relay.shared.isCloud && (token != nil || voipToken != nil)
-        var body: [String: Any] = ["device": Self.deviceID]
-        if wanted {
-            #if APP_STORE
-            body["env"] = "production"   // TestFlight and the App Store; the cloud retries the other if wrong
-            #else
-            body["env"] = "sandbox"
-            #endif
-            body["token"] = token
-            body["voipToken"] = voipToken
-            body["headset"] = Self.headsetConnected
-            body["calls"] = callsAllowed
-        }
-        let key = wanted ? "\(body["token"] ?? "")|\(body["voipToken"] ?? "")|\(body["headset"]!)|\(callsAllowed)" : "off"
-        guard key != lastUpload else { return }
-        if key == "off" && lastUpload == nil { lastUpload = key; return }   // never registered: nothing to remove
-        lastUpload = key
+        uploadAgain = true
+        guard !uploading else { return }
+        uploading = true
         Task {
-            do {
-                if wanted {
-                    try await Self.cloud("POST", "api/push/register", session: session, body: body)
-                } else {
-                    try await Self.cloud("DELETE", "api/push/register?device=\(Self.deviceID)", session: session)
+            defer { uploading = false }
+            while uploadAgain {
+                uploadAgain = false
+                guard let session = Keychain.read(Account.sessionKey) else { return }
+                let using = Account.shared.signedIn && Relay.shared.isCloud
+                // Signed in but the tokens haven't arrived yet (every launch): wait for them, don't unregister.
+                if using && token == nil && voipToken == nil { continue }
+                let headset = Self.headsetConnected
+                let key = using ? "\(token ?? "")|\(voipToken ?? "")|\(headset)|\(callsAllowed)" : "off"
+                // nil: never registered (a failure leaves it as it was), so there's nothing to remove.
+                if key == lastUpload || (key == "off" && lastUpload == nil) { continue }
+                do {
+                    if using {
+                        var body: [String: Any] = ["device": Self.deviceID, "headset": headset, "calls": callsAllowed]
+                        #if APP_STORE
+                        body["env"] = "production"   // TestFlight and the App Store; the cloud retries the other if wrong
+                        #else
+                        body["env"] = "sandbox"
+                        #endif
+                        if let token { body["token"] = token }
+                        if let voipToken { body["voipToken"] = voipToken }
+                        try await Self.cloud("POST", "api/push/register", session: session, body: body)
+                    } else {
+                        try await Self.cloud("DELETE", "api/push/register?device=\(Self.deviceID)", session: session)
+                    }
+                    lastUpload = key
+                } catch {
+                    // Left as it was, so the next change or launch tries again.
+                    status = "Couldn't reach Bridge Cloud for calls: \(error.localizedDescription)"
+                    return
                 }
-            } catch {
-                lastUpload = nil   // try again on the next change
-                status = "Couldn't reach Bridge Cloud for calls: \(error.localizedDescription)"
             }
         }
     }
@@ -156,17 +171,12 @@ final class Push: NSObject, ObservableObject {
     }
 
     private static func cloud(_ method: String, _ path: String, session: String, body: [String: Any]? = nil, timeout: TimeInterval = 15) async throws {
-        var req = URLRequest(url: URL(string: "\(Account.cloudURL)/\(path)")!)
-        req.httpMethod = method
-        req.timeoutInterval = timeout
-        req.setValue("Bearer \(session)", forHTTPHeaderField: "Authorization")
-        if let body {
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        do { try await Relay.shared.cloud(method, path, session: session, body: body, timeout: timeout) }
+        catch Relay.Failure.http(401) {
+            // The session is no longer valid: sign out, as Account does, rather than keep failing.
+            if Keychain.read(Account.sessionKey) == session { Account.shared.signOut() }
+            throw Relay.Failure.http(401)
         }
-        let (_, resp) = try await URLSession.shared.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard code == 200 else { throw Relay.Failure.http(code) }
     }
 
     // MARK: agent calls
@@ -184,23 +194,43 @@ final class Push: NSObject, ObservableObject {
         update.supportsUngrouping = false
         update.supportsDTMF = false
 
-        let busy = call != nil || GlassesController.shared.conversation.phase != .idle
-        let canTake = !busy && callsAllowed && Self.headsetConnected
-        if canTake { call = id }
+        // A stale registration can outlive signing out (the unregister needs a valid session): ring nothing then.
+        let signedIn = Account.shared.signedIn && Relay.shared.isCloud
+        let talking = (call != nil && answered) || GlassesController.shared.conversation.phase != .idle
+        let canTake = signedIn && !talking && call == nil && callsAllowed && Self.headsetConnected
+        if canTake { call = id; answered = false; ringing = (from, text) }
         provider.reportNewIncomingCall(with: id, update: update) { error in
             Task { @MainActor in
                 if error != nil {
-                    if self.call == id { self.call = nil }
-                    self.notifyLocally(from: from, text: text)
+                    if self.call == id { self.clearCall() }
+                    if signedIn { self.notifyLocally(from: from, text: text) }
                 } else if !canTake {
-                    // Busy: the open conversation reads the message. Otherwise leave it as a notification.
-                    self.provider.reportCall(with: id, endedAt: nil, reason: busy ? .answeredElsewhere : .unanswered)
-                    if !busy { self.notifyLocally(from: from, text: text) }
+                    // Talking: the open conversation reads the message. Otherwise leave it as a notification.
+                    self.provider.reportCall(with: id, endedAt: nil, reason: talking ? .answeredElsewhere : .unanswered)
+                    if signedIn && !talking { self.notifyLocally(from: from, text: text) }
+                } else {
+                    try? await Task.sleep(for: .seconds(Self.ringTimeout))
+                    if self.call == id && !self.answered {
+                        self.provider.reportCall(with: id, endedAt: nil, reason: .unanswered)
+                        self.missed()
+                    }
                 }
-                if !canTake { self.upload() }   // the cloud had a stale headset state
-                completion()
+                if !canTake && signedIn { self.upload() }   // the cloud had a stale headset state
             }
+            completion()
         }
+    }
+
+    /// Declined or not answered: the message shouldn't vanish, so it becomes a notification.
+    private func missed() {
+        if let ringing { notifyLocally(from: ringing.from, text: ringing.text) }
+        clearCall()
+    }
+
+    private func clearCall() {
+        call = nil
+        answered = false
+        ringing = nil
     }
 
     private func notifyLocally(from: String, text: String) {
@@ -216,7 +246,7 @@ final class Push: NSObject, ObservableObject {
     /// The conversation ended (goodbye, or it hung up on silence): hang up the call too.
     private func conversationEnded() {
         guard let id = call else { return }
-        call = nil
+        clearCall()
         callController.request(CXTransaction(action: CXEndCallAction(call: id))) { _ in }
     }
 
@@ -255,7 +285,7 @@ extension Push: PKPushRegistryDelegate {
 extension Push: CXProviderDelegate {
     nonisolated func providerDidReset(_ provider: CXProvider) {
         MainActor.assumeIsolated {
-            call = nil
+            clearCall()
             GlassesController.shared.conversation.end(saying: nil)
         }
     }
@@ -264,6 +294,7 @@ extension Push: CXProviderDelegate {
         MainActor.assumeIsolated {
             // Set the category before CallKit activates the session, so the glasses' mic (HFP) is in the route.
             try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
+            if action.callUUID == call { answered = true }
             action.fulfill()
         }
     }
@@ -280,7 +311,7 @@ extension Push: CXProviderDelegate {
         MainActor.assumeIsolated {
             // Hung up from the call screen or the headset. If the conversation ended first, it's already idle.
             let wasOurs = call == action.callUUID
-            if wasOurs { call = nil }
+            if wasOurs { if answered { clearCall() } else { missed() } }   // declined: keep the message
             let conversation = GlassesController.shared.conversation
             if wasOurs, conversation.phase != .idle { conversation.end(saying: nil) }
             action.fulfill()

@@ -103,6 +103,7 @@ final class Conversation: NSObject, ObservableObject {
             let ended = onEnded
             onEnded = nil
             ended?()
+            await Relay.shared.stoppedListening()
         }
     }
 

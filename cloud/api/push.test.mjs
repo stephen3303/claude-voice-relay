@@ -69,8 +69,8 @@ function setupNotifier(list, { listenedAt = 0, answer = () => ({ result: 'ok', e
     now: () => 1_000_000_000,
     devices: {
       list: async () => list,
-      save: async (u, d) => saved.push(d),
-      remove: async (u, id) => removed.push(id),
+      patch: async (u, id, p) => saved.push({ id, ...p }),
+      remove: async (u, id, expect) => removed.push({ id, expect }),
       lastListened: async () => listenedAt,
     },
     apns: async (token, env, kind, payload) => { pushes.push({ token, kind, payload }); return answer(token, kind); },
@@ -115,26 +115,29 @@ test('a dead VoIP token falls back to a notification and is forgotten', async ()
   const { notify, pushes, saved } = setupNotifier([phone()], { answer: (t, kind) => ({ result: kind === 'call' ? 'gone' : 'ok', env: 'production' }) });
   assert.deepEqual(await notify('u1', { text: 'done', id: 1 }), [{ device: 'p1', got: 'alert' }]);
   assert.deepEqual(pushes.map((p) => p.kind), ['call', 'alert']);
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0].voipToken, undefined);
-  assert.equal(saved[0].token, TOKEN);
+  // Only the dead token is dropped, and only if it's still the stored one; nothing else is written back.
+  assert.deepEqual(saved, [{ id: 'p1', drop: { voipToken: VOIP } }]);
 });
 
 test('a phone whose tokens are all dead is removed; a corrected environment is kept', async () => {
   const dead = setupNotifier([phone()], { answer: () => ({ result: 'gone', env: 'production' }) });
   await dead.notify('u1', { text: 'done', id: 1 });
-  assert.deepEqual(dead.removed, ['p1']);
+  assert.deepEqual(dead.removed, [{ id: 'p1', expect: { token: TOKEN, voipToken: VOIP } }]);
 
   const moved = setupNotifier([phone({ headset: false })], { answer: () => ({ result: 'ok', env: 'sandbox' }) });
   await moved.notify('u1', { text: 'done', id: 1 });
-  assert.equal(moved.saved[0].env, 'sandbox');
+  assert.deepEqual(moved.saved, [{ id: 'p1', env: 'sandbox', drop: {} }]);
+
+  const fine = setupNotifier([phone()]);
+  await fine.notify('u1', { text: 'done', id: 1 });
+  assert.deepEqual([fine.saved, fine.removed], [[], []]);   // a push that learned nothing writes nothing
 });
 
 test('a connection failure for one phone still lets the others get the message', async () => {
   const pushes = [];
   const notify = makeNotifier({
     now: () => 1_000_000_000,
-    devices: { list: async () => [phone({ device: 'p1' }), phone({ device: 'p2', headset: false })], save: async () => {}, remove: async () => {}, lastListened: async () => 0 },
+    devices: { list: async () => [phone({ device: 'p1' }), phone({ device: 'p2', headset: false })], patch: async () => {}, remove: async () => {}, lastListened: async () => 0 },
     apns: async (token, env, kind) => {
       pushes.push(kind);
       if (kind === 'call') throw new Error('stream reset');
@@ -143,4 +146,15 @@ test('a connection failure for one phone still lets the others get the message',
   });
   assert.deepEqual(await notify('u1', { text: 'done', id: 1 }), [{ device: 'p1', got: 'alert' }, { device: 'p2', got: 'alert' }]);
   assert.deepEqual(pushes, ['call', 'alert', 'alert']);
+});
+
+test('phones are pushed at the same time, not one after another', async () => {
+  let inFlight = 0, most = 0;
+  const notify = makeNotifier({
+    now: () => 1_000_000_000,
+    devices: { list: async () => [phone({ device: 'a', headset: false }), phone({ device: 'b', headset: false })], patch: async () => {}, remove: async () => {}, lastListened: async () => 0 },
+    apns: async (token, env) => { inFlight++; most = Math.max(most, inFlight); await new Promise((r) => setTimeout(r, 5)); inFlight--; return { result: 'ok', env }; },
+  });
+  await notify('u1', { text: 'done', id: 1 });
+  assert.equal(most, 2);
 });

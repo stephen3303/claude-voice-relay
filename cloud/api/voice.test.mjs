@@ -19,6 +19,7 @@ function setup() {
       save: async (u, d) => devices.set(`${u}/${d.device}`, d),
       remove: async (u, id) => devices.delete(`${u}/${id}`),
       markListening: async (u) => listening.push(u),
+      stopListening: async (u) => listening.push(`stop:${u}`),
     },
     deliver: async (u, text, from) => delivered.push({ u, text, from, at: clock }),
     now: () => clock,
@@ -104,10 +105,22 @@ test('unknown routes are 404', async () => {
   assert.equal((await call('GET', '/nope')).statusCode, 404);
 });
 
-test('the inbox poll marks a conversation as open, so pushes hold off', async () => {
-  const { call, listening } = setup();
+test('a long inbox poll marks a conversation as open; a one-off check or the end of a conversation does not', async () => {
+  const { call, listening, store } = setup();
   await call('GET', '/voice/inbox', { query: { wait: '0' } });
+  assert.deepEqual(listening, []);
+  await store.addMessage('u1', 'hi');
+  await call('GET', '/voice/inbox', { query: { after: '0' } });
   assert.deepEqual(listening, ['u1']);
+  assert.equal((await call('DELETE', '/voice/listening')).statusCode, 200);
+  assert.deepEqual(listening, ['u1', 'stop:u1']);
+});
+
+test('a failed push registration answers with an error the app can retry on', async () => {
+  const { call, devices } = setup();
+  devices.set = () => { throw new Error('throttled'); };
+  const r = await call('POST', '/push/register', { body: JSON.stringify({ device: 'p', token: 'ab'.repeat(32) }) });
+  assert.equal(r.statusCode, 500);
 });
 
 test('a phone registers its push tokens and headset state, and can unregister', async () => {

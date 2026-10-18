@@ -26,7 +26,7 @@ export const LOOK_PROMPT = [
  * deps.store: { getHeld(user), setHeld(user, held|null), addMessage(user, text), messagesAfter(user, id) }
  * deps.look(jpegBytes, said) -> spoken answer (Claude on Bedrock)
  * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not)
- * deps.devices: { save(user, device), remove(user, deviceId), markListening(user) }
+ * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.now() -> ms, deps.sleep(ms)
  */
@@ -119,14 +119,20 @@ export function makeHandler(deps) {
         return text(200, await send(user, said.trim()));
       }
       if (route === 'GET /voice/inbox') {
-        // A conversation is open while the app polls, so agents' messages need no push.
-        await deps.devices.markListening(user);
+        // A conversation is open while the app long-polls, so agents' messages need no push.
+        // A one-off check (wait=0, e.g. Settings > Test connection) isn't a conversation.
+        if (event.queryStringParameters?.wait !== '0') await deps.devices.markListening(user);
         return json(200, await inbox(user, event.queryStringParameters));
+      }
+      if (route === 'DELETE /voice/listening') {
+        // The conversation ended: push again right away instead of after the listening window.
+        await deps.devices.stopListening(user);
+        return json(200, { ok: true });
       }
       if (route === 'POST /push/register') {
         let b = null;
         try { b = JSON.parse(raw.toString('utf8')); } catch { /* bad JSON */ }
-        return register(user, b);
+        return await register(user, b);
       }
       if (route === 'DELETE /push/register') {
         const device = event.queryStringParameters?.device;
@@ -149,6 +155,8 @@ export function makeHandler(deps) {
       return text(404, 'Not found.');
     } catch (e) {
       console.error(route, e);
+      // The app retries push registration on a failure, so it must see one; voice routes speak the error instead.
+      if (/^\S+ \/(push\/|voice\/listening)/.test(route)) return json(500, { error: 'Bridge Cloud hit an error.' });
       return text(200, "Sorry, Bridge Cloud hit an error. Try again in a moment.");
     }
   };

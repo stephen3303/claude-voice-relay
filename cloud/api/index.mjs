@@ -59,17 +59,48 @@ const devices = {
     const clean = Object.fromEntries(Object.entries(device).filter(([, v]) => v !== undefined));
     await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `USER#${user}`, sk: `DEVICE#${device.device}`, ...clean } }));
   },
-  async remove(user, id) {
-    await db.send(new DeleteCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `DEVICE#${id}` } }));
+  // From a push result: drop dead tokens and fix the environment, only while the dead tokens are still stored.
+  async patch(user, id, { env, drop = {} }) {
+    const names = {}, values = {}, cond = ['attribute_exists(sk)'], remove = [];
+    for (const [field, dead] of Object.entries(drop)) {
+      names[`#${field}`] = field; values[`:${field}`] = dead;
+      cond.push(`#${field} = :${field}`); remove.push(`#${field}`);
+    }
+    if (env) { names['#env'] = 'env'; values[':env'] = env; }
+    const update = [env ? 'SET #env = :env' : '', remove.length ? `REMOVE ${remove.join(', ')}` : ''].filter(Boolean).join(' ');
+    await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `DEVICE#${id}` },
+      UpdateExpression: update, ConditionExpression: cond.join(' AND '), ExpressionAttributeNames: names,
+      ...(Object.keys(values).length ? { ExpressionAttributeValues: values } : {}) }));
+  },
+  // expect: the dead tokens; a phone that re-registered since keeps its entry.
+  async remove(user, id, expect) {
+    const Key = { pk: `USER#${user}`, sk: `DEVICE#${id}` };
+    if (!expect) return void await db.send(new DeleteCommand({ TableName: TABLE, Key }));
+    const names = {}, values = {}, cond = [];
+    for (const field of ['token', 'voipToken']) {
+      names[`#${field}`] = field;
+      if (expect[field]) { values[`:${field}`] = expect[field]; cond.push(`#${field} = :${field}`); }
+      else cond.push(`attribute_not_exists(#${field})`);
+    }
+    await conditional(new DeleteCommand({ TableName: TABLE, Key, ConditionExpression: cond.join(' AND '),
+      ExpressionAttributeNames: names, ...(Object.keys(values).length ? { ExpressionAttributeValues: values } : {}) }));
   },
   async markListening(user) {
     await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `USER#${user}`, sk: 'LISTENING', at: Date.now() } }));
+  },
+  async stopListening(user) {
+    await db.send(new DeleteCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: 'LISTENING' } }));
   },
   async lastListened(user) {
     const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: 'LISTENING' } }));
     return r.Item?.at ?? 0;
   },
 };
+
+async function conditional(command) {
+  try { await db.send(command); }
+  catch (e) { if (e.name !== 'ConditionalCheckFailedException') throw e; }
+}
 
 // The APNs key lives in Secrets Manager (cloud/setup/setup-apns.ps1). Until it's there, messages
 // still reach the inbox; they just don't ring the phone.
@@ -82,7 +113,9 @@ async function getNotifier() {
       notifier = makeNotifier({ devices, apns: makeApns({ teamId, keyId, key, bundleId: process.env.BUNDLE_ID, send: http2Send }) });
     } catch (e) {
       console.warn('Push is off:', e.name, e.message);
-      notifier = null;
+      // Only a missing secret is settled; anything else (throttling, a timeout) is tried again next time.
+      if (e.name === 'ResourceNotFoundException') notifier = null;
+      return null;
     }
   }
   return notifier;

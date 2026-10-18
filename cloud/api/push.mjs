@@ -11,7 +11,7 @@ import http2 from 'node:http2';
 
 export const APNS_HOSTS = { production: 'api.push.apple.com', sandbox: 'api.sandbox.push.apple.com' };
 const TOKEN_REFRESH_MS = 50 * 60_000;   // Apple: renew provider tokens after 20 and before 60 minutes
-export const LISTENING_MS = 45_000;     // an inbox poll this recent means a conversation is open
+export const LISTENING_MS = 30_000;     // a long poll this recent means a conversation is open (polls last ~20s)
 const ALERT_MAX = 180;
 
 const b64url = (b) => Buffer.from(b).toString('base64url');
@@ -68,8 +68,10 @@ export function makeApns(deps) {
 }
 
 /**
- * deps.devices: { list(user), save(user, device), remove(user, deviceId), lastListened(user) -> ms|0 }
+ * deps.devices: { list(user), patch(user, deviceId, { env?, drop? }), remove(user, deviceId, expect), lastListened(user) -> ms|0 }
  *   device: { device, token?, voipToken?, env, headset, calls, at }
+ *   patch and remove only change what this push learned (a dead token, the right environment), and only
+ *   while the stored token is still the one that failed, so a registration that landed meanwhile stands.
  * deps.apns: makeApns(...)
  * deps.now() -> ms
  */
@@ -79,35 +81,42 @@ export function makeNotifier(deps) {
   const apns = (token, env, kind, payload) =>
     deps.apns(token, env, kind, payload).catch((e) => ({ result: 'error', env, reason: e.message }));
 
+  async function toPhone(user, d, title, body, id) {
+    let got = null, env = d.env;
+    const drop = {};
+    const learn = (r, field) => {
+      if (r.result === 'gone') drop[field] = d[field];
+      else if (r.result === 'ok' && r.env !== env) env = r.env;
+    };
+    if (d.voipToken && d.calls && d.headset) {
+      const r = await apns(d.voipToken, env, 'call', { from: title, text: body, id });
+      if (r.result === 'ok') got = 'call';
+      learn(r, 'voipToken');
+    }
+    if (!got && d.token) {
+      const r = await apns(d.token, env, 'alert', {
+        aps: { alert: { title, body }, sound: 'default', 'interruption-level': 'time-sensitive',
+          category: 'AGENT_MESSAGE', 'thread-id': title },
+        id,
+      });
+      if (r.result === 'ok') got = 'alert';
+      learn(r, 'token');
+    }
+    const tokenLeft = d.token && !('token' in drop), voipLeft = d.voipToken && !('voipToken' in drop);
+    if (!tokenLeft && !voipLeft) await deps.devices.remove(user, d.device, { token: d.token, voipToken: d.voipToken });
+    else if (Object.keys(drop).length || env !== d.env) {
+      await deps.devices.patch(user, d.device, { ...(env !== d.env ? { env } : {}), drop });
+    }
+    return { device: d.device, got: got ?? 'nothing' };
+  }
+
   /** An agent's message for the user. Returns what each phone got, for logs and tests. */
   return async function notify(user, { text, from, id }) {
     if (now() - (await deps.devices.lastListened(user)) < LISTENING_MS) return [];
     const title = from || 'Bridge';
     const body = text.length > ALERT_MAX ? `${text.slice(0, ALERT_MAX - 1)}…` : text;
-    const sent = [];
-    for (const d of await deps.devices.list(user)) {
-      let device = d, got = null;
-      if (d.voipToken && d.calls && d.headset) {
-        const r = await apns(d.voipToken, d.env, 'call', { from: title, text: body, id });
-        if (r.result === 'ok') got = 'call';
-        if (r.result === 'gone') device = { ...device, voipToken: undefined };
-        if (r.env !== d.env && r.result !== 'error') device = { ...device, env: r.env };
-      }
-      if (!got && device.token) {
-        const r = await apns(device.token, device.env, 'alert', {
-          aps: { alert: { title, body }, sound: 'default', 'interruption-level': 'time-sensitive',
-            category: 'AGENT_MESSAGE', 'thread-id': title },
-          id,
-        });
-        if (r.result === 'ok') got = 'alert';
-        if (r.result === 'gone') device = { ...device, token: undefined };
-        if (r.env !== device.env && r.result !== 'error') device = { ...device, env: r.env };
-      }
-      if (!device.token && !device.voipToken) await deps.devices.remove(user, d.device);
-      else if (device !== d) await deps.devices.save(user, device);
-      sent.push({ device: d.device, got: got ?? 'nothing' });
-    }
-    return sent;
+    // All phones at once, so one slow connection doesn't hold up the rest (or the request that delivers).
+    return Promise.all((await deps.devices.list(user)).map((d) => toPhone(user, d, title, body, id)));
   };
 }
 
@@ -124,7 +133,7 @@ export function http2Send(host, path, headers, body) {
   }
   return new Promise((resolve, reject) => {
     const req = session.request({ ':method': 'POST', ':path': path, 'content-type': 'application/json', ...headers });
-    req.setTimeout(10_000, () => req.close(http2.constants.NGHTTP2_CANCEL));
+    req.setTimeout(5_000, () => req.close(http2.constants.NGHTTP2_CANCEL));
     let status = 0, data = '';
     req.on('response', (h) => { status = h[':status']; });
     req.setEncoding('utf8');

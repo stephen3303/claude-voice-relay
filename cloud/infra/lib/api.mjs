@@ -101,6 +101,7 @@ export class ApiStack extends Stack {
       ['POST', '/api/voice/send', voiceIntegration, sessions],
       ['GET', '/api/voice/inbox', voiceIntegration, sessions],
       ['POST', '/api/voice/photo', voiceIntegration, sessions],
+      ['DELETE', '/api/voice/listening', voiceIntegration, sessions],
       ['POST', '/api/push/register', voiceIntegration, sessions],
       ['DELETE', '/api/push/register', voiceIntegration, sessions],
       ['POST', '/api/push/test', voiceIntegration, sessions],
