@@ -44,6 +44,7 @@ export function verifyAppleJws(jws, { root = APPLE_ROOT_CA_G3, now = Date.now() 
  *   owner(tx) -> { user?, revoked?: Set|array of transaction IDs } | null   (pk PRO#<originalTransactionId>)
  *   claim(tx, user) -> false when another account holds tx
  *   revoke(tx, transactionId) -> the user holding tx, or null
+ *   unrevoke(tx, transactionId)   (a refund Apple reversed)
  *   getPro(user) -> { until, tx, transactionId } | null
  *   setPro(user, entitlement)   (keeps the latest `until`)
  *   dropPro(user, transactionId)   (only while that transaction is the stored one)
@@ -97,8 +98,12 @@ export function makePro(deps) {
     try {
       n = verify(JSON.parse(body).signedPayload, { now: now() });
       if (!n.data?.signedTransactionInfo) return { status: 200, body: { ignored: n.notificationType } };   // TEST, and others with no transaction
-      t = entitlement(verify(n.data.signedTransactionInfo, { now: now() }));
+      t = verify(n.data.signedTransactionInfo, { now: now() });
     } catch (err) { return { status: 400, body: { error: err.message } }; }
+    // Signed by Apple but not Bridge Pro (another product or app): answered, so Apple doesn't keep retrying it.
+    try { t = entitlement(t); } catch (err) { return { status: 200, body: { ignored: err.message } }; }
+    // Only Apple's signed notification type reverses a refund, never a transaction that merely lacks revocationDate.
+    if (n.notificationType === 'REFUND_REVERSED' && t.until) await deps.store.unrevoke(t.tx, t.transactionId);
     if (!t.until) {
       const user = await deps.store.revoke(t.tx, t.transactionId);
       if (user) await deps.store.dropPro(user, t.transactionId);

@@ -97,6 +97,7 @@ function setup() {
       const o = owners.get(t) ?? { revoked: new Set() };
       o.revoked.add(id); owners.set(t, o); return o.user ?? null;
     },
+    unrevoke: async (t, id) => { owners.get(t)?.revoked.delete(id); },
     getPro: async (u) => pros.get(u) ?? null,
     setPro: async (u, e) => { if (!(pros.get(u)?.until >= e.until)) pros.set(u, e); },
     dropPro: async (u, id) => { if (pros.get(u)?.transactionId === id) pros.delete(u); },
@@ -148,6 +149,16 @@ test("a refund ends Pro, and the phone's old copy of the transaction can't bring
   assert.equal(await pro.isPro('u1'), true);
 });
 
+test('a reversed refund brings Pro back; a transaction without revocationDate alone does not', async () => {
+  const { pro, notice } = setup();
+  await pro.claim('u1', jws(tx()));
+  await pro.notify(notice('REFUND', tx({ revocationDate: NOW })));
+  await pro.notify(notice('DID_RENEW', tx()));
+  assert.equal(await pro.isPro('u1'), false, 'only REFUND_REVERSED undoes a refund');
+  await pro.notify(notice('REFUND_REVERSED', tx()));
+  assert.equal(await pro.isPro('u1'), true);
+});
+
 test("a refund before the app reported the purchase still sticks; notifications don't pick the owner", async () => {
   const { pro, notice, pros } = setup();
   await pro.notify(notice('DID_RENEW', tx()));
@@ -157,9 +168,11 @@ test("a refund before the app reported the purchase still sticks; notifications 
 });
 
 test('notifications without a transaction are fine, and forged ones are refused', async () => {
-  const { pro } = setup();
+  const { pro, notice } = setup();
   assert.equal((await pro.notify(JSON.stringify({ signedPayload: jws({ notificationType: 'TEST', signedDate: NOW, data: {} }) }))).status, 200);
   assert.equal((await pro.notify('{"signedPayload":"x.y.z"}')).status, 400);
+  const other = await pro.notify(notice('DID_RENEW', tx({ productId: 'com.smitherman.glassesrelay.tip' })));
+  assert.deepEqual(other, { status: 200, body: { ignored: 'not Bridge Pro' } }, "another product is answered, so Apple stops retrying");
   assert.equal((await pro.notify('nope')).status, 400);
   assert.equal((await pro.notify(JSON.stringify({ signedPayload: 'x'.repeat(70_000) }))).status, 400);
 });

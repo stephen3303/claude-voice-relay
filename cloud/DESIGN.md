@@ -46,7 +46,9 @@ revocation; a refunded transaction ID is kept, so the phone's old copy can't bri
 needed for any of this. The natural voice (`/api/voice/tts`) answers 402 without Pro, and the app speaks with the phone;
 photos (`/api/voice/photo`, Bedrock) answer that they need Pro. Sandbox purchases count too, because App Review buys
 in the sandbox against this backend; that also gives invited TestFlight testers Pro for free, within the daily budgets. Missed refund notifications aren't caught up yet: that needs
-the App Store Server API and an App Store Connect key.
+the App Store Server API and an App Store Connect key. A reversed refund (`REFUND_REVERSED`) restores Pro. Keep the
+Billing Grace Period off in App Store Connect: Pro here lasts until `expiresDate`, and a grace period would keep Pro on
+the phone while the cloud has ended it. Turning it on needs `gracePeriodExpiresDate` from `signedRenewalInfo` first.
 
 ## Agents start the conversation (push)
 

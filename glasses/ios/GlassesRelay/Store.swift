@@ -58,8 +58,9 @@ final class Store: ObservableObject {
     /// a spoken reply isn't held up. A refusal (another account's subscription) is an answer: retrying won't change it.
     func reportIfNeeded() async {
         #if APP_STORE
-        // A reply or photo right after sign-in waits for the report already on its way, not just the next one.
-        if let inFlight { return await inFlight.value }
+        // A reply or photo right after sign-in waits for the report already on its way, then checks whether that
+        // one covered the current session and transaction (it may have started before sign-in).
+        if let inFlight { await inFlight.value }
         guard let jws = latestTransaction, let session = Keychain.read(Account.sessionKey) else { return }
         let key = "\(session)|\(jws)"
         // At most one try every 30 s while the cloud doesn't answer, so a slow or failing cloud costs replies little.

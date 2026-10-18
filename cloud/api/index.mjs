@@ -195,6 +195,10 @@ const proStore = {
       UpdateExpression: 'ADD revoked :id', ExpressionAttributeValues: { ':id': new Set([transactionId]) }, ReturnValues: 'ALL_NEW' }));
     return r.Attributes?.user ?? null;
   },
+  async unrevoke(tx, transactionId) {
+    await db.send(new UpdateCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' },
+      UpdateExpression: 'DELETE revoked :id', ExpressionAttributeValues: { ':id': new Set([transactionId]) } }));
+  },
   async getPro(user) {
     const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: 'PRO' }, ConsistentRead: true }));
     return r.Item ?? null;
