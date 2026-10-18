@@ -36,8 +36,8 @@ Use one by hand: in Claude Code, "use the security-reviewer on my last commit", 
   its own Claude config deleted, and Claude's tools can read it but not run it; `ci.yml` runs the tests in
   a job with no secrets. Fork PRs are skipped.
 - **`@claude` (`claude.yml`):** runs code, so it only acts on comments from you or collaborators, on
-  issues they opened and same-repo PRs, and it only reads your comments (and the Claude review's) in the
-  thread, since anyone can comment on a public repo. To add a collaborator, add their username to
+  issues they opened and same-repo PRs, and it only reads your comments in the thread, since anyone can
+  comment on a public repo (not the Claude review's, which are written from the PR's content). To add a collaborator, add their username to
   `include_comments_by_actor`. Pushes it makes use the workflow's token, so they don't start CI
   by themselves; push again or rerun CI.
 - **No `id-token: write`** in either, so neither can mint a GitHub OIDC token at all. Separately, the

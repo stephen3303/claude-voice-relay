@@ -62,9 +62,9 @@ jobs:
         if: steps.gate.outputs.ok
         with:
           github_token: ${{ github.token }}
-          # Anyone can comment on a public issue or PR, so Claude sees only the owner's comments and the
-          # Claude review's. Add a collaborator's username here if one ever joins.
-          include_comments_by_actor: ${{ github.repository_owner }},github-actions[bot]
+          # Anyone can comment on a public issue or PR, so Claude sees only the owner's comments. Not the
+          # Claude review's either: those are model text written from the PR. Add a collaborator here if one joins.
+          include_comments_by_actor: ${{ github.repository_owner }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
