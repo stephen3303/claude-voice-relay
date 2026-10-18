@@ -58,6 +58,7 @@ final class Account: ObservableObject {
     func signOut() {
         if let session = Keychain.read(Self.sessionKey) { Push.shared.unregister(session: session) }
         Keychain.delete(Self.sessionKey)
+        Store.shared.forgetReport()
         UserDefaults.standard.removeObject(forKey: "appleUser")
         expires = 0
         signedIn = false
