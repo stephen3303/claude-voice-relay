@@ -289,6 +289,16 @@ function speakResult(a, r) {
 // remote, so it shows in the Claude app. The session pushes and opens its own pull request.
 async function cloudTurn(a, prompt) {
   if (!fs.existsSync(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
+  // A reply to a conversation from before cloud mode would start a cloud session with only that one line.
+  if (!a.cloudId && a.sessionId) throw new Error(`its conversation was on the PC, before cloud mode. Start a new task for ${a.name}.`);
+  // The session pushes through the Claude GitHub app, not the relay, so the repo must have the same
+  // protected default branch the relay requires before it pushes (README: GitHub access for agents).
+  if (!a.cloudId) {
+    await agentGitHub.pinNow(a);
+    const creds = await agentGitHub.credentials(a);
+    if (!creds) throw new Error(`its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.`);
+    await agentGitHub.release(creds);
+  }
   const r = await runCloud({ spawn, claudeBin: process.env.CLAUDE_BIN || 'claude', env: process.env,
     cwd: a.repoPath, sessionId: a.cloudId, prompt });
   if (a.stopped) return;

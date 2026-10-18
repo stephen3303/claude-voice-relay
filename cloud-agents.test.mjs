@@ -3,16 +3,17 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { cloudArgs, cloudEnv, parseCloud, runCloud, CLOUD_PROMPT } from './cloud-agents.mjs';
 
-function fakeSpawn({ stdout = '', stderr = '', code = 0 } = {}) {
+function fakeSpawn({ stdout = '', stderr = '', code = 0, hang = false } = {}) {
   const calls = [];
   const spawn = (cmd, args, opts) => {
     const p = new EventEmitter();
+    p.kill = () => { calls.killed = true; setImmediate(() => p.emit('close', null)); };
     p.stdout = new EventEmitter();
     p.stderr = new EventEmitter();
     p.stdin = new EventEmitter();
     p.stdin.end = (input) => {
       calls.push({ cmd, args, opts, input });
-      setImmediate(() => {
+      if (!hang) setImmediate(() => {
         if (stdout) p.stdout.emit('data', stdout);
         if (stderr) p.stderr.emit('data', stderr);
         p.emit('close', code);
@@ -64,4 +65,10 @@ test('runCloud sends the prompt over stdin from the project folder and returns t
 test('runCloud rejects when the CLI fails', async () => {
   const { spawn } = fakeSpawn({ stderr: 'Error: Unable to get organization UUID', code: 1 });
   await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x' }), /organization UUID/);
+});
+
+test('runCloud kills a CLI that never answers', async () => {
+  const { spawn, calls } = fakeSpawn({ hang: true });
+  await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x', timeoutMs: 20 }), /no answer after .*Claude app/);
+  assert.equal(calls.killed, true);
 });

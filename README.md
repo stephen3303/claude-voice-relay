@@ -137,7 +137,9 @@ Docker container, so the conversation shows up in the Claude app (**Code** tab) 
 with its full transcript, and you can pick it up there. The relay still speaks the replies.
 - The session works on the project folder's GitHub remote at its current branch (what's pushed, not
   local changes), and pushes and opens its pull request itself through the Claude GitHub app, not the
-  relay's GitHub App.
+  relay's GitHub App. The relay still only starts one for a repo that passes the same check as
+  before a relay push (protected default branch, CODEOWNERS, the App installed), because those
+  rules are what stop any bot, the Claude GitHub app included, from changing main on its own.
 - It needs Claude Code on the PC signed in with your claude.ai account: run `claude auth login` once
   (and `claude update`; older versions don't wait for a follow-up's answer, so you hear "sent" and read it in the app).
   The `CLAUDE_CODE_OAUTH_TOKEN` setup token can't start cloud sessions; the relay keeps it away from them.

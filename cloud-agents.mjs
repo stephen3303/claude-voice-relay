@@ -49,14 +49,22 @@ export function parseCloud(out, err, code) {
 }
 
 // spawn is node's; the caller supplies the folder (cwd), the session to continue, and the prompt.
-export function runCloud({ spawn, claudeBin = 'claude', env, cwd, sessionId, prompt }) {
+// The CLI waits on a remote session, so a hung sign-in, network or session would keep the agent busy for
+// good: after timeoutMs it's killed. The cloud session itself carries on and stays in the Claude app.
+export const CLOUD_TIMEOUT_MS = 60 * 60_000;
+export function runCloud({ spawn, claudeBin = 'claude', env, cwd, sessionId, prompt, timeoutMs = CLOUD_TIMEOUT_MS }) {
   return new Promise((resolve, reject) => {
     const p = spawn(claudeBin, cloudArgs(sessionId), { cwd, windowsHide: true, env: cloudEnv(env) });
-    let out = '', err = '';
+    let out = '', err = '', timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; p.kill(); }, timeoutMs);
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err = (err + d).slice(-4000)));
-    p.on('error', reject);
-    p.on('close', (code) => { try { resolve(parseCloud(out, err, code)); } catch (e) { reject(e); } });
+    p.on('error', (e) => { clearTimeout(timer); reject(e); });
+    p.on('close', (code) => {
+      clearTimeout(timer);
+      if (timedOut) return reject(new Error(`no answer after ${Math.round(timeoutMs / 60_000)} minutes. It may still be working; check the Claude app.`));
+      try { resolve(parseCloud(out, err, code)); } catch (e) { reject(e); }
+    });
     p.stdin.on('error', () => {});
     p.stdin.end(prompt);
   });
