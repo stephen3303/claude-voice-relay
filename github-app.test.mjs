@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseRemote, appJwt, makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
+import { parseRemote, appJwt, makeGitHubApp, makeAgentGitHub, unsafeMount, ownersCoverAll } from './github-app.mjs';
 
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
 const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -37,12 +37,12 @@ test('appJwt is an RS256 JWT for the App, valid for under ten minutes', () => {
 });
 
 const PROTECTED_RULES = [
-  { type: 'pull_request', parameters: { require_code_owner_review: true, required_approving_review_count: 1 } },
+  { type: 'pull_request', parameters: { require_code_owner_review: true, require_last_push_approval: true, required_approving_review_count: 1 } },
   { type: 'non_fast_forward' },
   { type: 'deletion' },
 ];
 
-function fakeGitHub({ installed = true, rules = PROTECTED_RULES, canonical = 'claude-voice-relay' } = {}) {
+function fakeGitHub({ installed = true, rules = PROTECTED_RULES, canonical = 'claude-voice-relay', codeowners = { '.github/CODEOWNERS': '* @stephen3303\n' } } = {}) {
   const calls = [];
   let n = 0;
   const fetch = async (url, opts) => {
@@ -53,6 +53,8 @@ function fakeGitHub({ installed = true, rules = PROTECTED_RULES, canonical = 'cl
     if (path === '/installation/token' && opts.method === 'DELETE') return reply(204);
     if (path === '/app/installations/42/access_tokens') return reply(201, { token: `ghs_${++n}` });
     if (path.startsWith('/repos/stephen3303/') && path.includes('/rules/branches/main')) return reply(200, rules);
+    const file = path.match(/\/contents\/(.+)\?ref=main$/)?.[1];
+    if (file) return codeowners[file] ? reply(200, { content: Buffer.from(codeowners[file]).toString('base64') }) : reply(404, {});
     if (/^\/repos\/stephen3303\/[\w.-]+$/.test(path)) {
       return reply(200, { id: 5, name: canonical, full_name: `stephen3303/${canonical}`, owner: { login: 'stephen3303' }, default_branch: 'main' });
     }
@@ -71,7 +73,7 @@ test('tokenFor mints a token for the one repository by id, and revokes the looku
   const { app, calls } = fakeGitHub();
   assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_2');
   const [probe, real] = mints(calls);
-  assert.deepEqual(probe.body, { permissions: { metadata: 'read' } });
+  assert.deepEqual(probe.body, { permissions: { metadata: 'read', contents: 'read' } });
   assert.match(probe.headers.Authorization, /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/); // the App's JWT
   assert.deepEqual(real.body, {
     repository_ids: [5],
@@ -90,7 +92,8 @@ test('tokenFor follows a renamed repository to its current name', async () => {
 
 test('tokenFor refuses a repository whose default branch is not protected', async () => {
   for (const rules of [[], PROTECTED_RULES.slice(1),
-    [{ type: 'pull_request', parameters: { require_code_owner_review: false, required_approving_review_count: 1 } }, ...PROTECTED_RULES.slice(1)],
+    [{ type: 'pull_request', parameters: { require_code_owner_review: false, require_last_push_approval: true, required_approving_review_count: 1 } }, ...PROTECTED_RULES.slice(1)],
+    [{ type: 'pull_request', parameters: { require_code_owner_review: true, require_last_push_approval: false, required_approving_review_count: 1 } }, ...PROTECTED_RULES.slice(1)],
     PROTECTED_RULES.filter((r) => r.type !== 'deletion')]) {
     const { app, calls, logs } = fakeGitHub({ rules });
     assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), null);
@@ -98,6 +101,24 @@ test('tokenFor refuses a repository whose default branch is not protected', asyn
     assert.deepEqual(revokes(calls), ['Bearer ghs_1']);
     assert.match(logs.at(-1), /isn't protected/);
   }
+});
+
+test('tokenFor refuses a repository whose CODEOWNERS does not give every file a person', async () => {
+  for (const codeowners of [{}, { '.github/CODEOWNERS': '/docs @stephen3303\n' }, { 'CODEOWNERS': '* @bridge-agents[bot]' }]) {
+    const { app, calls, logs } = fakeGitHub({ codeowners });
+    assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), null);
+    assert.equal(mints(calls).length, 1);
+    assert.match(logs.at(-1), /CODEOWNERS/);
+  }
+  // Any of GitHub's three places will do.
+  assert.equal(await fakeGitHub({ codeowners: { 'docs/CODEOWNERS': '# owners\n*   @stephen3303 # me' } }).app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_2');
+});
+
+test('ownersCoverAll needs a person or team owning every file', () => {
+  assert.ok(ownersCoverAll('* @stephen3303'));
+  assert.ok(ownersCoverAll('/** @org/team'));
+  assert.ok(ownersCoverAll('* someone@example.com'));
+  for (const t of ['', '# * @stephen3303', '*.js @stephen3303', '*', '* @bridge-agents[bot]']) assert.equal(ownersCoverAll(t), false, t);
 });
 
 test('tokenFor returns null when the App is not installed on the repository', async () => {

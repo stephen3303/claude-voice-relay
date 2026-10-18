@@ -11,12 +11,22 @@ const API = 'https://api.github.com';
 const TOKEN_PERMISSIONS = { contents: 'write', pull_requests: 'write', metadata: 'read' };
 
 // The default branch's rules must stop the bot merging or rewriting it alone: a pull request needing a
-// code owner's approval (the bot's own approval doesn't count), and no force pushes or deletion.
+// code owner's approval of its latest push (so the bot can't approve, or push after you approved, and
+// merge), and no force pushes or deletion.
 export function branchProtected(rules) {
   if (!Array.isArray(rules)) return false;
   const has = (type, ok = () => true) => rules.some((r) => r.type === type && ok(r.parameters || {}));
-  return has('pull_request', (p) => p.require_code_owner_review === true && p.required_approving_review_count >= 1)
+  return has('pull_request', (p) => p.require_code_owner_review === true && p.require_last_push_approval === true
+    && p.required_approving_review_count >= 1)
     && has('non_fast_forward') && has('deletion');
+}
+
+// Code owner review only means something when CODEOWNERS gives every file (`*`) a person as owner.
+export function ownersCoverAll(text) {
+  return String(text || '').split(/\r?\n/).some((line) => {
+    const [pattern, ...owners] = line.replace(/#.*/, '').trim().split(/\s+/);
+    return (pattern === '*' || pattern === '/**') && owners.some((o) => /^(@[\w.-]+(\/[\w.-]+)?|[^@\s]+@[^@\s]+\.\w+)$/.test(o));
+  });
 }
 
 // True when mounting `repoPath` into a container would expose one of `protectedPaths` (the relay's own
@@ -90,13 +100,27 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
     let probe;
     try {
       const inst = await call('GET', `/repos/${e(owner)}/${e(repo)}/installation`);
-      // A metadata-only token looks the repo up: its current name and id (the remote may predate a
-      // rename, which would make a token request by name fail) and its default branch's rules.
-      probe = (await call('POST', `/app/installations/${inst.id}/access_tokens`, { body: { permissions: { metadata: 'read' } } })).token;
+      // A read-only token looks the repo up: its current name and id (the remote may predate a
+      // rename, which would make a token request by name fail), its default branch's rules and CODEOWNERS.
+      probe = (await call('POST', `/app/installations/${inst.id}/access_tokens`,
+        { body: { permissions: { metadata: 'read', contents: 'read' } } })).token;
       const info = await call('GET', `/repos/${e(owner)}/${e(repo)}`, { auth: probe });
-      const rules = await call('GET', `/repos/${e(info.owner.login)}/${e(info.name)}/rules/branches/${e(info.default_branch)}`, { auth: probe });
+      const base = `/repos/${e(info.owner.login)}/${e(info.name)}`;
+      const rules = await call('GET', `${base}/rules/branches/${e(info.default_branch)}`, { auth: probe });
       if (!branchProtected(rules)) {
         log(`${info.full_name}'s ${info.default_branch} branch isn't protected (see README: GitHub access for agents); no token.`);
+        return null;
+      }
+      let owners = '';
+      for (const f of ['.github/CODEOWNERS', 'CODEOWNERS', 'docs/CODEOWNERS']) {
+        try {
+          const c = await call('GET', `${base}/contents/${f}?ref=${e(info.default_branch)}`, { auth: probe });
+          owners = Buffer.from(c.content || '', 'base64').toString('utf8');
+          break; // GitHub uses the first one it finds, in this order
+        } catch (err) { if (err.status !== 404) throw err; }
+      }
+      if (!ownersCoverAll(owners)) {
+        log(`${info.full_name} has no CODEOWNERS giving every file a person as owner (see README: GitHub access for agents); no token.`);
         return null;
       }
       const t = await call('POST', `/app/installations/${inst.id}/access_tokens`,

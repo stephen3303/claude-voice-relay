@@ -105,7 +105,8 @@ repo of the same name): in your projects folder, `git clone https://github.com/<
    requests only** (so you can still merge your own pull requests); never add the agents App.
    **Target branches → Add target → Include default branch.** Keep **Restrict deletions** and
    **Block force pushes** on. Tick **Require a pull request before merging**, set **Required
-   approvals** to 1 and tick **Require review from Code Owners**. **Create.**
+   approvals** to 1, and tick **Require review from Code Owners** and **Require approval of the most
+   recent reviewable push**. **Create.**
 3. **New branch ruleset** again. Name `Protect branches`, Enforcement **Active**, **Bypass list →
    Repository admin**, set to **Always**. **Target branches → Add target → Include all branches.**
    Keep **Restrict deletions** and **Block force pushes** on, nothing else. **Create.**
