@@ -22,7 +22,7 @@ const cfg = {
   oauth: process.env.CLAUDE_CODE_OAUTH_TOKEN,
   voicePort: Number(process.env.VOICE_PORT || 47879),
   voiceToken: process.env.VOICE_TOKEN || '',
-  // Read every Shortcut task back and wait for "send it"; VOICE_CONFIRM=0 sends immediately.
+  // Read every Shortcut task back ("Ready to send it?") and wait for a yes; VOICE_CONFIRM=0 sends immediately.
   voiceConfirm: process.env.VOICE_CONFIRM !== '0',
   projectsRoot: process.env.PROJECTS_ROOT || path.resolve(ROOT, '..'),
   // Natural-sounding speech for the glasses app: set OPENAI_API_KEY to enable POST /voice/tts.
@@ -468,7 +468,7 @@ else {
       // then close the connection instead of reading the rest.
       tooBig = true;
       res.writeHead(413, { 'content-type': 'text/plain', connection: 'close' })
-        .end('That was too long. Say it again, shorter.', () => req.destroy());
+        .end('That was too long. Can you say it shorter?', () => req.destroy());
     });
     req.on('end', () => {
       if (tooBig) return;

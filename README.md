@@ -20,7 +20,8 @@ Spoken project names match folder names under PROJECTS_ROOT; add nicknames to `a
 e.g. `{ "trading bot": "Roundtable_Trading" }`.
 
 ## iPhone Shortcut ("Tell Claude") with read-back
-The relay reads your task back and waits for **send it** before anything starts. `/voice` does
+The relay reads your task back the way Siri reads back a text ("Here's your message to trading bot:
+add a stop-loss check. Ready to send it?") and waits for a yes before anything starts. `/voice` does
 this by default (set `VOICE_CONFIRM=0` in `.env` to send immediately); `/voice/confirm` always does.
 Build the Shortcut so it keeps listening until the task is sent or cancelled:
 
@@ -31,23 +32,23 @@ Build the Shortcut so it keeps listening until the task is sent or cancelled:
    (or `http://<relay>:47879/voice/confirm`): Method **POST**, Header `Authorization` = `Bearer <VOICE_TOKEN>`,
    Request Body **JSON** with one field, `text` = the Text from step 3
 5. &nbsp;&nbsp;**Speak** Contents of URL (leave *Wait Until Finished* on, or dictation hears the speech)
-6. &nbsp;&nbsp;**If** Contents of URL *does not contain* `again` → **Stop This Shortcut**
+6. &nbsp;&nbsp;**If** Contents of URL *does not contain* `?` → **Stop This Shortcut**
 7. **End Repeat**
 
 On each turn, say one of these:
-- **send it** (or "go ahead", "do it", "yes"; "sent it" and "send it please" also count): starts the task you just heard read back.
-- **the task again**: replaces it, and the relay reads the new one back.
-- **cancel**: drops it.
+- **send** or **yes** (or "send it", "go ahead", "do it"; "sent it" and "send it please" also count): starts the task you just heard read back.
+- **change it**: the relay asks "What do you want to tell trading bot?" and reads your new words back. Saying a new task straight away replaces it too.
+- **cancel** or **no**: drops it ("OK, I won't send it.").
 
 The read-back names the project it resolved, so a misheard project gets caught before the agent
 starts. If dictation stops right after the project ("in voice relay"), the relay keeps the project
-and asks for the task. Every reply that is waiting on you contains "again"; "Sent." and
-"Cancelled. Nothing sent." don't, which is what ends the loop. An unconfirmed task expires after
+and asks for the task. Every reply that is waiting on you is a question (it contains "?"); "Sent." and
+"OK, I won't send it." aren't, which is what ends the loop. Silence never sends anything. An unconfirmed task expires after
 10 minutes, and "send it" after that says so. With nothing waiting, a bare "yes" answers an agent
 that asked you a yes-or-no question.
 
 **Updating an older Shortcut:** change the URL in *Get contents of* to end in `/voice/confirm`,
-wrap the actions in the Repeat loop above if they aren't already, and add the *If ... again* step.
+wrap the actions in the Repeat loop above if they aren't already, and add the *If ... does not contain ?* step (older Shortcuts checked for `again`; change it to `?`).
 The body can stay JSON, or be a Form with a `text` field. Nothing else changes.
 
 ## Ray-Ban Meta glasses ("Hey Meta, start Bridge")
@@ -57,7 +58,7 @@ publishes `GlassesRelay.ipa` as a prerelease, and [glasses/SIDELOAD.md](glasses/
 the install steps. Meta AI opens it on "Hey Meta, start Bridge"; it listens through the glasses
 microphone, sends what you say to `/voice/confirm` (the same read-back as the Shortcut), and speaks
 the answer. While the conversation is open it also long-polls `GET /voice/inbox` and reads out
-whatever your agents say. Say "in <project>, <task>" to start a task, "send it" to confirm,
+whatever your agents say. Say "in <project>, <task>" to start a task, "send" or "yes" when it asks "Ready to send it?",
 "yes" to answer an agent, and "goodbye" to hang up. After "Sent." it stays on the line for up to
 15 minutes so you hear the agent's answer.
 

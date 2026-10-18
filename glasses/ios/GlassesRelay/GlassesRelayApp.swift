@@ -37,8 +37,8 @@ struct GlassesRelayApp: App {
         glasses.conversation.phase = .listening
         glasses.conversation.transcript = [
             ("You", "In trading bot, add a stop-loss check to the order router"),
-            ("Relay", "I heard: add a stop-loss check to the order router. That goes to trading bot. Say send it, or say the task again."),
-            ("You", "Send it"),
+            ("Relay", "Here's your message to trading bot: add a stop-loss check to the order router. Ready to send it?"),
+            ("You", "Send"),
             ("Relay", "Sent."),
             ("Agent", "Added the stop-loss check and a test for it, and pushed. Want me to lower the default to two percent?"),
             ("You", "Yes"),

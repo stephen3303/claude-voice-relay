@@ -109,15 +109,16 @@ final class Relay {
         let body = text.replacingOccurrences(of: #"^task:\s*"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: " .!?"))
         let lower = body.lowercased()
-        if ["send it", "go ahead", "do it", "yes"].contains(lower) {
-            guard demoHeld != nil else { return "Nothing is waiting to send. Say the task again." }
+        if ["send", "send it", "go ahead", "do it", "yes"].contains(lower) {
+            guard demoHeld != nil else { return "There's nothing to send yet. What do you want to send?" }
             demoHeld = nil
             return "Sent. In demo mode no agent runs; with your PC connected, its answer is read to you here."
         }
-        if lower == "cancel" { demoHeld = nil; return "Cancelled. Nothing sent." }
+        if ["cancel", "no"].contains(lower) { demoHeld = nil; return "OK, I won't send it." }
+        if ["change it", "change"].contains(lower) { demoHeld = nil; return "OK. What do you want to send?" }
         if lower == "status" { return "Demo mode. Connect your PC's relay to hear your agents' status." }
         demoHeld = body
-        return "I heard: \(body). Say send it, or say it again."
+        return "Here's your message: \(body). Ready to send it?"
     }
 
     /// A Bridge Cloud call outside the voice protocol (push registration, ending a conversation),
