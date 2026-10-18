@@ -41,6 +41,7 @@ final class Store: ObservableObject {
             }
         }
         isPro = active
+        Conversation.noteProForNaturalVoice(active)
         latestTransaction = latest?.jws
         await reportIfNeeded()
         #endif

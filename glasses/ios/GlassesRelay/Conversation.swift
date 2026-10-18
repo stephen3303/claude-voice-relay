@@ -65,9 +65,28 @@ final class Conversation: NSObject, ObservableObject {
     }
     /// Natural voice: OpenAI text-to-speech from the PC relay (when it has a key), or Amazon Polly from Bridge Cloud
     /// (Bridge Pro). Off by default, so replies are spoken by the phone voice and no text goes out to be spoken.
+    /// Except for Bridge Pro users who already heard it on Bridge Cloud before the switch existed: theirs starts on.
     static var naturalVoice: Bool {
-        get { UserDefaults.standard.object(forKey: "naturalVoice") as? Bool ?? false }
+        get {
+            if let on = UserDefaults.standard.object(forKey: "naturalVoice") as? Bool { return on }
+            return UserDefaults.standard.bool(forKey: "naturalVoiceBefore") && Store.shared.isPro
+        }
         set { UserDefaults.standard.set(newValue, forKey: "naturalVoice") }
+    }
+    /// Once, at launch: notes whether this install was already on Bridge Cloud when the switch arrived. Whether it
+    /// had Pro then is noted by noteProForNaturalVoice, since StoreKit hasn't answered yet at launch.
+    static func noteNaturalVoiceBefore() {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "naturalVoiceBefore") == nil else { return }
+        d.set(d.object(forKey: "naturalVoice") == nil && d.string(forKey: "relayURL") == Relay.cloudAddress, forKey: "naturalVoiceBefore")
+    }
+    /// Once, on StoreKit's first answer after that: only an install that had Pro then was hearing the natural voice,
+    /// so one that buys Pro later starts with it off like everyone else.
+    static func noteProForNaturalVoice(_ pro: Bool) {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: "naturalVoiceProNoted") else { return }
+        d.set(true, forKey: "naturalVoiceProNoted")
+        if !pro { d.set(false, forKey: "naturalVoiceBefore") }
     }
     /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
     private var onHiFi = false
