@@ -23,6 +23,7 @@ struct AskBridge: AppIntent {
     var message: String
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        try await Store.shared.requirePro()
         let reply = try await Relay.shared.say(Conversation.forRelay(message))
         return .result(value: reply, dialog: "\(reply)")
     }

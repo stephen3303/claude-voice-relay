@@ -36,7 +36,11 @@ final class GlassesController: ObservableObject {
         Task { for await state in Wearables.shared.registrationStateStream() { registration = "\(state)" } }
         Task { await followDevices() }
         Task { await awaitRegistered(); await refreshCameraPermission() }
+        #if !APP_STORE
+        // "Hey Meta, start Bridge" is experimental in Meta's toolkit, so it's left out of the
+        // App Store build; that build starts from Siri, Shortcuts or the Action Button.
         await keepVoiceChannelOpen()
+        #endif
     }
 
     func register() async {
@@ -135,6 +139,7 @@ final class GlassesController: ObservableObject {
     /// Order per Meta's sample: session started → camera stream streaming → photo started → stream
     /// stopped so the shutter has the sensor to itself → capture.
     func capturePhoto() async throws -> Data {
+        try Store.shared.requirePro()
         // Launched from a Shortcut, the device list can arrive a beat after the app opens.
         for _ in 0..<10 where devices.isEmpty { try await Task.sleep(for: .milliseconds(500)) }
         guard let device = devices.first else { throw PhotoFailure.noGlasses }
@@ -153,9 +158,17 @@ final class GlassesController: ObservableObject {
             }
         }
 
+        #if APP_STORE
+        // App Store build: the standalone photo capability is experimental (Meta won't allow it in
+        // published apps yet), so take the still from the camera stream, which is not.
+        guard let camera = try session.addCamera(config: StreamConfiguration(
+            videoCodec: .hvc1, audioCodec: nil, resolution: .medium, frameRate: 7))
+        else { throw PhotoFailure.failed("The camera would not start.") }
+        #else
         guard let camera = try session.addCamera(config: StreamConfiguration(
             videoCodec: .hvc1, audioCodec: nil, resolution: .low, frameRate: 7))
         else { throw PhotoFailure.failed("The camera would not start.") }
+        #endif
 
         enum Event { case streaming, photoReady, photo(Data), error(String) }
         let (events, emit) = AsyncStream<Event>.makeStream()
@@ -164,19 +177,31 @@ final class GlassesController: ObservableObject {
         camera.stream.statePublisher.listen { state in
             if case .streaming = state { emit.yield(.streaming) }
         }.store(in: tokens)
+        camera.stream.errorPublisher.listen { error in emit.yield(.error(error.localizedDescription)) }.store(in: tokens)
+        #if APP_STORE
+        camera.stream.photoDataPublisher.listen { data in emit.yield(.photo(data.data)) }.store(in: tokens)
+        #else
         camera.photo.statePublisher.listen { state in
             if case .started = state { emit.yield(.photoReady) }
         }.store(in: tokens)
         camera.photo.photoDataPublisher.listen { data in emit.yield(.photo(data.imageData)) }.store(in: tokens)
         camera.photo.errorPublisher.listen { error in emit.yield(.error(error.description)) }.store(in: tokens)
+        #endif
 
         camera.stream.start()
         return try await withTimeout(30) {
             var asked = false
             for await event in events {
                 switch event {
-                case .streaming:
+                case .streaming where !asked:
+                    #if APP_STORE
+                    asked = true
+                    guard camera.stream.capturePhoto(format: .jpeg) else { throw PhotoFailure.failed("The camera was busy.") }
+                    #else
                     camera.photo.start()
+                    #endif
+                case .streaming:
+                    break
                 case .photoReady where !asked:
                     asked = true
                     camera.stream.stop()
@@ -185,7 +210,11 @@ final class GlassesController: ObservableObject {
                 case .photoReady:
                     break
                 case .photo(let jpeg):
+                    #if APP_STORE
+                    camera.stream.stop()
+                    #else
                     camera.photo.stop()
+                    #endif
                     return jpeg
                 case .error(let why):
                     throw PhotoFailure.failed(why)

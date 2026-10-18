@@ -1,4 +1,5 @@
 import SwiftUI
+import StoreKit
 
 struct ContentView: View {
     @EnvironmentObject var glasses: GlassesController
@@ -7,6 +8,8 @@ struct ContentView: View {
     @State private var token = Relay.shared.token
     @State private var testResult = ""
     @State private var photoResult = ""
+    @State private var showPaywall = false
+    @ObservedObject private var store = Store.shared
 
     var body: some View {
         NavigationStack {
@@ -43,8 +46,22 @@ struct ContentView: View {
                             catch { testResult = error.localizedDescription }
                         }
                     }
+                    Button("Use demo (no PC needed)") {
+                        url = Relay.demoAddress
+                        Relay.shared.baseURL = Relay.demoAddress
+                        testResult = "Demo on: replies are samples. Enter your PC's address to use your agents."
+                    }
                     if !testResult.isEmpty { Text(testResult).font(.footnote) }
                 } header: { Text("PC relay") }
+
+                Section("Bridge Pro") {
+                    LabeledContent("Status", value: store.isPro ? "Active" : "Not subscribed")
+                    if !store.isPro {
+                        Text("Photos from your glasses and the Ask and Look Shortcuts actions. Voice conversations stay free.")
+                            .font(.footnote)
+                        Button("Start free trial") { showPaywall = true }
+                    }
+                }
 
                 Section("Conversation — \(conversation.phase.rawValue)") {
                     if conversation.phase == .idle {
@@ -62,6 +79,23 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Bridge")
+            .sheet(isPresented: $showPaywall) {
+                SubscriptionStoreView(productIDs: Store.productIDs) {
+                    VStack(spacing: 8) {
+                        Text("Bridge Pro").font(.title.bold())
+                        Text("Ask Claude about what you see, hand photos to your agents, and use Bridge from Shortcuts.")
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                }
+                .storeButton(.visible, for: .restorePurchases)
+                .subscriptionStorePolicyDestination(url: Store.privacyURL, for: .privacyPolicy)
+                .subscriptionStorePolicyDestination(url: Store.termsURL, for: .termsOfService)
+                .onInAppPurchaseCompletion { _, _ in
+                    await store.refresh()
+                    if store.isPro { showPaywall = false }
+                }
+            }
         }
     }
 }

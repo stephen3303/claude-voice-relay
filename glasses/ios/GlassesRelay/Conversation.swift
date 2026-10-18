@@ -186,7 +186,9 @@ final class Conversation: NSObject, ObservableObject {
         Task {
             phase = .thinking
             let reply: String
-            if Self.wantsPhoto(text), let takePhoto {
+            if Self.wantsPhoto(text), !Store.shared.isPro {
+                reply = Store.Locked.needsPro.localizedDescription
+            } else if Self.wantsPhoto(text), let takePhoto {
                 await say("Taking a picture.")
                 phase = .thinking
                 do { reply = try await Relay.shared.photo(try await takePhoto(), said: text) }

@@ -1,5 +1,7 @@
 # Builds the glasses iPhone app on a GitHub-hosted Mac, so no Mac is needed.
-# Output: an unsigned GlassesRelay.ipa artifact. Sign and install it from Windows with Sideloadly.
+# personal: unsigned GlassesRelay.ipa artifact (with "Hey Meta"); sign and install it with Sideloadly.
+# appstore: compile check of the App Store flavour (no experimental Meta features, StoreKit Pro).
+#           Shipping it is glasses-appstore.yml.
 name: Glasses iOS build
 on:
   push:
@@ -10,6 +12,10 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [personal, appstore]
     defaults:
       run:
         working-directory: glasses/ios
@@ -29,18 +35,23 @@ jobs:
       - name: Build unsigned device app
         run: |
           set -o pipefail
+          FLAGS=()
+          if [ "${{ matrix.flavor }}" = appstore ]; then FLAGS+=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) APP_STORE'); fi
           xcodebuild -project GlassesRelay.xcodeproj -scheme GlassesRelay \
             -sdk iphoneos -configuration Release -derivedDataPath build \
             -skipPackagePluginValidation -skipMacroValidation \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | xcbeautify --renderer github-actions
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            "${FLAGS[@]}" build | xcbeautify --renderer github-actions
 
       - name: Package IPA
+        if: matrix.flavor == 'personal'
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/GlassesRelay.app Payload/
           zip -qry GlassesRelay.ipa Payload
 
       - uses: actions/upload-artifact@v4
+        if: matrix.flavor == 'personal'
         with:
           name: GlassesRelay-ipa
           path: glasses/ios/GlassesRelay.ipa

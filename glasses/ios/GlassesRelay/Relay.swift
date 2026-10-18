@@ -29,8 +29,14 @@ final class Relay {
         }
     }
 
+    /// "Use demo" sets this address: sample replies, no PC needed (for trying the app, and App Review).
+    static let demoAddress = "demo"
+    var isDemo: Bool { baseURL == Self.demoAddress }
+    private var demoHeld: String?
+
     /// One utterance through the read-back step. Returns the line to speak.
     func say(_ text: String) async throws -> String {
+        if isDemo { return demoReply(text) }
         var req = try request("voice/confirm", timeout: 30)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -41,6 +47,7 @@ final class Relay {
 
     /// A glasses photo plus what was said with it. Returns the line to speak.
     func photo(_ jpeg: Data, said: String) async throws -> String {
+        if isDemo { return "Demo mode: on your PC, Claude would look at this photo and answer. The photo was \(jpeg.count / 1024) kilobytes." }
         var req = try request("voice/photo", timeout: 150)
         req.httpMethod = "POST"
         req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
@@ -52,11 +59,31 @@ final class Relay {
 
     /// Messages after `after` (nil = from now). With `wait`, the relay holds the request up to 25s.
     func inbox(after: Int?, wait: Bool = true) async throws -> Inbox {
+        if isDemo {
+            if wait { try await Task.sleep(for: .seconds(25)) }
+            return Inbox(boot: 1, last: 0, messages: [])
+        }
         var query: [String] = []
         if let after { query.append("after=\(after)") }
         if !wait { query.append("wait=0") }
         let path = "voice/inbox" + (query.isEmpty ? "" : "?" + query.joined(separator: "&"))
         return try JSONDecoder().decode(Inbox.self, from: try await fetch(try request(path, timeout: 40)))
+    }
+
+    /// The same read-back flow as the relay, with canned answers.
+    private func demoReply(_ text: String) -> String {
+        let body = text.replacingOccurrences(of: #"^task:\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " .!?"))
+        let lower = body.lowercased()
+        if ["send it", "go ahead", "do it", "yes"].contains(lower) {
+            guard demoHeld != nil else { return "Nothing is waiting to send. Say the task again." }
+            demoHeld = nil
+            return "Sent. In demo mode no agent runs; with your PC connected, its answer is read to you here."
+        }
+        if lower == "cancel" { demoHeld = nil; return "Cancelled. Nothing sent." }
+        if lower == "status" { return "Demo mode. Connect your PC's relay to hear your agents' status." }
+        demoHeld = body
+        return "I heard: \(body). Say send it, or say it again."
     }
 
     private func request(_ path: String, timeout: TimeInterval) throws -> URLRequest {

@@ -23,8 +23,9 @@ targets:
       path: GlassesRelay/Info.plist
       properties:
         CFBundleDisplayName: Bridge          # must match the app name in the Wearables Developer Center
-        CFBundleShortVersionString: "0.1"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)   # CI sets this to the run number
+        ITSAppUsesNonExemptEncryption: false          # HTTPS only: exempt, so no export paperwork per upload
         UILaunchScreen: {}
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
@@ -32,8 +33,8 @@ targets:
             CFBundleURLSchemes: [glassesrelay]
         MWDAT:
           AppLinkURLScheme: "glassesrelay://"
-          MetaAppID: "0"                     # "0" = Developer Mode, no attestation
-          ClientToken: "0"
+          MetaAppID: $(META_APP_ID)          # "0" = Developer Mode, no attestation; the App Store build sets the real one
+          ClientToken: $(CLIENT_TOKEN)
           TeamID: $(DEVELOPMENT_TEAM)
           Analytics: { OptOut: true }
           CrashReporting: { OptOut: true }
@@ -54,3 +55,9 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        META_APP_ID: "0"
+        CLIENT_TOKEN: "0"
+        # The App Store flavour (no experimental Meta features, Pro sold via StoreKit) is selected with
+        # SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) APP_STORE" on the xcodebuild command line.
