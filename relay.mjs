@@ -548,7 +548,12 @@ else {
     if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
-    if (req.method !== 'POST' || !['/voice', '/voice/confirm', '/voice/send'].includes(req.url)) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
+    const SPEECH_ROUTES = ['/voice', '/voice/confirm', '/voice/send'];
+    if (req.method !== 'POST' || !SPEECH_ROUTES.includes(req.url)) {
+      log(`voice 404: ${req.method} ${req.url}`);
+      res.writeHead(404).end();
+      return;
+    }
     let body = '', tooBig = false;
     req.setEncoding('utf8'); // a character split across chunks stays whole
     req.on('data', (c) => {
