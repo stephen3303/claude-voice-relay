@@ -41,7 +41,9 @@ An unconfirmed task expires after 10 minutes.
 
 ## Ray-Ban Meta glasses ("Hey Meta, start Bridge")
 `glasses/ios` is an iPhone app, Bridge, built on GitHub Actions (`Glasses iOS build`) and sideloaded
-with Sideloadly. Meta AI opens it on "Hey Meta, start Bridge"; it listens through the glasses
+with Sideloadly. For a build to install, run `Glasses dev release` (Actions > Run workflow): it
+publishes `GlassesRelay.ipa` as a prerelease, and [glasses/SIDELOAD.md](glasses/SIDELOAD.md) has
+the install steps. Meta AI opens it on "Hey Meta, start Bridge"; it listens through the glasses
 microphone, sends what you say to `/voice/confirm` (the same read-back as the Shortcut), and speaks
 the answer. While the conversation is open it also long-polls `GET /voice/inbox` and reads out
 whatever your agents say. Say "in <project>, <task>" to start a task, "send it" to confirm,
