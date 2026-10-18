@@ -259,6 +259,8 @@ async function turn(a, prompt, photo) {
   const photoIn = photo && `/tmp/${path.basename(photo)}`;
   try {
     await ensureContainer(a);
+    // A request left by a turn that failed or was stopped belongs to that turn, not this one.
+    await run('docker', ['exec', a.container, 'rm', '-f', REQUEST_FILE]);
     if (photo) {
       await run('docker', ['cp', photo, `${a.container}:${photoIn}`]);
       fs.rmSync(photo, { force: true });
