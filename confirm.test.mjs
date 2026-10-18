@@ -229,3 +229,13 @@ test('dictation variants of cancel, no and change it', async () => {
   assert.equal(await held.say('no'), "OK, I won't send it.", 'no also drops a held project');
   assert.match(await held.say('fix it'), /^Here's your message: fix it\./, 'the project is gone');
 });
+
+test('a bare "go" never sends: it is easily misheard from "no"', async () => {
+  const { say, sent } = setup();
+  await say('task: in trading bot, fix typos');
+  assert.match(await say('task: go'), /\?$/);
+  assert.match(await say('send it'), /nothing to send/, 'the misheard reply was not taken as a yes');
+  await say('Here is a note');
+  assert.match(await say('go'), /^Here's your message: go\./);
+  assert.deepEqual(sent, []);
+});

@@ -108,6 +108,17 @@ test('cloud: every reply that waits is a question, and change it with no project
   assert.equal(started.length, 0);
 });
 
+test('cloud: a bare "go" never sends, and a held project is not re-targeted by "for ..."', async () => {
+  const { call, started } = setup();
+  const say = async (body) => (await call('POST', '/voice/confirm', { body })).body;
+  await say('task: in app, fix login');
+  assert.equal(await say('go'), "Here's your message: go. Ready to send it?");
+  assert.equal(started.length, 0);
+  await say('task: in app, fix login');
+  await say('change it');
+  assert.equal(await say('task: for the README, fix typos'), "Here's your message to app: for the README, fix typos. Ready to send it?");
+});
+
 test('users are kept apart', async () => {
   const { call } = setup();
   await call('POST', '/voice/confirm', { body: 'task: in app, fix login', user: 'a' });

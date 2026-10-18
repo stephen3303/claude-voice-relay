@@ -6,7 +6,7 @@
 import { userOf } from './auth.mjs';
 
 // "send it" and what dictation tends to make of it ("sent it", "send it please"), as in confirm.mjs.
-const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
+const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go ahead|do it|yes|yep|yeah)[\s.!]*$/i;
 const CANCEL = /^(?:cancel(?: it)?|never ?mind|forget it|stop)[\s.!]*$/i;
 const CHANGE = /^(?:(?:no|nope)[\s,]+)?(?:change(?: it| that| the message| the task)?|edit(?: it)?)[\s.!]*$/i;
 const NO = /^(?:no|nope|nah|don'?t(?: send(?: it)?)?)[\s.!]*$/i;
@@ -77,8 +77,9 @@ export function makeHandler(deps) {
     }
     const m = body.match(PROJECT);
     if (isTask || held?.project) {
-      // After "change it", the next words are the task for the project that was held.
-      const parsed = m ? { project: m[1].trim(), task: m[2].trim() } : held?.project ? { project: held.project, task: body } : null;
+      // After "change it", the next words are the task for the project that was held, whatever they
+      // start with: "for the README, fix typos" must not re-target it. "Cancel" lets you pick another.
+      const parsed = held?.project ? { project: held.project, task: body } : m ? { project: m[1].trim(), task: m[2].trim() } : null;
       if (!parsed) {
         await deps.store.setHeld(user, null);
         return `I can't tell which project "${body}" is for. Start with in and the project name. ${ASK}`;

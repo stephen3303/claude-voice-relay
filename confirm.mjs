@@ -5,8 +5,9 @@
 // is a question (contains "?"); the Shortcut's loop stops listening otherwise.
 // Dependencies are passed in, so tests run it without Docker or the projects folder.
 
-// "send it" and what dictation tends to make of it ("sent it", "send it please").
-export const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
+// "send it" and what dictation tends to make of it ("sent it", "send it please"). Not a bare "go":
+// it is easily misheard from "no", the other natural answer to "Ready to send it?".
+export const SEND = /^(?:(?:yes|yeah|ok(?:ay)?|please)[\s,]+)?(?:sen[dt](?: (?:it|that|this))?(?: (?:now|off|please))?|go ahead|do it|yes|yep|yeah)[\s.!]*$/i;
 export const CANCEL = /^(?:cancel(?: it)?|never ?mind|forget it|stop)[\s.!]*$/i;
 // Siri's "Change it": the next utterance replaces the held words. With nothing held it is a message.
 export const CHANGE = /^(?:(?:no|nope)[\s,]+)?(?:change(?: it| that| the message| the task)?|edit(?: it)?)[\s.!]*$/i;
