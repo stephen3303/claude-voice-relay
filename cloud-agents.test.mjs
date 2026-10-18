@@ -85,11 +85,12 @@ test('runCloud rejects when claude is not installed', async () => {
   await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x', timeoutMs: 1000 }), /ENOENT/);
 });
 
-function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true } = {}) {
+function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true, unsafe = false } = {}) {
   const runs = [], said = [], spoken = [], checked = [];
   const cloudTurn = makeCloudTurn({
     run: async (o) => { runs.push(o); if (reply instanceof Error) throw reply; return reply; },
     checkRepo: async (a) => { checked.push(a.name); return why; },
+    unsafe: () => unsafe,
     exists: () => exists, say: (t, o) => said.push(o?.spoken ?? t), speakResult: (a, r) => spoken.push(r.result),
   });
   return { cloudTurn, runs, said, spoken, checked };
@@ -166,4 +167,10 @@ test('a CLI failure after the session exists keeps its id, so a reply can reach 
   assert.equal(a.cloudId, 'cse_7');
   await assert.rejects(h.cloudTurn(a, 'Yes, go ahead.'), /stopped before/); // the harness keeps failing,
   assert.equal(h.runs[1].sessionId, 'cse_7'); // but the reply went to the same session
+});
+
+test('cloudTurn refuses the relay\'s own folder, before any check or session', async () => {
+  const h = turnHarness({ unsafe: true });
+  await assert.rejects(h.cloudTurn(newAgent(), 'x'), /holds the relay or its keys/);
+  assert.equal(h.checked.length + h.runs.length, 0);
 });

@@ -86,8 +86,9 @@ export function runCloud({ spawn, claudeBin = 'claude', env, cwd, sessionId, pro
 
 // One agent turn in cloud mode. `a` is the relay's agent record: a.cloudNew is set by a new task, and only
 // a new task starts a cloud session; a reply goes to a.cloudId. checkRepo(a) resolves to why the repo
-// can't have a cloud agent, or '' when it can.
-export function makeCloudTurn({ run = runCloud, checkRepo, exists, say, speakResult, log = () => {} }) {
+// can't have a cloud agent, or '' when it can. unsafe(folder) is true for the relay's own folder, the
+// folder holding its keys, or one above them: the CLI runs there on the host and may bundle it.
+export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, log = () => {} }) {
   return async function cloudTurn(a, prompt) {
     // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
     // failed after the session may have started) would start one with only that one line, next to an orphan
@@ -98,6 +99,7 @@ export function makeCloudTurn({ run = runCloud, checkRepo, exists, say, speakRes
     const fresh = a.cloudNew;
     a.cloudNew = false;
     if (!exists(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
+    if (unsafe(a.repoPath)) throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
     // Checked once per task, before the session exists: what it pushes later is held by the repo's rules.
     if (fresh) {
       const why = await checkRepo(a);

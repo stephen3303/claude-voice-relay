@@ -300,6 +300,7 @@ const cloudTurn = makeCloudTurn({
     await agentGitHub.release(creds).catch((e) => log(a.name, 'token revoke failed:', e.message));
     return '';
   },
+  unsafe: (folder) => unsafeMount(folder, PROTECTED),
   exists: fs.existsSync, say, speakResult, log,
 });
 
