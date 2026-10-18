@@ -41,6 +41,9 @@ final class Store: ObservableObject {
         #endif
     }
 
+    /// The one description of what Pro gives, used in the settings section and the subscription sheet.
+    static let summary = "Photos from your glasses, and the Ask and Look actions for Shortcuts. Voice conversations stay free."
+
     enum Locked: LocalizedError {
         case needsPro
         var errorDescription: String? { "That needs Bridge Pro. Open Bridge to start a free trial." }

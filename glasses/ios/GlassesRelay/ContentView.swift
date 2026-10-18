@@ -20,6 +20,7 @@ struct ContentView: View {
                     Button("Connect to Meta AI") { Task { await glasses.register() } }
                     if glasses.cameraAllowed {
                         Button("Test photo") {
+                            guard store.isPro else { photoResult = "Photos need Bridge Pro. See Bridge Pro below."; return }
                             photoResult = "Taking a picture…"
                             Task {
                                 do {
@@ -57,15 +58,18 @@ struct ContentView: View {
                 Section("Bridge Pro") {
                     LabeledContent("Status", value: store.isPro ? "Active" : "Not subscribed")
                     if !store.isPro {
-                        Text("Photos from your glasses and the Ask and Look Shortcuts actions. Voice conversations stay free.")
-                            .font(.footnote)
+                        Text(Store.summary).font(.footnote)
                         Button("Start free trial") { showPaywall = true }
                     }
                 }
 
                 Section("Conversation — \(conversation.phase.rawValue)") {
                     if conversation.phase == .idle {
+                        #if APP_STORE
+                        Button("Talk now") { conversation.begin(trigger: .button) }
+                        #else
                         Button("Talk now (without Hey Meta)") { conversation.begin(trigger: .button) }
+                        #endif
                     } else {
                         Button("End", role: .destructive) { conversation.end(saying: nil) }
                     }
@@ -83,12 +87,11 @@ struct ContentView: View {
                 SubscriptionStoreView(productIDs: Store.productIDs) {
                     VStack(spacing: 8) {
                         Text("Bridge Pro").font(.title.bold())
-                        Text("Ask Claude about what you see, hand photos to your agents, and use Bridge from Shortcuts.")
-                            .multilineTextAlignment(.center)
+                        Text(Store.summary).multilineTextAlignment(.center)
                     }
                     .padding()
                 }
-                .storeButton(.visible, for: .restorePurchases)
+                .storeButton(.visible, for: .restorePurchases, .cancellation)
                 .subscriptionStorePolicyDestination(url: Store.privacyURL, for: .privacyPolicy)
                 .subscriptionStorePolicyDestination(url: Store.termsURL, for: .termsOfService)
                 .onInAppPurchaseCompletion { _, _ in
