@@ -44,6 +44,7 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
   BridgeWeb (allowed to fail while AWS has CloudFront blocked). AWS access is the
   `BridgeGitHubDeploy` role via GitHub OIDC; there are no stored AWS keys.
 - `pages.yml` — the website on GitHub Pages.
+- `impactor-check.yml` — builds Impactor (the sideloader) and checks Apple accepts its sign-in; manual, and on edits to the workflow.
 
 ## Working with Stephen
 - Be direct and say why. Keep going until he says stop. Keep replies short; if he's on voice,
