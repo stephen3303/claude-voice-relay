@@ -10,7 +10,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
-import { makeGitHubApp, parseRemote } from './github-app.mjs';
+import { makeGitHubApp, makeAgentGitHub } from './github-app.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -109,46 +109,13 @@ if (cfg.githubAppId && cfg.githubAppKeyFile) {
 }
 if (!ghApp && !cfg.agentGhToken) log('WARNING: no GitHub access for agents (GITHUB_APP_ID or AGENT_GH_TOKEN); they can commit but not push.');
 
-// Agents can rewrite their repo's .git/config, so each folder's GitHub repo is pinned the first time
-// it's read (before any agent has run there) and kept across agents and restarts: a changed origin
-// must not get a token for another repo the App is installed on.
-// A pins file that exists but can't be read stops all tokens rather than being rebuilt from live config.
-const PINS_FILE = path.join(ROOT, 'github-pins.json');
-let pins = {};
-try { pins = JSON.parse(fs.readFileSync(PINS_FILE, 'utf8')); }
-catch (e) { if (e.code !== 'ENOENT') { pins = null; log(`WARNING: ${PINS_FILE} is unreadable (${e.message}); agents get no GitHub token until it's fixed or deleted.`); } }
-function pinRepo(a, slug) {
-  if (!pins) return null;
-  const key = path.resolve(a.repoPath).toLowerCase();
-  if (!pins[key]) {
-    pins[key] = slug;
-    fs.writeFileSync(PINS_FILE, JSON.stringify(pins, null, 2));
-    // An agent from before pinning may already have changed origin, so this pin is only as good as that config.
-    log(a.ranBeforePins ? `WARNING: pinned ${a.repoPath} to ${slug} after an agent already ran there; check it's right, or fix it in github-pins.json.`
-      : `Pinned ${a.repoPath} to GitHub repo ${slug}.`);
-  }
-  return pins[key];
-}
+const agentGitHub = makeAgentGitHub({
+  ghApp, fallbackToken: cfg.agentGhToken, hostGit, log, pinsFile: path.join(ROOT, 'github-pins.json'),
+  getRemote: (repoPath) => hostValue('git', ['-C', repoPath, 'remote', 'get-url', 'origin']),
+});
 
 // Passed to each turn with "docker exec -e", never baked into the container, so a token only lives as long as a turn needs it.
 const GH_ENV = ['GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'];
-async function githubEnv(a) {
-  let token = cfg.agentGhToken, who = hostGit;
-  if (ghApp) {
-    const remote = parseRemote(await hostValue('git', ['-C', a.repoPath, 'remote', 'get-url', 'origin']));
-    const slug = remote && `${remote.owner}/${remote.repo}`.toLowerCase();
-    const pinned = slug && pinRepo(a, slug);
-    if (!slug) log(a.name, 'has no GitHub origin remote, so no GitHub token.');
-    else if (pinned && slug !== pinned) log(a.name, `origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in github-pins.json if that was you.`);
-    token = slug && slug === pinned ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
-    who = (await ghApp.identity()) || hostGit;
-  }
-  return {
-    GH_TOKEN: token || '',
-    GIT_AUTHOR_NAME: who.name, GIT_COMMITTER_NAME: who.name,
-    GIT_AUTHOR_EMAIL: who.email, GIT_COMMITTER_EMAIL: who.email,
-  };
-}
 
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
@@ -159,7 +126,7 @@ function save() {
 }
 function load() {
   try {
-    for (const a of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))) agents.set(a.name, { ...a, busy: false, queue: [], ranBeforePins: !pins?.[path.resolve(a.repoPath).toLowerCase()] });
+    for (const a of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))) agents.set(a.name, { ...a, busy: false, queue: [], ranBeforePins: !agentGitHub.isPinned(a.repoPath) });
   } catch { /* first run */ }
 }
 
@@ -257,7 +224,7 @@ async function turn(a, prompt, photo) {
       await run('docker', ['cp', photo, `${a.container}:${photoIn}`]);
       fs.rmSync(photo, { force: true });
     }
-    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt, await githubEnv(a));
+    const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt, await agentGitHub.env(a));
     a.sessionId = r.session_id || a.sessionId;
     fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
     const line = spoken(r.result);

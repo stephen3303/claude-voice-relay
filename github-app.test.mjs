@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { parseRemote, appJwt, makeGitHubApp } from './github-app.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { parseRemote, appJwt, makeGitHubApp, makeAgentGitHub } from './github-app.mjs';
 
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
 const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
@@ -15,6 +18,11 @@ test('parseRemote reads the GitHub remotes git uses', () => {
   assert.deepEqual(parseRemote('https://x-access-token@github.com/stephen3303/claude-voice-relay.git'), want);
   assert.equal(parseRemote('https://gitlab.com/a/b.git'), null);
   assert.equal(parseRemote(''), null);
+  // Nothing that could steer the API path, and no look-alike hosts.
+  assert.equal(parseRemote('https://github.com/../app'), null);
+  assert.equal(parseRemote('https://github.com/o/r?x=1'), null);
+  assert.equal(parseRemote('https://github.com/o/r#x'), null);
+  assert.equal(parseRemote('https://evilgithub.com/o/r.git'), null);
 });
 
 test('appJwt is an RS256 JWT for the App, valid for under ten minutes', () => {
@@ -74,4 +82,67 @@ test('identity is the App bot user, with its noreply address', async () => {
   assert.equal(calls.find((c) => c.url.includes('/users/')).headers.Authorization, undefined);
   await app.identity();
   assert.equal(calls.length, 2); // looked up once
+});
+
+function agentGitHub({ remote = 'https://github.com/stephen3303/claude-voice-relay.git', pinsJson, ghApp, fallbackToken } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pins-'));
+  const pinsFile = path.join(dir, 'github-pins.json');
+  if (pinsJson !== undefined) fs.writeFileSync(pinsFile, pinsJson);
+  const minted = [];
+  const app = ghApp === null ? null : {
+    tokenFor: async (owner, repo) => { minted.push(`${owner}/${repo}`); return 'ghs_x'; },
+    identity: async () => ({ name: 'bridge-agents[bot]', email: '9+bridge-agents[bot]@users.noreply.github.com' }),
+  };
+  const logs = [];
+  const state = { remote };
+  const gh = makeAgentGitHub({
+    ghApp: app, fallbackToken, hostGit: { name: 'Stephen', email: 's@example.com' },
+    getRemote: async () => state.remote, pinsFile, log: (m) => logs.push(m),
+  });
+  return { gh, minted, logs, state, pinsFile };
+}
+const agent = { name: 'voice relay', repoPath: '/p/claude-voice-relay' };
+
+test('an agent gets a token for its pinned repo and commits as the App bot', async () => {
+  const { gh, minted, pinsFile } = agentGitHub();
+  const env = await gh.env(agent);
+  assert.equal(env.GH_TOKEN, 'ghs_x');
+  assert.equal(env.GIT_AUTHOR_NAME, 'bridge-agents[bot]');
+  assert.deepEqual(minted, ['stephen3303/claude-voice-relay']);
+  assert.ok(gh.isPinned(agent.repoPath));
+  assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(pinsFile, 'utf8'))), ['stephen3303/claude-voice-relay']);
+});
+
+test('a changed origin gets no token and is not re-pinned', async () => {
+  const { gh, minted, logs, state } = agentGitHub();
+  await gh.env(agent);
+  state.remote = 'https://github.com/stephen3303/other-repo.git';
+  const env = await gh.env(agent);
+  assert.equal(env.GH_TOKEN, '');
+  assert.deepEqual(minted, ['stephen3303/claude-voice-relay']);
+  assert.match(logs.at(-1), /origin changed/);
+});
+
+test('no GitHub origin, or an unreadable pins file, gets no token', async () => {
+  const none = agentGitHub({ remote: '' });
+  assert.equal((await none.gh.env(agent)).GH_TOKEN, '');
+  assert.deepEqual(none.minted, []);
+  const broken = agentGitHub({ pinsJson: '{not json' });
+  assert.equal((await broken.gh.env(agent)).GH_TOKEN, '');
+  assert.deepEqual(broken.minted, []);
+  assert.equal(fs.readFileSync(broken.pinsFile, 'utf8'), '{not json'); // not rebuilt from live config
+});
+
+test('a pin made for an agent that ran before pinning is a warning', async () => {
+  const { gh, logs } = agentGitHub();
+  await gh.env({ ...agent, ranBeforePins: true });
+  assert.match(logs[0], /^WARNING: pinned/);
+});
+
+test('without the App, AGENT_GH_TOKEN and the host git identity are used', async () => {
+  const { gh } = agentGitHub({ ghApp: null, fallbackToken: 'github_pat_x' });
+  const env = await gh.env(agent);
+  assert.equal(env.GH_TOKEN, 'github_pat_x');
+  assert.equal(env.GIT_COMMITTER_EMAIL, 's@example.com');
+  assert.equal((await agentGitHub({ ghApp: null }).gh.env(agent)).GH_TOKEN, '');
 });

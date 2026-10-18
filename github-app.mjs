@@ -3,16 +3,20 @@
 // hour and covers only that agent's repository, with only the App's permissions (contents and pull
 // requests; no workflows, secrets or admin). A token that leaks from a container is soon useless.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const API = 'https://api.github.com';
 // Reuse a token only while it has nearly its full hour left, so every turn gets about 55 minutes.
 // A turn that runs longer than that gets a 401 on its next push.
 const REUSE_MS = 55 * 60_000;
 
-// owner/repo from a GitHub remote: https://github.com/o/r(.git), git@github.com:o/r.git, ssh://git@github.com/o/r
+// owner/repo from a GitHub remote: https://github.com/o/r(.git), git@github.com:o/r.git, ssh://git@github.com/o/r.
+// Only GitHub's own name characters, so a crafted remote can't steer the App's API calls to another path.
 export function parseRemote(url) {
-  const m = String(url || '').trim().match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i);
-  return m ? { owner: m[1], repo: m[2] } : null;
+  const m = String(url || '').trim().match(/(?:^|[/@])github\.com[:/]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i);
+  if (!m || [m[1], m[2]].some((s) => s === '.' || s === '..')) return null;
+  return { owner: m[1], repo: m[2] };
 }
 
 const b64url = (b) => Buffer.from(b).toString('base64url');
@@ -55,7 +59,7 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
     const hit = cache.get(id);
     if (hit && hit.expires - now() > REUSE_MS) return hit.token;
     try {
-      const inst = await call('GET', `/repos/${owner}/${repo}/installation`);
+      const inst = await call('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/installation`);
       const t = await call('POST', `/app/installations/${inst.id}/access_tokens`, { body: { repositories: [repo] } });
       cache.set(id, { token: t.token, expires: Date.parse(t.expires_at) });
       return t.token;
@@ -79,4 +83,53 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
   }
 
   return { tokenFor, identity };
+}
+
+// What each agent turn gets: GH_TOKEN plus the git identity to commit as. Agents never get the owner's
+// own login: with the App, a token for the agent's pinned repo only; else `fallbackToken` (AGENT_GH_TOKEN).
+//
+// Agents can rewrite their repo's .git/config, so each folder's GitHub repo is pinned in `pinsFile` the
+// first time it's read (before any agent has run there) and kept across agents and restarts: a changed
+// origin must not get a token for another repo the App is installed on. A pins file that exists but
+// can't be read stops all tokens rather than being rebuilt from live config.
+export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote, pinsFile, log = () => {} }) {
+  let pins = {};
+  try { pins = JSON.parse(fs.readFileSync(pinsFile, 'utf8')); }
+  catch (e) {
+    if (e.code !== 'ENOENT') { pins = null; log(`WARNING: ${pinsFile} is unreadable (${e.message}); agents get no GitHub token until it's fixed or deleted.`); }
+  }
+  const keyOf = (repoPath) => path.resolve(repoPath).toLowerCase();
+
+  function pin(a, slug) {
+    if (!pins) return null;
+    const key = keyOf(a.repoPath);
+    if (!pins[key]) {
+      pins[key] = slug;
+      fs.writeFileSync(pinsFile, JSON.stringify(pins, null, 2));
+      // An agent from before pinning may already have changed origin, so this pin is only as good as that config.
+      log(a.ranBeforePins ? `WARNING: pinned ${a.repoPath} to ${slug} after an agent already ran there; check it's right, or fix it in ${path.basename(pinsFile)}.`
+        : `Pinned ${a.repoPath} to GitHub repo ${slug}.`);
+    }
+    return pins[key];
+  }
+
+  async function env(a) {
+    let token = fallbackToken, who = hostGit;
+    if (ghApp) {
+      const remote = parseRemote(await getRemote(a.repoPath));
+      const slug = remote && `${remote.owner}/${remote.repo}`.toLowerCase();
+      const pinned = slug && pin(a, slug);
+      if (!slug) log(`${a.name} has no GitHub origin remote, so no GitHub token.`);
+      else if (pinned && slug !== pinned) log(`${a.name}: origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in ${path.basename(pinsFile)} if that was you.`);
+      token = slug && slug === pinned ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
+      who = (await ghApp.identity()) || hostGit;
+    }
+    return {
+      GH_TOKEN: token || '',
+      GIT_AUTHOR_NAME: who.name, GIT_COMMITTER_NAME: who.name,
+      GIT_AUTHOR_EMAIL: who.email, GIT_COMMITTER_EMAIL: who.email,
+    };
+  }
+
+  return { env, isPinned: (repoPath) => !!pins?.[keyOf(repoPath)] };
 }
