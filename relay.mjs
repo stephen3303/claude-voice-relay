@@ -107,14 +107,29 @@ if (cfg.githubAppId && cfg.githubAppKeyFile) {
 }
 if (!ghApp && !cfg.agentGhToken) log('WARNING: no GitHub access for agents (GITHUB_APP_ID or AGENT_GH_TOKEN); they can commit but not push.');
 
+// Agents can rewrite their repo's .git/config, so each folder's GitHub repo is pinned the first time
+// it's read (before any agent has run there) and kept across agents and restarts: a changed origin
+// must not get a token for another repo the App is installed on.
+const PINS_FILE = path.join(ROOT, 'github-pins.json');
+let pins = {};
+try { pins = JSON.parse(fs.readFileSync(PINS_FILE, 'utf8')); } catch { /* first run */ }
+function pinRepo(repoPath, slug) {
+  const key = path.resolve(repoPath).toLowerCase();
+  if (!pins[key]) { pins[key] = slug; fs.writeFileSync(PINS_FILE, JSON.stringify(pins, null, 2)); }
+  return pins[key];
+}
+
 // Passed to each turn with "docker exec -e", never baked into the container, so a token only lives as long as a turn needs it.
 const GH_ENV = ['GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL'];
 async function githubEnv(a) {
   let token = cfg.agentGhToken, who = hostGit;
   if (ghApp) {
     const remote = parseRemote(await hostValue('git', ['-C', a.repoPath, 'remote', 'get-url', 'origin']));
-    if (!remote) log(a.name, 'has no GitHub origin remote, so no GitHub token.');
-    token = remote ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
+    const slug = remote && `${remote.owner}/${remote.repo}`.toLowerCase();
+    const pinned = slug && pinRepo(a.repoPath, slug);
+    if (!slug) log(a.name, 'has no GitHub origin remote, so no GitHub token.');
+    else if (slug !== pinned) log(a.name, `origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in github-pins.json if that was you.`);
+    token = slug && slug === pinned ? await ghApp.tokenFor(remote.owner, remote.repo) : '';
     who = (await ghApp.identity()) || hostGit;
   }
   return {

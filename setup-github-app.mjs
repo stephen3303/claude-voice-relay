@@ -38,7 +38,7 @@ const page = (body) => `<!doctype html><meta charset="utf-8"><title>Bridge agent
 function setEnv(text, key, value) {
   const line = `${key}=${value}`;
   const re = new RegExp(`^${key}=.*$`, 'm');
-  return re.test(text) ? text.replace(re, line) : `${text}${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`;
+  return re.test(text) ? text.replace(re, () => line) : `${text}${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`;
 }
 
 const server = http.createServer(async (req, res) => {

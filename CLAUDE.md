@@ -2,7 +2,7 @@
 
 Talk to Claude Code agents hands-free: "Hey Meta, start Bridge" on Ray-Ban Meta glasses (or Siri,
 Shortcuts), hear the answers out loud. Owner: Stephen (Windows 11 PC "powerspec", iPhone,
-no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`, `outbox.json` or logs.
+no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`, `outbox.json`, `github-pins.json`, `*.pem` or logs.
 
 ## Layout
 - `relay.mjs` — the PC relay (Node, no deps). Docker agents (one container per repo,
