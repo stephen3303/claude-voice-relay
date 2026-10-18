@@ -283,6 +283,11 @@ async function startTask(body) {
   let a = agents.get(name);
   if (a?.busy) return say(`${name} is still working. Say stop ${name} first, or wait for it.`);
   if (!a) { a = { name, repoPath: parsed.repo, container: `claude-agent-${norm(name)}`, queue: [] }; agents.set(name, a); }
+  else if (path.resolve(a.repoPath) !== path.resolve(parsed.repo)) {
+    // The name now leads to another folder (aliases.json changed): its container mounts the old one.
+    await run('docker', ['rm', '-f', a.container]).catch(() => {});
+    a.repoPath = parsed.repo;
+  }
   a.sessionId = null; // a new task gets fresh context
   say(`Starting ${name}.`);
   turn(a, parsed.task);
