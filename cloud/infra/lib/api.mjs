@@ -110,8 +110,10 @@ export class ApiStack extends Stack {
       ['DELETE', '/api/push/register', voiceIntegration, sessions],
       ['POST', '/api/push/test', voiceIntegration, sessions],
     ];
+    const throttled = [];   // routes the stage's route settings name, below
     for (const [method, path, integration, authorizer] of routes) {
-      api.addRoutes({ path, methods: [apigw.HttpMethod[method]], integration, ...(authorizer ? { authorizer } : {}) });
+      const added = api.addRoutes({ path, methods: [apigw.HttpMethod[method]], integration, ...(authorizer ? { authorizer } : {}) });
+      if (path === '/api/voice/tts') throttled.push(...added);
     }
 
     // Claude connector (cloud/api/connector.mjs): the MCP server and the OAuth server Claude signs in
@@ -143,6 +145,7 @@ export class ApiStack extends Stack {
       [['POST'], '/api/oauth/token'],
     ];
     const stage = api.defaultStage.node.defaultChild;
+    for (const route of throttled) stage.node.addDependency(route);
     for (const [methods, path] of connectorRoutes) {
       for (const route of api.addRoutes({ path, methods: methods.map((m) => apigw.HttpMethod[m]), integration: connectorIntegration })) {
         stage.node.addDependency(route);   // route settings below name these routes
@@ -153,6 +156,9 @@ export class ApiStack extends Stack {
     stage.routeSettings = {
       'POST /api/oauth/register': { ThrottlingRateLimit: 1, ThrottlingBurstLimit: 5 },
       'GET /api/oauth/authorize': { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 20 },
+      // Every call runs Polly (about $0.09 for the longest line): cap what a loop can spend. The app speaks one
+      // line at a time, and a throttled call just falls back to the phone's voice.
+      'POST /api/voice/tts': { ThrottlingRateLimit: 2, ThrottlingBurstLimit: 5 },
     };
     new CfnOutput(this, 'ConnectorUrl', { value: `${api.apiEndpoint}/api/mcp` });
     new CfnOutput(this, 'AppleReturnUrl', { value: `${api.apiEndpoint}/api/oauth/apple` });
