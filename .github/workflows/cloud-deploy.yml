@@ -32,6 +32,9 @@ jobs:
       - name: API tests
         run: node --test ../api/voice.test.mjs ../api/auth.test.mjs
 
+      - name: Claude connector tests
+        run: node --test ../api/connector.test.mjs
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
@@ -45,9 +48,6 @@ jobs:
             --inference-config maxTokens=5 --query 'output.message.content[0].text' --output text
 
       - run: npm ci
-
-      - name: Claude connector tests
-        run: node --test ../api/connector.test.mjs
 
       - name: Deploy the API
         run: npx cdk deploy BridgeApi --require-approval never --outputs-file outputs.json

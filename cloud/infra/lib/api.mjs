@@ -129,9 +129,17 @@ export class ApiStack extends Stack {
       [['POST'], '/api/oauth/apple'],
       [['POST'], '/api/oauth/token'],
     ];
+    const stage = api.defaultStage.node.defaultChild;
     for (const [methods, path] of connectorRoutes) {
-      api.addRoutes({ path, methods: methods.map((m) => apigw.HttpMethod[m]), integration: connectorIntegration });
+      for (const route of api.addRoutes({ path, methods: methods.map((m) => apigw.HttpMethod[m]), integration: connectorIntegration })) {
+        stage.node.addDependency(route);   // route settings below name these routes
+      }
     }
+    // Registration and sign-in need no account, and each writes a row: keep a loop from filling the table.
+    stage.routeSettings = {
+      'POST /api/oauth/register': { throttlingRateLimit: 1, throttlingBurstLimit: 5 },
+      'GET /api/oauth/authorize': { throttlingRateLimit: 5, throttlingBurstLimit: 20 },
+    };
     new CfnOutput(this, 'ConnectorUrl', { value: `${api.apiEndpoint}/api/mcp` });
     new CfnOutput(this, 'AppleReturnUrl', { value: `${api.apiEndpoint}/api/oauth/apple` });
 

@@ -24,7 +24,7 @@ function appleToken(claims) {
 
 function setup() {
   let clock = NOW;
-  const clients = new Map(), grants = new Map(), started = [], inbox = [];
+  const clients = new Map(), grants = new Map(), refresh = new Map(), started = [], inbox = [];
   const keys = {
     appleKeys: async () => ({ keys: [{ ...apple.publicKey.export({ format: 'jwk' }), kid: 'apple-1' }] }),
     sign: async (bytes) => createSign('RSA-SHA256').update(bytes).sign(bridge.privateKey),
@@ -33,13 +33,26 @@ function setup() {
   const connector = makeConnector({
     issuer: ISSUER, servicesId: SERVICES_ID, ...keys, now: () => clock,
     store: {
-      saveClient: async (id, c) => clients.set(id, structuredClone(c)),
-      getClient: async (id) => structuredClone(clients.get(id) ?? null),
+      saveClient: async (id, c, expires) => clients.set(id, { c: structuredClone(c), expires }),
+      getClient: async (id) => { const e = clients.get(id); return e && e.expires > clock / 1000 ? structuredClone(e.c) : null; },
       saveGrant: async (k, data, expires) => grants.set(k, { data, expires }),
       takeGrant: async (k) => { const g = grants.get(k); grants.delete(k); return g && g.expires > clock / 1000 ? g.data : null; },
+      // Like DynamoDB's rows under USER#<sub>, sk RT#<hash>.
+      saveRefresh: async (u, h, data, expires) => refresh.set(`${u}|${h}`, { data, expires }),
+      useRefresh: async (u, h) => {
+        const r = refresh.get(`${u}|${h}`);
+        if (!r) return null;
+        if (r.used) return { data: r.data, reused: true };
+        r.used = true;
+        return r.expires > clock / 1000 ? { data: r.data, reused: false } : null;
+      },
+      revokeFamily: async (u, family) => {
+        for (const [k, r] of refresh) if (k.startsWith(`${u}|`) && r.data.family === family) refresh.delete(k);
+      },
     },
     startTask: async (user, t) => { started.push({ user, ...t }); return 'Sent.'; },
-    messagesAfter: async (user, after) => inbox.filter((m) => m.user === user && m.id > after),
+    messagesAfter: async (user, after) => inbox.filter((m) => m.user === user && m.id > after).slice(0, 20),
+    latestMessages: async (user, n) => inbox.filter((m) => m.user === user).slice(-n),
   });
   const app = makeAuth({ issuer: ISSUER, audience: BUNDLE_ID, ...keys, now: () => clock, deleteUser: async () => {} });
 
@@ -78,7 +91,13 @@ function setup() {
   }
   const mcp = (token, body) => call('POST', '/api/mcp', { body, headers: token ? { authorization: `Bearer ${token}` } : {} });
 
-  return { call, register, signIn, exchange, connect, mcp, started, inbox, app, grants, advance: (ms) => (clock += ms) };
+  const refreshWith = (client_id, token) => call('POST', '/api/oauth/token', {
+    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: token, client_id }).toString() });
+  // What deleteUser does to the connector's rows: everything under USER#<sub> goes.
+  const deleteAccount = (sub) => { for (const k of refresh.keys()) if (k.startsWith(`${sub}|`)) refresh.delete(k); };
+
+  return { call, register, signIn, exchange, connect, mcp, refreshWith, deleteAccount, started, inbox, app, grants, clients,
+    advance: (ms) => (clock += ms) };
 }
 
 test('metadata points Claude at the sign-in', async () => {
@@ -245,19 +264,70 @@ test('Apple tokens with the wrong audience, nonce or signature are refused; sign
 });
 
 test('refresh tokens give new tokens to their own client only', async () => {
-  const { connect, register, call, mcp, advance } = setup();
+  const { connect, register, call, mcp, refreshWith, advance } = setup();
   const { client, refresh_token, access_token } = await connect();
-  const refresh = (client_id, token) => call('POST', '/api/oauth/token', {
-    body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: token, client_id }).toString() });
   advance(2 * 3600_000);
   assert.equal((await mcp(access_token, { jsonrpc: '2.0', id: 1, method: 'ping' })).statusCode, 401, 'access token expired');
-  const r = await refresh(client.client_id, refresh_token);
+  const r = await refreshWith(client.client_id, refresh_token);
   assert.equal(r.statusCode, 200);
   assert.equal(r.headers['cache-control'], 'no-store');
-  assert.equal((await mcp(JSON.parse(r.body).access_token, { jsonrpc: '2.0', id: 1, method: 'ping' })).statusCode, 200);
-  assert.equal((await refresh((await register()).client_id, refresh_token)).statusCode, 400);
-  assert.equal((await refresh(client.client_id, access_token)).statusCode, 400, 'an access token is not a refresh token');
+  const next = JSON.parse(r.body);
+  assert.notEqual(next.refresh_token, refresh_token, 'rotated');
+  assert.equal((await mcp(next.access_token, { jsonrpc: '2.0', id: 1, method: 'ping' })).statusCode, 200);
+  assert.equal((await refreshWith((await register()).client_id, next.refresh_token)).statusCode, 400, 'another client');
+  assert.equal((await refreshWith(client.client_id, access_token)).statusCode, 400, 'an access token is not a refresh token');
+  assert.equal((await refreshWith(client.client_id, 'junk')).statusCode, 400);
   assert.equal((await call('POST', '/api/oauth/token', { body: 'grant_type=password&client_id=' + client.client_id })).statusCode, 400);
+});
+
+test('a refresh token works once; using an old one again revokes its whole sign-in', async () => {
+  const { connect, refreshWith } = setup();
+  const { client, refresh_token: first } = await connect();
+  const second = JSON.parse((await refreshWith(client.client_id, first)).body).refresh_token;
+  assert.equal((await refreshWith(client.client_id, first)).statusCode, 400, 'reuse refused');
+  assert.equal((await refreshWith(client.client_id, second)).statusCode, 400, 'and the newer one in its family is revoked');
+});
+
+test('a sign-in lasts 30 days however often it refreshes', async () => {
+  const { connect, refreshWith, advance } = setup();
+  let { client, refresh_token } = await connect();
+  for (let day = 0; day < 3; day++) {
+    advance(9 * 86400_000);
+    const r = await refreshWith(client.client_id, refresh_token);
+    assert.equal(r.statusCode, 200, `day ${(day + 1) * 9}`);
+    refresh_token = JSON.parse(r.body).refresh_token;
+  }
+  advance(4 * 86400_000);   // day 31
+  assert.equal((await refreshWith(client.client_id, refresh_token)).statusCode, 400);
+});
+
+test('deleting the account disconnects Claude', async () => {
+  const { connect, refreshWith, deleteAccount } = setup();
+  const { client, refresh_token } = await connect();
+  deleteAccount('apple.001.abc');
+  assert.equal((await refreshWith(client.client_id, refresh_token)).statusCode, 400);
+});
+
+test('read_inbox with no cursor gives the newest messages', async () => {
+  const { connect, mcp, inbox } = setup();
+  const { access_token } = await connect();
+  for (let id = 1; id <= 50; id++) inbox.push({ user: 'apple.001.abc', id, text: `m${id}`, at: NOW });
+  const r = JSON.parse((await mcp(access_token, { jsonrpc: '2.0', id: 1, method: 'tools/call',
+    params: { name: 'read_inbox', arguments: null } })).body);
+  const ids = r.result.structuredContent.messages.map((m) => m.id);
+  assert.deepEqual([ids.length, ids[0], ids.at(-1), r.result.structuredContent.last], [20, 31, 50, 50]);
+});
+
+test('registered clients are forgotten after 90 days unused, and kept while used', async () => {
+  const { connect, register, refreshWith, signIn, advance } = setup();
+  const { client, refresh_token } = await connect();
+  advance(29 * 86400_000);
+  assert.equal((await refreshWith(client.client_id, refresh_token)).statusCode, 200);
+  advance(80 * 86400_000);
+  await signIn(client);   // 109 days after registering, but used 80 days ago
+  const idle = await register();
+  advance(91 * 86400_000);
+  await assert.rejects(signIn(idle), 'an idle client is gone');
 });
 
 test('a client registered with a secret must send it', async () => {
@@ -274,6 +344,9 @@ test('a client registered with a secret must send it', async () => {
     body: new URLSearchParams({ grant_type: 'authorization_code', code: code3, redirect_uri: CALLBACK, code_verifier: 'v'.repeat(50) }).toString() });
   assert.equal(r.statusCode, 200, 'client_secret_basic');
   assert.equal((await exchange({ client_id: 'nope' }, 'x')).statusCode, 401, 'unknown client');
+  const bad = await call('POST', '/api/oauth/token', { headers: { authorization: `Basic ${Buffer.from('abc:%E0%A4%A').toString('base64')}` },
+    body: 'grant_type=authorization_code&code=x' });
+  assert.equal(bad.statusCode, 401, 'malformed Basic credentials');
 });
 
 test('connector tokens and app sessions do not stand in for each other', async () => {

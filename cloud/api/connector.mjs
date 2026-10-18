@@ -7,7 +7,9 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { APPLE_ISSUER, KID, signJwt, verifyJwt } from './auth.mjs';
 
 export const ACCESS_S = 3600;            // access tokens: an hour, then Claude refreshes
-export const REFRESH_S = 30 * 86400;     // refresh tokens: 30 days, like app sessions
+export const REFRESH_S = 30 * 86400;     // a sign-in lasts 30 days, like app sessions, however often it refreshes
+export const CLIENT_S = 90 * 86400;      // a registered client unused this long is forgotten
+export const INBOX_LATEST = 20;
 const CODE_S = 5 * 60;                   // authorization codes
 const LOGIN_S = 10 * 60;                 // the Sign in with Apple round trip
 const BODY_MAX = 1024 * 1024;
@@ -76,26 +78,33 @@ const sameSecret = (a, b) => a.length === b.length && timingSafeEqual(a, b);
  * deps.servicesId: the Sign in with Apple Services ID (the web client; Apple tokens' aud)
  * deps.publicUrl: the address Claude uses, e.g. https://abc.execute-api.us-east-1.amazonaws.com (default: the request's host)
  * deps.sign(bytes), deps.publicJwk(), deps.appleKeys(): as in auth.mjs
- * deps.store: { saveClient(id, client), getClient(id), saveGrant(key, data, expiresS), takeGrant(key) }
- *   takeGrant reads and deletes in one step, so a code or sign-in is used once.
- * deps.startTask(user, { project, task }) -> spoken line, deps.messagesAfter(user, id) -> [{ id, text, at }]
+ * deps.store: { saveClient(id, client, expiresS), getClient(id), saveGrant(key, data, expiresS), takeGrant(key),
+ *   saveRefresh(user, hash, data, expiresS), useRefresh(user, hash) -> { data, reused } | null, revokeFamily(user, family) }
+ *   takeGrant reads and deletes in one step, so a code or sign-in is used once. useRefresh marks a refresh
+ *   token used in one step and says whether it already was. Refresh tokens are kept under the user's
+ *   own records, so deleting the account revokes them.
+ * deps.startTask(user, { project, task }) -> spoken line
+ * deps.messagesAfter(user, id) -> [{ id, text, at }], deps.latestMessages(user, n) -> the newest n, oldest first
  * deps.now() -> ms
  */
 export function makeConnector(deps) {
   const now = deps.now ?? Date.now;
   const nowS = () => Math.floor(now() / 1000);
   const ACCESS_AUD = `${deps.issuer}/mcp`;
-  const REFRESH_AUD = `${deps.issuer}/mcp/refresh`;
   const sessionKey = async (kid) => (kid === KID ? deps.publicJwk() : null);
   const appleKey = async (kid) => (await deps.appleKeys()).keys.find((k) => k.kid === kid);
 
-  async function tokens(sub, clientId) {
+  // Refresh tokens are opaque: "<user>.<random>". Each one works once and is replaced by the next in
+  // its family; a used one coming back means it leaked, so the whole family is revoked.
+  async function tokens(sub, clientId, { family = random(16), authTime = nowS() } = {}) {
     const iat = nowS();
+    const refresh = `${b64url(sub)}.${random()}`;
+    await deps.store.saveRefresh(sub, b64url(sha256(refresh)), { client_id: clientId, family, auth_time: authTime }, authTime + REFRESH_S);
     return {
       access_token: await signJwt({ iss: deps.issuer, aud: ACCESS_AUD, sub, client_id: clientId, scope: SCOPE, iat, exp: iat + ACCESS_S }, deps.sign),
       token_type: 'Bearer',
       expires_in: ACCESS_S,
-      refresh_token: await signJwt({ iss: deps.issuer, aud: REFRESH_AUD, sub, client_id: clientId, iat, exp: iat + REFRESH_S }, deps.sign),
+      refresh_token: refresh,
       scope: SCOPE,
     };
   }
@@ -139,7 +148,7 @@ export function makeConnector(deps) {
       ...(secret ? { secretHash: b64url(sha256(secret)) } : {}),
       created: nowS(),
     };
-    await deps.store.saveClient(clientId, client);
+    await deps.store.saveClient(clientId, client, nowS() + CLIENT_S);
     const { secretHash, created, ...shown } = client;
     return json(201, {
       client_id: clientId, client_id_issued_at: created, ...shown,
@@ -200,7 +209,8 @@ export function makeConnector(deps) {
     const basic = /^Basic\s+(.+)$/i.exec(headers?.authorization ?? '');
     if (basic) {
       const [id, ...rest] = Buffer.from(basic[1], 'base64').toString('utf8').split(':');
-      clientId = decodeURIComponent(id); secret = decodeURIComponent(rest.join(':'));
+      try { clientId = decodeURIComponent(id); secret = decodeURIComponent(rest.join(':')); }
+      catch { return oauthError(401, 'invalid_client', 'Malformed client credentials.'); }
     }
     const client = clientId && await deps.store.getClient(clientId);
     if (!client) return oauthError(401, 'invalid_client', 'Unknown client.');
@@ -208,19 +218,28 @@ export function makeConnector(deps) {
       return oauthError(401, 'invalid_client', 'Wrong client secret.');
     }
 
+    // Each use keeps a client registered for another CLIENT_S.
+    const touch = () => deps.store.saveClient(clientId, client, nowS() + CLIENT_S);
     if (form.grant_type === 'authorization_code') {
       const grant = form.code && await deps.store.takeGrant(`code#${b64url(sha256(form.code))}`);
       if (!grant || grant.client_id !== clientId) return oauthError(400, 'invalid_grant', 'The code is unknown, used or expired.');
       if (form.redirect_uri && form.redirect_uri !== grant.redirect_uri) return oauthError(400, 'invalid_grant', 'redirect_uri does not match.');
       if (!form.code_verifier || b64url(sha256(form.code_verifier)) !== grant.code_challenge) return oauthError(400, 'invalid_grant', 'PKCE check failed.');
+      await touch();
       return json(200, await tokens(grant.sub, clientId), { 'cache-control': 'no-store' });
     }
     if (form.grant_type === 'refresh_token') {
-      let claims;
-      try { claims = await verifyJwt(form.refresh_token, sessionKey, { issuer: deps.issuer, audience: REFRESH_AUD, now: now() }); }
-      catch { return oauthError(400, 'invalid_grant', 'The refresh token is invalid or expired.'); }
-      if (claims.client_id !== clientId) return oauthError(400, 'invalid_grant', 'The refresh token belongs to another client.');
-      return json(200, await tokens(claims.sub, clientId), { 'cache-control': 'no-store' });
+      const invalid = () => oauthError(400, 'invalid_grant', 'The refresh token is invalid, used or expired.');
+      const [userPart, secretPart] = String(form.refresh_token ?? '').split('.');
+      if (!userPart || !secretPart) return invalid();
+      const sub = Buffer.from(userPart, 'base64url').toString('utf8');
+      const hash = b64url(sha256(form.refresh_token));
+      const found = await deps.store.useRefresh(sub, hash);
+      if (!found) return invalid();
+      const row = found.data;
+      if (found.reused || row.client_id !== clientId) { await deps.store.revokeFamily(sub, row.family); return invalid(); }
+      await touch();
+      return json(200, await tokens(sub, clientId, { family: row.family, authTime: row.auth_time }), { 'cache-control': 'no-store' });
     }
     return oauthError(400, 'unsupported_grant_type', 'Use authorization_code or refresh_token.');
   }
@@ -236,7 +255,8 @@ export function makeConnector(deps) {
     }
     if (name === 'read_inbox') {
       const after = Number.isInteger(args.after) && args.after > 0 ? args.after : 0;
-      const messages = await deps.messagesAfter(user, after);
+      // No cursor: the newest messages, since Claude usually asks "what did my agents say?" first.
+      const messages = after ? await deps.messagesAfter(user, after) : await deps.latestMessages(user, INBOX_LATEST);
       const last = messages.reduce((m, x) => Math.max(m, x.id), after);
       const shown = messages.map(({ id, text, at }) => ({ id, text, age_seconds: Math.round((now() - at) / 1000) }));
       return {
@@ -264,7 +284,7 @@ export function makeConnector(deps) {
     if (method === 'tools/list') return rpcResult(id, { tools: TOOLS });
     if (method === 'tools/call') {
       try {
-        const r = await callTool(user, params?.name, params?.arguments);
+        const r = await callTool(user, params?.name, params?.arguments ?? {});
         return r ? rpcResult(id, r) : rpcError(id, -32602, `Unknown tool: ${params?.name}`);
       } catch (e) {
         console.error('tool', params?.name, e);

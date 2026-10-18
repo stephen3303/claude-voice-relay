@@ -96,7 +96,8 @@ For Claude Code: `claude mcp add --transport http bridge <ConnectorUrl>`, then `
 
 How it works: `cloud/api/connector.mjs`. The MCP endpoint is stateless streamable HTTP (JSON
 responses). Sign-in is OAuth 2.1 with dynamic client registration and PKCE; only Claude's and
-localhost redirect addresses can register. Access tokens last an hour and refresh for 30 days;
-they're signed by the same KMS key as app sessions but for another audience, so neither works in
-place of the other. Until cloud agents are built (cloud/DESIGN.md step 4), send_task answers that
+localhost redirect addresses can register. Access tokens last an hour; a sign-in lasts 30 days.
+Refresh tokens are kept with the account, work once each, and deleting the account disconnects
+Claude. Access tokens are signed by the same KMS key as app sessions but for another audience, so
+neither works in place of the other. Until cloud agents are built (cloud/DESIGN.md step 4), send_task answers that
 they aren't switched on yet, the same as the app does in Cloud mode.

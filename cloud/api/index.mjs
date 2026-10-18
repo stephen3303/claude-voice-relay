@@ -115,15 +115,16 @@ export const { auth, authorize } = accounts;
 // ---------- Claude connector (connector.mjs): MCP server and its OAuth sign-in ----------
 import { makeConnector } from './connector.mjs';
 
-// OAuth clients: pk CLIENT#<id>, sk CLIENT. Sign-ins in progress and authorization codes:
-// pk GRANT#<key>, sk GRANT, removed when used (and by TTL).
+// OAuth clients: pk CLIENT#<id>, sk CLIENT, forgotten after 90 days unused. Sign-ins in progress and
+// authorization codes: pk GRANT#<key>, sk GRANT, removed when used (and by TTL). Refresh tokens:
+// pk USER#<sub>, sk RT#<sha256>, so deleting the account (deleteUser) disconnects Claude too.
 const grants = {
-  async saveClient(id, client) {
-    await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `CLIENT#${id}`, sk: 'CLIENT', client } }));
+  async saveClient(id, client, expires) {
+    await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `CLIENT#${id}`, sk: 'CLIENT', client, expires } }));
   },
   async getClient(id) {
     const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `CLIENT#${id}`, sk: 'CLIENT' } }));
-    return r.Item?.client ?? null;
+    return r.Item && r.Item.expires > Date.now() / 1000 ? r.Item.client : null;
   },
   async saveGrant(key, data, expires) {
     await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `GRANT#${key}`, sk: 'GRANT', data, expires } }));
@@ -133,7 +134,39 @@ const grants = {
     const item = r.Attributes;
     return item && item.expires > Date.now() / 1000 ? item.data : null;   // TTL deletes lazily
   },
+  async saveRefresh(user, hash, data, expires) {
+    await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `USER#${user}`, sk: `RT#${hash}`, data, expires } }));
+  },
+  async useRefresh(user, hash) {
+    const Key = { pk: `USER#${user}`, sk: `RT#${hash}` };
+    try {
+      const r = await db.send(new UpdateCommand({ TableName: TABLE, Key, UpdateExpression: 'SET used = :t',
+        ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(used)',
+        ExpressionAttributeValues: { ':t': true }, ReturnValues: 'ALL_NEW' }));
+      const item = r.Attributes;
+      return item.expires > Date.now() / 1000 ? { data: item.data, reused: false } : null;
+    } catch (e) {
+      if (e.name !== 'ConditionalCheckFailedException') throw e;
+      const r = await db.send(new GetCommand({ TableName: TABLE, Key }));
+      return r.Item ? { data: r.Item.data, reused: true } : null;
+    }
+  },
+  async revokeFamily(user, family) {
+    const r = await db.send(new QueryCommand({ TableName: TABLE, KeyConditionExpression: 'pk = :pk AND begins_with(sk, :rt)',
+      ExpressionAttributeValues: { ':pk': `USER#${user}`, ':rt': 'RT#' } }));
+    await Promise.all((r.Items ?? []).filter((i) => i.data?.family === family)
+      .map(({ pk, sk }) => db.send(new DeleteCommand({ TableName: TABLE, Key: { pk, sk } }))));
+  },
 };
+
+// The newest inbox messages, oldest first.
+async function latestMessages(user, n) {
+  const r = await db.send(new QueryCommand({
+    TableName: TABLE, KeyConditionExpression: 'pk = :pk AND begins_with(sk, :m)',
+    ExpressionAttributeValues: { ':pk': `USER#${user}`, ':m': 'MSG#' }, ScanIndexForward: false, Limit: n,
+  }));
+  return (r.Items ?? []).reverse().map(({ id, text, at }) => ({ id, text, at }));
+}
 
 export const connector = makeConnector({
   issuer: process.env.ISSUER,
@@ -145,4 +178,5 @@ export const connector = makeConnector({
   store: grants,
   startTask,
   messagesAfter: (user, after) => store.messagesAfter(user, after),
+  latestMessages,
 });
