@@ -4,6 +4,7 @@ import { makeHandler } from './voice.mjs';
 
 function setup() {
   const budget = new Map(), spoken = [], held = new Map(), msgs = new Map(), started = [], looked = [], devices = new Map(), listening = [], delivered = [];
+  const pros = new Set(['u1', 'u2', 'u3']), claims = [];
   let clock = 1_000_000;
   const store = {
     getHeld: async (u) => held.get(u) ?? null,
@@ -28,6 +29,10 @@ function setup() {
     },
     deliver: async (u, text, from) => delivered.push({ u, text, from, at: clock }),
     speak: async (text) => { if (text === 'fail') throw new Error('Polly down'); spoken.push(text); return new Uint8Array([0xff, 0xf3, text.length]); },
+    pro: {
+      isPro: async (u) => pros.has(u),
+      claim: async (u, jws) => { claims.push({ u, jws }); return jws === 'good' ? { status: 200, body: { pro: true } } : { status: 400, body: { error: 'no' } }; },
+    },
     now: () => clock,
     sleep: async (ms) => { clock += ms; },
   });
@@ -35,7 +40,7 @@ function setup() {
     requestContext: { http: { method }, authorizer: user ? { jwt: { claims: { sub: user } } } : undefined },
     rawPath: `/api${path}`, body, isBase64Encoded: !!base64, queryStringParameters: query, headers,
   });
-  return { call, budget, spoken, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
+  return { call, pros, claims, budget, spoken, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
 }
 
 test('needs a signed-in user', async () => {
@@ -227,4 +232,31 @@ test('tts has a daily budget per account and in total', async () => {
   assert.equal((await call('POST', '/voice/tts', { body: line })).statusCode, 200, 'a new day, a new budget');
   budget.set(`ALL/${new Date(1_000_000 + 24 * 3600_000).toISOString().slice(0, 10)}`, 1_000_000);
   assert.equal((await call('POST', '/voice/tts', { body: 'hi', user: 'u3' })).statusCode, 429, 'the total cap holds for everyone');
+});
+
+test('tts is for Bridge Pro: anyone else gets a non-200 (the phone voice) and spends nothing', async () => {
+  const { call, pros, budget, spoken } = setup();
+  pros.delete('u1');
+  const r = await call('POST', '/voice/tts', { body: 'hello' });
+  assert.equal(r.statusCode, 402);
+  assert.equal(spoken.length, 0);
+  assert.equal(budget.size, 0);
+});
+
+test('POST /pro hands the signed transaction to the Pro check and answers what it says', async () => {
+  const { call, claims } = setup();
+  const ok = await call('POST', '/pro', { body: JSON.stringify({ transaction: 'good' }) });
+  assert.equal(ok.statusCode, 200);
+  assert.deepEqual(JSON.parse(ok.body), { pro: true });
+  assert.equal((await call('POST', '/pro', { body: 'not json' })).statusCode, 400);
+  assert.deepEqual(claims, [{ u: 'u1', jws: 'good' }, { u: 'u1', jws: undefined }]);
+  assert.equal((await call('POST', '/pro', { body: '{}', user: null })).statusCode, 401);
+});
+
+test('photos are for Bridge Pro too: Bedrock is never called without it', async () => {
+  const { call, pros, looked, started } = setup();
+  pros.delete('u1');
+  const r = await call('POST', '/voice/photo', { body: Buffer.from('jpegjpg').toString('base64'), base64: true });
+  assert.match(r.body, /need Bridge Pro/);
+  assert.equal(looked.length + started.length, 0);
 });

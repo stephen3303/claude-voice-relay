@@ -34,6 +34,7 @@ export const LOOK_PROMPT = [
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
  * deps.store.spendSpeech(key, day, chars, max) -> false when that would take key's total for day past max
+ * deps.pro: { claim(user, jws) -> { status, body }, isPro(user) } (storekit.mjs)
  * deps.now() -> ms, deps.sleep(ms)
  */
 // What was said: the body's JSON "text", or the plain-text body. null for JSON without a string "text".
@@ -111,6 +112,7 @@ export function makeHandler(deps) {
   }
 
   async function photo(user, jpeg, said) {
+    if (!await deps.pro.isPro(user)) return 'Photos need Bridge Pro. Open Bridge to start a free trial.';
     if (!jpeg?.length) return 'The photo was empty. Try again.';
     if (jpeg.length > PHOTO_MAX) return 'That photo is too large.';
     const m = said.match(SEND_TO);
@@ -160,6 +162,8 @@ export function makeHandler(deps) {
         // so a line too long for one Polly call, or past the day's budget, is read whole by the phone instead.
         const said = saidOf(raw);
         if (!said) return text(400, 'Nothing to say.');
+        // The natural voice is part of Bridge Pro, as Apple's signed transaction says, not as the app says.
+        if (!await deps.pro.isPro(user)) return text(402, 'The natural voice needs Bridge Pro.');
         const chars = [...said].length;
         if (chars > SPEAK_MAX) return text(413, 'Too long for the cloud voice.');
         const day = new Date(now()).toISOString().slice(0, 10);
@@ -175,6 +179,13 @@ export function makeHandler(deps) {
         catch (e) { await Promise.all([refund(`SPEECH#${user}`), refund('ALL')]); throw e; }   // nothing was spoken
         return { statusCode: 200, headers: { 'content-type': 'audio/mpeg' }, body: Buffer.from(mp3).toString('base64'), isBase64Encoded: true };
       }
+      if (route === 'POST /pro') {
+        // The app's StoreKit 2 transaction (JWS), whenever its entitlements change and after signing in.
+        let b = null;
+        try { b = JSON.parse(raw.toString('utf8')); } catch { /* bad JSON */ }
+        const r = await deps.pro.claim(user, b?.transaction);
+        return json(r.status, r.body);
+      }
       if (route === 'POST /voice/photo') {
         let said = '';
         try { said = decodeURIComponent(event.headers?.['x-question'] || '').trim(); } catch { /* keep empty */ }
@@ -185,7 +196,7 @@ export function makeHandler(deps) {
       console.error(route, e);
       // The app retries push registration and falls back to the phone's voice on a failure, so those must see
       // one; the other voice routes speak the error instead.
-      if (/^\S+ \/(push\/|voice\/listening|voice\/tts)/.test(route)) return json(500, { error: 'Bridge Cloud hit an error.' });
+      if (/^\S+ \/(push\/|voice\/listening|voice\/tts|pro$)/.test(route)) return json(500, { error: 'Bridge Cloud hit an error.' });
       return text(200, "Sorry, Bridge Cloud hit an error. Try again in a moment.");
     }
   };

@@ -313,8 +313,10 @@ final class Conversation: NSObject, ObservableObject {
 
     private func say(_ text: String) async {
         phase = .speaking
-        // Natural cloud voice from the relay when it has a key; otherwise (or on any failure) the phone's voice.
-        if let mp3 = try? await Relay.shared.speech(text), let player = try? AVAudioPlayer(data: mp3) {
+        // Natural voice from the relay when it has a key, or from Bridge Cloud with Bridge Pro; otherwise (or on any
+        // failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
+        if !Relay.shared.isCloud || Store.shared.isPro,
+           let mp3 = try? await Relay.shared.speech(text), let player = try? AVAudioPlayer(data: mp3) {
             player.delegate = self
             self.player = player
             status = Relay.shared.isCloud ? "Voice: Bridge Cloud (natural)" : "Voice: relay (natural)"
