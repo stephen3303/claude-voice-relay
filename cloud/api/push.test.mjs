@@ -59,6 +59,10 @@ test('a token from the other environment is retried there; dead tokens come back
   const bad = setupApns(() => ({ status: 400, reason: 'BadDeviceToken' }));
   assert.equal((await bad.apns(TOKEN, 'production', 'alert', {})).result, 'gone');
 
+  const otherApp = setupApns(() => ({ status: 400, reason: 'DeviceTokenNotForTopic' }));
+  assert.equal((await otherApp.apns(TOKEN, 'production', 'alert', {})).result, 'gone');
+  assert.equal(otherApp.sent.length, 1);
+
   const down = setupApns(() => ({ status: 500, reason: 'InternalServerError' }));
   assert.equal((await down.apns(TOKEN, 'production', 'alert', {})).result, 'error');
 });
