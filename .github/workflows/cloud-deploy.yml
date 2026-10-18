@@ -51,6 +51,11 @@ jobs:
 
       - run: npm ci
 
+      # Catches template keys CloudFormation would reject before they roll BridgeApi back. ci.yml runs it
+      # too, but the deploy doesn't wait for CI.
+      - name: Check the templates
+        run: npx cdk synth -q && node check-template.mjs
+
       - name: Deploy the API
         run: npx cdk deploy BridgeApi --require-approval never --outputs-file outputs.json
 

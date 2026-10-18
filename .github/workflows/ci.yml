@@ -44,3 +44,5 @@ jobs:
       - run: npm ci
       - name: CDK synth
         run: npx cdk synth -q
+      - name: Check the templates
+        run: node check-template.mjs
