@@ -108,9 +108,6 @@ function walk(dir) {
 
 /** Writes the public tree into dest and returns the paths written. */
 export function exportPublic(dest, { root = ROOT } = {}) {
-  if (existsSync(dest)) {
-    for (const name of readdirSync(dest)) if (name !== '.git') rmSync(join(dest, name), { recursive: true, force: true });
-  }
   const files = new Map();
   const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
   for (const path of tracked.filter(included)) {
@@ -134,6 +131,10 @@ export function exportPublic(dest, { root = ROOT } = {}) {
     for (const re of FORBIDDEN) if (re.test(text)) problems.push(`${path}: ${re}`);
   }
   if (problems.length) throw new Error(`Paid or private content in the public export:\n${problems.join('\n')}`);
+  // Empty dest only once the export is known clean, so a failed check leaves a local clone untouched.
+  if (existsSync(dest)) {
+    for (const name of readdirSync(dest)) if (name !== '.git') rmSync(join(dest, name), { recursive: true, force: true });
+  }
   for (const [path, body] of files) {
     mkdirSync(dirname(join(dest, path)), { recursive: true });
     writeFileSync(join(dest, path), body);
