@@ -27,7 +27,7 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
 5. **Subscription:** the app > Monetization > Subscriptions > new group "Bridge Pro", then two
    auto-renewable subscriptions:
    - `com.smitherman.glassesrelay.pro.monthly`: 1 month, $4.99, 1-week free introductory offer
-   - `com.smitherman.glassesrelay.pro.yearly`: 1 year, $39.99, 1-week free introductory offer
+   - `com.smitherman.glassesrelay.pro.yearly`: 1 year, $49.99, 1-week free introductory offer
    Each needs a display name, a description and a review screenshot (a screenshot of the Bridge Pro sheet is fine).
 6. **API key for CI:** Users and Access > Integrations > App Store Connect API > generate a key with
    the App Manager role. Add these repository secrets (Settings > Secrets and variables > Actions):

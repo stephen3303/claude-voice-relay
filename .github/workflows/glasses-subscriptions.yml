@@ -1,0 +1,26 @@
+# Creates the Bridge Pro subscriptions in App Store Connect (glasses/asc-subscriptions.mjs).
+# Run by hand once the app record and the ASC_* secrets exist; running it again is harmless.
+name: Glasses subscriptions
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  subscriptions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Create Bridge Pro
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+        run: |
+          echo "$ASC_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/key.p8"
+          ASC_KEY_P8="$RUNNER_TEMP/key.p8" node glasses/asc-subscriptions.mjs
