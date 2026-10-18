@@ -109,7 +109,9 @@ jobs:
             and CDK synth, and `gh pr checks ${{ env.PR_NUMBER }}` shows their results.
 
             Review this PR with the subagents in .claude/agents. First read .review/stat.txt to see what
-            changed, then launch the relevant subagents in parallel with the Task tool. Tell each one the
+            changed, then launch the relevant subagents in parallel with the Agent tool, each with
+            run_in_background: false. This is a one-shot run: it ends the moment you stop, so never stop to
+            wait; their results come back in the same turn, and only then do you post. Tell each one the
             above (where main, the PR and the diff are, no git, no running code, `gh pr checks` for CI) in
             place of the git commands in its own instructions.
             - code-reviewer and test-engineer: always.
