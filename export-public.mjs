@@ -8,7 +8,7 @@
 // exactly the personal flavour. The export fails if anything paid or private is left in it.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -78,11 +78,15 @@ export function publicReadme(source) {
   return out.join('\n').replace(/\n*$/, '\n');
 }
 
-/** project.yml without the comment that explains how CI builds the App Store flavour. */
+/**
+ * project.yml without the comment that explains how CI builds the App Store flavour, and without the voip
+ * background mode, which only the App Store build's agent calls (Push.swift) use.
+ */
 export function publicProject(source) {
-  const lines = source.split('\n');
+  const lines = source.split('\n').filter((l) => !/^\s*# voip:/.test(l))
+    .map((l) => l.replace(/(UIBackgroundModes: \[.*), voip\]/, '$1]'));
   const start = lines.findIndex((l) => /^\s*# The App Store flavour/.test(l));
-  if (start < 0) return source;
+  if (start < 0) return lines.join('\n');
   let end = start;
   while (end < lines.length && /^\s*#/.test(lines[end])) end++;
   lines.splice(start, end - start);
@@ -108,6 +112,9 @@ function walk(dir) {
 
 /** Writes the public tree into dest and returns the paths written. */
 export function exportPublic(dest, { root = ROOT } = {}) {
+  // dest is emptied, so it must not be this repo or a folder holding it.
+  const out = resolve(dest), src = resolve(root);
+  if (src === out || src.startsWith(out.endsWith(sep) ? out : out + sep)) throw new Error(`Refusing to export into ${out}: it holds this repo`);
   const files = new Map();
   const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
   for (const path of tracked.filter(included)) {

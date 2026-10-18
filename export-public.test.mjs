@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +27,41 @@ test('keeps an #if !APP_STORE branch and drops its #else', () => {
 
 test('refuses #elseif inside an APP_STORE block', () => {
   assert.throws(() => stripAppStore('#if APP_STORE\na\n#elseif DEBUG\nb\n#endif'), /elseif/);
+});
+
+test('the public project drops the voip background mode', () => {
+  const src = ['        # voip: an agent call', '        UIBackgroundModes: [audio, external-accessory, voip]'].join('\n');
+  assert.equal(publicProject(src), '        UIBackgroundModes: [audio, external-accessory]');
+});
+
+test('refuses to export into this repo or a folder above it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bridge-src-'));
+  try {
+    assert.throws(() => exportPublic(root, { root }), /Refusing/);
+    assert.throws(() => exportPublic(join(root, '..'), { root }), /Refusing/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a clean export replaces stale files and keeps .git', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bridge-src-'));
+  const dest = mkdtempSync(join(tmpdir(), 'bridge-dest-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    writeFileSync(join(root, 'relay.mjs'), 'ok\n');
+    execFileSync('git', ['add', 'relay.mjs'], { cwd: root });
+    mkdirSync(join(dest, '.git'));
+    writeFileSync(join(dest, '.git', 'HEAD'), 'ref');
+    writeFileSync(join(dest, 'stale.txt'), 'old');
+    exportPublic(dest, { root });
+    assert.equal(existsSync(join(dest, 'stale.txt')), false);
+    assert.equal(readFileSync(join(dest, '.git', 'HEAD'), 'utf8'), 'ref');
+    assert.equal(readFileSync(join(dest, 'relay.mjs'), 'utf8'), 'ok\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(dest, { recursive: true, force: true });
+  }
 });
 
 test('a failed export leaves the destination untouched', () => {
