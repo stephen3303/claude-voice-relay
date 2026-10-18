@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var testResult = ""
     @State private var photoResult = ""
     @State private var showPaywall = false
+    @State private var readBack = Conversation.readBack
     @ObservedObject private var store = Store.shared
 
     var body: some View {
@@ -74,6 +75,8 @@ struct ContentView: View {
                     } else {
                         Button("End", role: .destructive) { conversation.end(saying: nil) }
                     }
+                    Toggle("Read back what I said", isOn: $readBack)
+                        .onChange(of: readBack) { _, on in Conversation.readBack = on }
                     if !conversation.status.isEmpty { Text(conversation.status).font(.footnote).foregroundStyle(.secondary) }
                     if !conversation.transcript.isEmpty {
                         Button("Clear history", role: .destructive) { conversation.transcript = [] }

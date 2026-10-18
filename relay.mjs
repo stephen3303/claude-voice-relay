@@ -70,9 +70,10 @@ const BOOT = Date.now();
 const outbox = []; // { id, at, text }
 let outboxId = 0;
 const inboxWaiters = new Set();
-async function say(text, { voice = true } = {}) {
+// `spoken` replaces what the glasses read aloud (e.g. the reply without the agent's name in front).
+async function say(text, { voice = true, spoken } = {}) {
   if (voice) {
-    outbox.push({ id: ++outboxId, at: Date.now(), text: String(text) });
+    outbox.push({ id: ++outboxId, at: Date.now(), text: String(spoken ?? text) });
     if (outbox.length > 50) outbox.shift();
     for (const wake of [...inboxWaiters]) wake();
   }
@@ -204,7 +205,8 @@ async function turn(a, prompt, photo) {
     fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), a.lastFull);
     const line = spoken(r.result);
     a.awaiting = line.endsWith('?');
-    await say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`);
+    await say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
+      { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line });
   } catch (e) {
     if (a.stopped) return;
     log(a.name, 'turn failed:', e.message);
@@ -513,14 +515,15 @@ if (cfg.voiceToken) {
     if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
-    if (req.method !== 'POST' || (req.url !== '/voice' && req.url !== '/voice/confirm')) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
+    if (req.method !== 'POST' || !['/voice', '/voice/confirm', '/voice/send'].includes(req.url)) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });
     req.on('end', () => {
       let text = body;
       try { const j = JSON.parse(body); if (j && typeof j.text === 'string') text = j.text; } catch { /* plain-text body */ }
       text = String(text).trim();
-      if (req.url === '/voice/confirm' || cfg.voiceConfirm) {
+      // /voice/send skips the read-back: the app's "Read back what I said" setting is off.
+      if (req.url === '/voice/confirm' || (cfg.voiceConfirm && req.url !== '/voice/send')) {
         log('voice confirm:', text);
         res.writeHead(200, { 'content-type': 'text/plain' }).end(confirmStep(text));
         return;

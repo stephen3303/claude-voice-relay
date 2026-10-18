@@ -42,8 +42,14 @@ final class Conversation: NSObject, ObservableObject {
     /// Set after "Sent.": an agent is working, so stay on the line for its answer.
     private var awaitingAgent = false
 
+    /// Settings > "Read back what I said". On: the relay repeats your words and waits for "send it".
+    /// Off: your words go straight to the agents, so wait for a longer pause before sending.
+    static var readBack: Bool {
+        get { UserDefaults.standard.object(forKey: "readBack") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "readBack") }
+    }
     /// Pause after you stop talking before your turn is sent.
-    private let endOfTurn: TimeInterval = 1.4
+    private var endOfTurn: TimeInterval { Self.readBack ? 1.4 : 2.0 }
     /// Hang up after this much silence, or the longer one while an agent is working.
     private let idleHangup: TimeInterval = 25
     private let agentHangup: TimeInterval = 15 * 60
@@ -207,7 +213,7 @@ final class Conversation: NSObject, ObservableObject {
                 // The camera session can disturb the Bluetooth audio route; put the glasses mic back.
                 try? configureAudioForGlasses()
             } else {
-                do { reply = try await Relay.shared.say(Self.forRelay(text)) }
+                do { reply = try await Relay.shared.say(Self.forRelay(text), readBack: Self.readBack) }
                 catch { reply = "I couldn't reach your PC. \(error.localizedDescription)" }
             }
             if reply.hasPrefix("Sent") { awaitingAgent = true }

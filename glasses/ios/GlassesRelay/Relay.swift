@@ -34,10 +34,11 @@ final class Relay {
     var isDemo: Bool { baseURL == Self.demoAddress }
     private var demoHeld: String?
 
-    /// One utterance through the read-back step. Returns the line to speak.
-    func say(_ text: String) async throws -> String {
-        if isDemo { return demoReply(text) }
-        var req = try request("voice/confirm", timeout: 30)
+    /// One utterance through the read-back step, or straight to the agents with `readBack` off.
+    /// Returns the line to speak.
+    func say(_ text: String, readBack: Bool = true) async throws -> String {
+        if isDemo { return readBack ? demoReply(text) : "Sent." }
+        var req = try request(readBack ? "voice/confirm" : "voice/send", timeout: 30)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(["text": text])
