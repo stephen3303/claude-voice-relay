@@ -129,11 +129,12 @@ jobs:
           claude_args: |
             --max-turns 60
             --disallowedTools "Read(//proc/**),Read(//sys/**),Read(~/.claude/**),Read(~/.config/**),Read(~/.ssh/**),Read(//home/runner/work/_temp/**)"
-            --allowedTools "Task,Read(./**),Grep,Glob,Write(//tmp/claude-review/**),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(node --check:*)"
+            --allowedTools "Agent,Task,Read(./**),Grep,Glob,Write(//tmp/claude-review/**),mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(node --check:*)"
 
-      # Claude's output is hidden in the log; the tool calls it was refused are safe to show and are
-      # the first thing to check when a review posts nothing.
-      - name: Show refused tool calls
+      # Claude's output is hidden in the log. Its tool calls (names and short inputs, which can't hold the
+      # credential since Claude can't read it), refusals and final message are safe to show, and are what
+      # to check when a review posts nothing.
+      - name: Show what Claude did
         if: always() && steps.fork.outputs.ok
         run: |
           f="$RUNNER_TEMP/claude-execution-output.json"
@@ -142,8 +143,12 @@ jobs:
           import json, sys
           def walk(x):
               if isinstance(x, dict):
+                  if x.get('type') == 'tool_use':
+                      print('tool:', x.get('name'), json.dumps(x.get('input'))[:200])
                   for d in x.get('permission_denials') or []:
                       print('refused:', d.get('tool_name'), json.dumps(d.get('tool_input'))[:300])
+                  if x.get('type') == 'result':
+                      print('final:', str(x.get('result'))[:1500])
                   for v in x.values(): walk(v)
               elif isinstance(x, list):
                   for v in x: walk(v)
