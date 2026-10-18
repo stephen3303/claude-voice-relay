@@ -58,6 +58,14 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.pr && format('refs/pull/{0}/head', inputs.pr) || '' }}
 
+      # Review with main's agents: a PR branched before they existed has none, and a PR shouldn't
+      # get to rewrite the instructions of the agents reviewing it.
+      - name: Use the subagents from main
+        if: steps.fork.outputs.ok
+        run: |
+          rm -rf .claude/agents
+          git checkout origin/main -- .claude/agents
+
       - uses: actions/setup-node@v4
         if: steps.fork.outputs.ok
         with:
