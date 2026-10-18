@@ -44,6 +44,8 @@ function setEnv(text, key, value) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
+  // Only this machine's own browser tab: a page on another site rebinding a hostname to 127.0.0.1 is refused.
+  if (req.headers.host !== `127.0.0.1:${server.address().port}`) { res.writeHead(403).end(); return; }
   if (url.pathname === '/') {
     const { port } = server.address();
     const manifest = {

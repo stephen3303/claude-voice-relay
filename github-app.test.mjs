@@ -137,10 +137,31 @@ test('no GitHub origin, or an unreadable pins file, gets no token', async () => 
   assert.equal(fs.readFileSync(broken.pinsFile, 'utf8'), '{not json'); // not rebuilt from live config
 });
 
-test('a pin made for an agent that ran before pinning is a warning', async () => {
-  const { gh, logs } = agentGitHub();
-  await gh.env({ ...agent, ranBeforePins: true });
-  assert.match(logs[0], /^WARNING: pinned/);
+test('an agent that ran before pinning is only pinned to a repo named like its folder', async () => {
+  const same = agentGitHub();
+  assert.equal((await same.gh.env({ ...agent, ranBeforePins: true })).GH_TOKEN, 'ghs_x');
+  assert.match(same.logs[0], /^WARNING: pinned/);
+
+  const other = agentGitHub({ remote: 'https://github.com/stephen3303/trading-bot.git' });
+  assert.equal((await other.gh.env({ ...agent, ranBeforePins: true })).GH_TOKEN, '');
+  assert.deepEqual(other.minted, []);
+  assert.equal(other.gh.isPinned(agent.repoPath), false);
+  assert.match(other.logs[0], /doesn't match its folder name/);
+});
+
+test('pins survive a restart', async () => {
+  const first = agentGitHub();
+  await first.gh.env(agent);
+  const logs = [], minted = [];
+  const restarted = makeAgentGitHub({
+    ghApp: { tokenFor: async (o, r) => { minted.push(`${o}/${r}`); return 'ghs_y'; }, identity: async () => null },
+    hostGit: { name: 'Stephen', email: 's@example.com' },
+    getRemote: async () => 'https://github.com/stephen3303/other-repo.git',
+    pinsFile: first.pinsFile, log: (m) => logs.push(m),
+  });
+  assert.equal((await restarted.env(agent)).GH_TOKEN, '');
+  assert.deepEqual(minted, []);
+  assert.match(logs[0], /origin changed from stephen3303\/claude-voice-relay/);
 });
 
 test('without the App, AGENT_GH_TOKEN and the host git identity are used', async () => {

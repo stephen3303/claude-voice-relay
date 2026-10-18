@@ -107,6 +107,13 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     if (!pins) return null;
     const key = keyOf(a.repoPath);
     if (!pins[key]) {
+      // An agent from before pinning may already have pointed origin elsewhere, so its folder is only
+      // pinned to a repo with the folder's own name (how a clone is named); anything else waits for a hand-made pin.
+      const bare = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (a.ranBeforePins && bare(path.basename(a.repoPath)) !== bare(slug.split('/')[1])) {
+        log(`WARNING: ${a.name} ran before repos were pinned and its origin ${slug} doesn't match its folder name; no GitHub token. If ${slug} is right, add ${JSON.stringify(key)}: ${JSON.stringify(slug)} to ${pinsFile}.`);
+        return null;
+      }
       pins[key] = slug;
       // Write then rename, so a crash mid-write can't leave a file that blocks every token.
       // A failed save (a locked file) keeps the pin in memory for this run rather than failing the turn.
@@ -115,7 +122,6 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
         fs.writeFileSync(`${pinsFile}.tmp`, JSON.stringify(pins, null, 2));
         fs.renameSync(`${pinsFile}.tmp`, pinsFile);
       } catch (e) { log(`WARNING: couldn't save ${pinsFile}: ${e.message}`); }
-      // An agent from before pinning may already have changed origin, so this pin is only as good as that config.
       log(a.ranBeforePins ? `WARNING: pinned ${a.repoPath} to ${slug} after an agent already ran there; check it's right, or fix it in ${path.basename(pinsFile)}.`
         : `Pinned ${a.repoPath} to GitHub repo ${slug}.`);
     }
