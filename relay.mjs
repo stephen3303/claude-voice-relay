@@ -127,7 +127,7 @@ function save() {
 }
 function load() {
   try {
-    for (const a of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))) agents.set(a.name, { ...a, busy: false, queue: [], ranBeforePins: !agentGitHub.isPinned(a.repoPath) });
+    for (const a of JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))) agents.set(a.name, { ...a, busy: false, queue: [] });
   } catch { /* first run */ }
 }
 

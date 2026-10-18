@@ -123,8 +123,8 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
 // own login: with the App, a token for the agent's pinned repo only; else `fallbackToken` (AGENT_GH_TOKEN).
 //
 // Agents can rewrite their repo's .git/config, so each folder's GitHub repo is pinned in `pinsFile` the
-// first time it's read (before any agent has run there) and kept across agents and restarts: a changed
-// origin must not get a token for another repo the App is installed on. A pins file that exists but
+// first time it's read and kept across agents and restarts: a changed origin must not get a token for
+// another repo the App is installed on. A pins file that exists but
 // can't be read stops all tokens rather than being rebuilt from live config.
 const AGENT_FALLBACK = { name: 'Bridge agent', email: 'bridge-agent@users.noreply.github.com' };
 
@@ -140,11 +140,12 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     if (!pins) return null;
     const key = keyOf(a.repoPath);
     if (!pins[key]) {
-      // An agent from before pinning may already have pointed origin elsewhere, so its folder is only
-      // pinned to a repo with the folder's own name (how a clone is named); anything else waits for a hand-made pin.
+      // An agent that worked here before (before pinning existed, or one since stopped) may already have
+      // pointed origin elsewhere, so a folder is only pinned to a repo of its own name, which is how a
+      // clone is named; anything else waits for a pin added by hand.
       const bare = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (a.ranBeforePins && bare(path.basename(a.repoPath)) !== bare(slug.split('/')[1])) {
-        log(`WARNING: ${a.name} ran before repos were pinned and its origin ${slug} doesn't match its folder name; no GitHub token. If ${slug} is right, add ${JSON.stringify(key)}: ${JSON.stringify(slug)} to ${pinsFile}.`);
+      if (bare(path.basename(a.repoPath)) !== bare(slug.split('/')[1])) {
+        log(`WARNING: ${a.name}'s origin ${slug} doesn't match its folder name; no GitHub token. If ${slug} is right, add ${JSON.stringify(key)}: ${JSON.stringify(slug)} to ${pinsFile}.`);
         return null;
       }
       pins[key] = slug;
@@ -155,8 +156,7 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
         fs.writeFileSync(`${pinsFile}.tmp`, JSON.stringify(pins, null, 2));
         fs.renameSync(`${pinsFile}.tmp`, pinsFile);
       } catch (e) { log(`WARNING: couldn't save ${pinsFile}: ${e.message}`); }
-      log(a.ranBeforePins ? `WARNING: pinned ${a.repoPath} to ${slug} after an agent already ran there; check it's right, or fix it in ${path.basename(pinsFile)}.`
-        : `Pinned ${a.repoPath} to GitHub repo ${slug}.`);
+      log(`Pinned ${a.repoPath} to GitHub repo ${slug}.`);
     }
     return pins[key];
   }

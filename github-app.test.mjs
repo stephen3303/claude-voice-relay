@@ -177,16 +177,15 @@ test('no GitHub origin, or an unreadable pins file, gets no token', async () => 
   assert.equal(fs.readFileSync(broken.pinsFile, 'utf8'), '{not json'); // not rebuilt from live config
 });
 
-test('an agent that ran before pinning is only pinned to a repo named like its folder', async () => {
-  const same = agentGitHub();
-  assert.equal((await same.gh.env({ ...agent, ranBeforePins: true })).GH_TOKEN, 'ghs_x');
-  assert.match(same.logs[0], /^WARNING: pinned/);
-
+test('a folder is only pinned to the repo of its own name', async () => {
   const other = agentGitHub({ remote: 'https://github.com/stephen3303/trading-bot.git' });
-  assert.equal((await other.gh.env({ ...agent, ranBeforePins: true })).GH_TOKEN, '');
+  assert.equal((await other.gh.env(agent)).GH_TOKEN, '');
   assert.deepEqual(other.minted, []);
   assert.equal(other.gh.isPinned(agent.repoPath), false);
   assert.match(other.logs[0], /doesn't match its folder name/);
+  // Case and separators don't matter.
+  const same = agentGitHub({ remote: 'git@github.com:stephen3303/Claude_Voice_Relay.git' });
+  assert.equal((await same.gh.env(agent)).GH_TOKEN, 'ghs_x');
 });
 
 test('pins survive a restart', async () => {
