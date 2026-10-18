@@ -16,7 +16,7 @@ concurrency: cloud-deploy
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 120   # the first domain deploy waits for the Cloudflare validation record
     defaults:
       run:
         working-directory: cloud/infra

@@ -1,7 +1,9 @@
-// BridgeWeb: the website (site/) on a private S3 bucket behind CloudFront.
-// The custom domain (talktobridge.com) is added once it's registered; until then the
-// CloudFront address serves the site.
+// BridgeWeb: the website (site/) on a private S3 bucket behind CloudFront, at talktobridge.com.
+// DNS is at Cloudflare (its registrar requires that), so the certificate is validated by a
+// CNAME added there by hand: the deploy prints it and waits until it resolves. Then two more
+// Cloudflare records point the names at CloudFront (DNS only, not proxied).
 import { Stack, RemovalPolicy, Duration, CfnOutput } from 'aws-cdk-lib';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
@@ -9,6 +11,7 @@ import * as deploy from 'aws-cdk-lib/aws-s3-deployment';
 import { fileURLToPath } from 'node:url';
 
 const SITE_DIR = fileURLToPath(new URL('../../../site', import.meta.url));
+export const DOMAIN = 'talktobridge.com';
 
 export class WebStack extends Stack {
   constructor(scope, id, props) {
@@ -32,7 +35,16 @@ export class WebStack extends Stack {
       },
     });
 
+    // CloudFront certificates must live in us-east-1, which is where this stack is.
+    const certificate = new acm.Certificate(this, 'Cert', {
+      domainName: DOMAIN,
+      subjectAlternativeNames: [`www.${DOMAIN}`],
+      validation: acm.CertificateValidation.fromDns(),   // no hosted zone: the CNAME goes in Cloudflare
+    });
+
     const site = new cloudfront.Distribution(this, 'Cdn', {
+      domainNames: [DOMAIN, `www.${DOMAIN}`],
+      certificate,
       defaultRootObject: 'index.html',
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(bucket),
@@ -51,6 +63,8 @@ export class WebStack extends Stack {
       distributionPaths: ['/*'],
     });
 
-    new CfnOutput(this, 'SiteUrl', { value: `https://${site.distributionDomainName}` });
+    new CfnOutput(this, 'SiteUrl', { value: `https://${DOMAIN}` });
+    new CfnOutput(this, 'CloudFrontTarget', { value: site.distributionDomainName,
+      description: `Cloudflare: CNAME ${DOMAIN} and www to this, DNS only` });
   }
 }
