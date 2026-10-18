@@ -18,7 +18,7 @@ struct HelpView: View {
                 }
                 Section("Talking to your agents") {
                     HelpItem("Start a task", "Begin with \"in\" and the project's name: \"In trading bot, add a stop-loss check.\"")
-                    HelpItem("Read-back", "With Read back on, Bridge reads your message back like Siri does: \"Here's your message to trading bot: ... Ready to send it?\" Say \"send\" or \"yes\" to send it, \"change it\" to say it differently, or \"cancel\" or \"no\". Nothing is sent until you say yes. Turn it off in Settings to send after a 2-second pause instead.")
+                    HelpItem("Read-back", "With Read back on, Bridge reads your message back like Siri does: \"Here's your message to Claude: ... Ready to send it?\" Say \"send\" or \"yes\" to send it, \"change it\" to say it differently, or \"cancel\" or \"no\". Nothing is sent until you say yes. Turn it off in Settings to send after a 2-second pause instead.")
                     HelpItem("Answers", "While a conversation is open, your agents' replies are read to you as they arrive. Answer a yes-or-no question with \"yes\".")
                     #if APP_STORE
                     HelpItem("Calls from your agents", "With Bridge Cloud, an agent that has something for you rings like a phone call when glasses or headphones are connected. Answer it to hear the message and reply. Otherwise you get a notification. Turn it off in Settings > Calls.")

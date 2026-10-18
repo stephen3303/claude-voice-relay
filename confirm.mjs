@@ -1,5 +1,6 @@
 // Read-back loop for the iPhone Shortcut and the glasses app (/voice/confirm).
-// Worded like Siri reading back a text: "Here's your message to <project>: <task>. Ready to send it?"
+// Worded like Siri reading back a text: "Here's your message to Claude: <task>. Ready to send it?"
+// The project isn't read back (Stephen's call): the read-back stays short.
 // Each utterance is held until the user says "send" or "yes"; "change it" asks for new words, and
 // "cancel" or "no" drops it. Nothing is sent on silence. Every reply that expects another utterance
 // is a question (contains "?"); the Shortcut's loop stops listening otherwise.
@@ -38,9 +39,7 @@ export function makeConfirm(deps) {
     Promise.resolve().then(() => deps.dispatch(text)).catch((e) => log('handler error:', e.message));
     return 'Sent.';
   }
-  const readBack = (task, repo) => repo
-    ? `Here's your message to ${deps.spokenName(repo)}: ${task}. Ready to send it?`
-    : `Here's your message: ${task}. Ready to send it?`;
+  const readBack = (task) => `Here's your message to Claude: ${task}. Ready to send it?`;
 
   return function confirmStep(raw) {
     raw = String(raw ?? '').trim();
@@ -79,7 +78,7 @@ export function makeConfirm(deps) {
       if (parsed?.task) {
         // Hold the resolved repo, so "send it" starts exactly what was read back.
         pending = { text: { repo: parsed.repo, task: parsed.task }, at: now() };
-        return readBack(parsed.task, parsed.repo);
+        return readBack(parsed.task);
       }
       // Dictation stopped after the project name: keep the project and ask for the task.
       const alone = body.match(PROJECT_ONLY);
@@ -92,7 +91,7 @@ export function makeConfirm(deps) {
       if (pending?.repo) {
         const { repo: held } = pending;
         pending = { text: { repo: held, task: body }, at: now() };
-        return readBack(body, held);
+        return readBack(body);
       }
       pending = null;
       return `I can't tell which project "${body}" is for. Start with in and the project name. ${ASK}`;

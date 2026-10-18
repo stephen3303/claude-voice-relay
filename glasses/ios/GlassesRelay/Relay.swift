@@ -118,7 +118,7 @@ final class Relay {
         if demoHeld != nil, ["change it", "change"].contains(lower) { demoHeld = nil; return "OK. What do you want to send?" }
         if lower == "status" { return "Demo mode. Connect your PC's relay to hear your agents' status." }
         demoHeld = body
-        return "Here's your message: \(body). Ready to send it?"
+        return "Here's your message to Claude: \(body). Ready to send it?"
     }
 
     /// A Bridge Cloud call outside the voice protocol (push registration, ending a conversation),
