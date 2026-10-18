@@ -1,6 +1,6 @@
 import StoreKit
 
-/// Bridge Pro: photos and the Ask/Look Shortcuts actions. Voice conversations stay free.
+/// Bridge Pro: photos, Bridge Cloud's natural voice and the Ask/Look Shortcuts actions. Voice conversations stay free.
 /// The personal (sideloaded) build has everything unlocked; only the App Store build sells Pro.
 @MainActor
 final class Store: ObservableObject {
@@ -32,17 +32,24 @@ final class Store: ObservableObject {
     func refresh() async {
         #if APP_STORE
         var active = false
+        var latest: (jws: String, expires: Date)?
         for await result in Transaction.currentEntitlements {
             if case .verified(let t) = result, Self.productIDs.contains(t.productID), t.revocationDate == nil {
                 active = true
+                let expires = t.expirationDate ?? .distantFuture
+                if latest == nil || expires > latest!.expires { latest = (result.jwsRepresentation, expires) }
             }
         }
         isPro = active
+        // Bridge Cloud checks Apple's signature on the transaction itself before it unlocks the natural voice.
+        if let latest, Account.shared.signedIn {
+            try? await Relay.shared.cloud("POST", "api/pro", body: ["transaction": latest.jws])
+        }
         #endif
     }
 
     /// The one description of what Pro gives, used in the settings section and the subscription sheet.
-    static let summary = "Photos from your glasses, and the Ask and Look actions for Shortcuts. Voice conversations stay free."
+    static let summary = "Photos from your glasses, the natural voice on Bridge Cloud, and the Ask and Look actions for Shortcuts. Voice conversations stay free."
 
     enum Locked: LocalizedError {
         case needsPro

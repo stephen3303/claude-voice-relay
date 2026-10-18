@@ -1,4 +1,4 @@
-// Lambda entry point: wires voice.mjs to DynamoDB, Bedrock, Polly and APNs (push.mjs). The AWS SDK v3 ships with the
+// Lambda entry point: wires voice.mjs to DynamoDB, Bedrock, Polly, APNs (push.mjs) and Bridge Pro (storekit.mjs). The AWS SDK v3 ships with the
 // Node.js 22 Lambda runtime, so there is nothing to bundle.
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
@@ -11,6 +11,7 @@ import { makeHandler, LOOK_PROMPT, INBOX_KEEP_S } from './voice.mjs';
 import { makeAuth } from './auth.mjs';
 import { makeApns, makeNotifier, http2Send } from './push.mjs';
 import { makeSpeak } from './speech.mjs';
+import { makePro } from './storekit.mjs';
 
 const TABLE = process.env.TABLE;
 const LOOK_MODEL = process.env.LOOK_MODEL || 'us.anthropic.claude-haiku-5-5';
@@ -167,6 +168,46 @@ const speak = makeSpeak({
   synth: async (params, options) => (await polly.send(new SynthesizeSpeechCommand(params), options)).AudioStream.transformToByteArray(),
 });
 
+// Bridge Pro (storekit.mjs). pk PRO#<originalTransactionId>, sk OWNER: the account the subscription belongs to and
+// its refunded transaction IDs, outside USER#<sub> so a refund outlives the account. pk USER#<sub>, sk PRO: until when.
+const proStore = {
+  async owner(tx) {
+    const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' } }));
+    return r.Item ?? null;
+  },
+  async claim(tx, user) {
+    try {
+      await db.send(new UpdateCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' },
+        UpdateExpression: 'SET #user = :user', ConditionExpression: 'attribute_not_exists(#user) OR #user = :user',
+        ExpressionAttributeNames: { '#user': 'user' }, ExpressionAttributeValues: { ':user': user } }));
+      return true;
+    } catch (e) {
+      if (e.name === 'ConditionalCheckFailedException') return false;
+      throw e;
+    }
+  },
+  async revoke(tx, transactionId) {
+    const r = await db.send(new UpdateCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' },
+      UpdateExpression: 'ADD revoked :id', ExpressionAttributeValues: { ':id': new Set([transactionId]) }, ReturnValues: 'ALL_NEW' }));
+    return r.Attributes?.user ?? null;
+  },
+  async getPro(user) {
+    const r = await db.send(new GetCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: 'PRO' } }));
+    return r.Item ?? null;
+  },
+  async setPro(user, { tx, transactionId, product, env, until }) {
+    await conditional(new PutCommand({ TableName: TABLE,
+      Item: { pk: `USER#${user}`, sk: 'PRO', tx, transactionId, product, env, until },
+      ConditionExpression: 'attribute_not_exists(#until) OR #until < :until',
+      ExpressionAttributeNames: { '#until': 'until' }, ExpressionAttributeValues: { ':until': until } }));
+  },
+  async dropPro(user, transactionId) {
+    await conditional(new DeleteCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: 'PRO' },
+      ConditionExpression: 'transactionId = :id', ExpressionAttributeValues: { ':id': transactionId } }));
+  },
+};
+const pro = makePro({ store: proStore, bundleId: process.env.BUNDLE_ID });
+
 // Cloud agents (Fargate, GitHub App) are build step 4 in cloud/DESIGN.md. Until then a confirmed task
 // is acknowledged honestly instead of pretending to run.
 async function startTask(user, { project, task }) {
@@ -174,12 +215,30 @@ async function startTask(user, { project, task }) {
   return 'Sent.';
 }
 
-export const handler = makeHandler({ store, look, startTask, devices, deliver, speak });
+export const handler = makeHandler({ store, look, startTask, devices, deliver, speak, pro });
+
+// App Store Server Notifications v2 (POST /api/appstore/notifications, no authorizer: Apple signs the body).
+export async function appStore(event) {
+  try {
+    const r = await pro.notify(Buffer.from(event.body || '', event.isBase64Encoded ? 'base64' : 'utf8').toString('utf8'));
+    if (r.status !== 200) console.warn('App Store notification refused:', r.body.error);
+    return { statusCode: r.status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(r.body) };
+  } catch (e) {
+    console.error('App Store notification', e);
+    return { statusCode: 500, body: '' };   // Apple sends it again later
+  }
+}
 
 // ---------- accounts (auth.mjs): Sign in with Apple, sessions signed by KMS ----------
 let appleKeys = null, appleKeysAt = 0, publicJwk = null;
 
 async function deleteUser(sub) {
+  // The subscription is free to join another account; its refunds stay on record.
+  const p = await proStore.getPro(sub);
+  if (p?.tx) {
+    await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `PRO#${p.tx}`, sk: 'OWNER' }, UpdateExpression: 'REMOVE #user',
+      ConditionExpression: '#user = :sub', ExpressionAttributeNames: { '#user': 'user' }, ExpressionAttributeValues: { ':sub': sub } }));
+  }
   for (;;) {
     const r = await db.send(new QueryCommand({ TableName: TABLE, KeyConditionExpression: 'pk = :pk',
       ExpressionAttributeValues: { ':pk': `USER#${sub}` }, ProjectionExpression: 'pk, sk', Limit: 100 }));

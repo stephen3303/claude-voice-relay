@@ -12,7 +12,7 @@ The cloud speaks the same protocol as the relay, so the app only switches its ba
 | `POST /voice/confirm` | same | read-back step; "send it" starts a task |
 | `GET /voice/inbox` | same | agent messages, long-poll |
 | `POST /voice/photo` | same | quick answer, or "send this to <project>" |
-| `POST /voice/tts` (OpenAI, with a key) | same (Amazon Polly; 60k characters per account and 1M in total per day) | MP3 of a line; any non-200 means the phone voice |
+| `POST /voice/tts` (OpenAI, with a key) | same (Amazon Polly, Bridge Pro only; 60k characters per account and 1M in total per day) | MP3 of a line; any non-200 means the phone voice |
 | bearer `VOICE_TOKEN` | Bridge session token (Sign in with Apple) | per user |
 | projects = folders on the PC | projects = GitHub repos the user installed the Bridge GitHub App on, plus a Files workspace | |
 
@@ -31,9 +31,19 @@ iPhone app ──HTTPS──> CloudFront (bridge domain)
                                                      clone repo via GitHub App token → branch → PR
                                                      posts SPOKEN line to the inbox via the API
 Accounts: Sign in with Apple only (App Store 4.8). The app sends Apple's identity token to /api/auth/apple, which answers with a 30-day session signed by a KMS key; a Lambda authorizer checks it. No Cognito.
-App Store Server Notifications v2 ──> Lambda: subscription state per user
+App Store Server Notifications v2 ──> Lambda: subscription state per user (cloud/api/storekit.mjs)
 GitHub App webhooks ──> Lambda: which repos each user installed it on
 ```
+
+## Bridge Pro, checked in the cloud
+
+The app sends StoreKit 2's signed transaction to `POST /api/pro` after signing in and whenever its entitlements change.
+`cloud/api/storekit.mjs` checks Apple's signature (x5c chain to Apple Root CA - G3, pinned by fingerprint, plus the
+App Store marker extensions), the bundle ID and the Pro product, then stores until when the account is Pro. One
+subscription (originalTransactionId) belongs to one Bridge account, so a transaction copied to another account is refused.
+App Store Server Notifications v2 (`POST /api/appstore/notifications`) extend Pro on renewal and end it on a refund or
+revocation; a refunded transaction ID is kept, so the phone's old copy can't bring Pro back. No App Store Connect key is
+needed for any of this. The natural voice (`/api/voice/tts`) answers 402 without Pro, and the app speaks with the phone.
 
 ## Agents start the conversation (push)
 

@@ -98,5 +98,6 @@ final class Account: ObservableObject {
         expires = session.expires
         signedIn = true
         Push.shared.refresh()   // agents can reach this phone now
+        Task { await Store.shared.refresh() }   // and Bridge Cloud learns about Bridge Pro
     }
 }
