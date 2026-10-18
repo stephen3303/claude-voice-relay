@@ -4,7 +4,7 @@ name: Cloud deploy
 on:
   push:
     branches: [main]
-    paths: ["cloud/infra/**", "site/**", ".github/workflows/cloud-deploy.yml"]
+    paths: ["cloud/infra/**", "cloud/api/**", "site/**", ".github/workflows/cloud-deploy.yml"]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +28,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: cloud/infra/package-lock.json
+
+      - name: API tests
+        run: node --test ../api/voice.test.mjs
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
