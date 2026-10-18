@@ -65,7 +65,8 @@ final class Conversation: NSObject, ObservableObject {
     }
     /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
     private var onHiFi = false
-    private var formatRetries = 0
+    private var micRetries = 0
+    private var retry: Task<Void, Never>?
 
     /// Pause after you stop talking before your turn is sent.
     private var endOfTurn: TimeInterval { Self.readBack ? 1.4 : 2.0 }
@@ -90,6 +91,7 @@ final class Conversation: NSObject, ObservableObject {
         guard phase == .idle else { return }
         phase = .thinking
         self.trigger = trigger
+        micRetries = 0
         Task {
             guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; end(saying: nil); return }
             do { try configureAudioForGlasses() } catch { status = "Audio setup failed: \(error.localizedDescription)"; end(saying: nil); return }
@@ -136,9 +138,9 @@ final class Conversation: NSObject, ObservableObject {
         let session = AVAudioSession.sharedInstance()
         // HFP is the only Bluetooth profile that carries the glasses' microphone.
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
-        onHiFi = false   // only once it worked, so a failed switch back is tried again on the next listen
         if let hfp = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
             try session.setPreferredInput(hfp)
+            onHiFi = false   // only once the glasses' mic is back, so a failed switch is tried again
             if report { status = "Using \(hfp.portName)" }
         } else if report {
             status = "Glasses mic not found — using phone mic"
@@ -166,15 +168,19 @@ final class Conversation: NSObject, ObservableObject {
         if recognizer?.supportsOnDeviceRecognition == true { req.requiresOnDeviceRecognition = true }
         request = req
 
-        if onHiFi { try? useGlassesMic(report: false) }
+        if onHiFi {
+            try? useGlassesMic(report: false)
+            // Still no glasses mic after a few tries (none connected): listen on the phone instead.
+            if onHiFi && micRetries >= 3 { onHiFi = false; status = "Glasses mic not found — using phone mic" }
+        }
         let input = engine.inputNode
-        // Right after switching back from A2DP the mic can briefly have no format; try again in a moment.
-        guard input.outputFormat(forBus: 0).sampleRate > 0 else {
-            formatRetries += 1
-            if formatRetries >= 3 { status = "Mic unavailable, still trying" }
+        // Right after switching back from A2DP the glasses' mic can briefly be missing or have no format; retry soon.
+        guard !onHiFi, input.outputFormat(forBus: 0).sampleRate > 0 else {
+            micRetries += 1
+            if micRetries >= 3 { status = "Mic unavailable, still trying" }
             restartSoon(); return
         }
-        formatRetries = 0
+        micRetries = 0
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { [weak req] buffer, _ in
             req?.append(buffer)
@@ -205,13 +211,14 @@ final class Conversation: NSObject, ObservableObject {
 
     private func restartSoon() {
         stopListening()
-        Task {
+        retry = Task {
             try? await Task.sleep(for: .seconds(1))
-            if phase == .listening { startListening() }
+            if !Task.isCancelled, phase == .listening { startListening() }
         }
     }
 
     private func stopListening() {
+        retry?.cancel(); retry = nil   // a restart that already happened makes a queued retry stale
         silenceTimer?.invalidate()
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
