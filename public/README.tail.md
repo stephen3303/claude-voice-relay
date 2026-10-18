@@ -10,7 +10,7 @@ builds without one (the default here) send nothing.
 ## The App Store app
 
 Bridge on the App Store adds Bridge Cloud (agents without a PC), calls from agents, the Claude connector and
-Bridge Pro. It is built from a separate, private repository; this one is the free, self-hosted part.
+Bridge Pro. It is built from a separate repository; this one is the free, self-hosted part.
 
 ## Licence
 
