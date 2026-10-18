@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node --env-file=.env relay.mjs",
     "build-agent": "docker build -t claude-voice-agent:latest agent",
-    "install-hook": "node install-hook.mjs"
+    "install-hook": "node install-hook.mjs",
+    "test": "node --test"
   }
 }

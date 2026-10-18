@@ -9,6 +9,7 @@ import os from 'node:os';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -231,8 +232,9 @@ function findAgentPrefix(text) {
     .find((a) => t.startsWith(norm(a.name)));
 }
 
+// `body` is what was said after "task:", or { repo, task } already resolved by the read-back.
 async function startTask(body) {
-  const parsed = parseTask(body);
+  const parsed = typeof body === 'string' ? parseTask(body) : body;
   if (!parsed || !parsed.task) return say("I couldn't tell which project. Say task, in, the project name, a pause, then the task.");
   const name = spokenName(parsed.repo);
   let a = agents.get(name);
@@ -291,7 +293,6 @@ async function onMessage(m) {
 }
 
 // Shared by Telegram and the iPhone Shortcut endpoint.
-const TASK_PREFIX = /^(new\s+)?task\b\s*[:,.]?\s*/i;
 async function dispatch(text) {
   if (TASK_PREFIX.test(text)) return startTask(text.replace(TASK_PREFIX, ''));
   if (/^\/?status\b/i.test(text)) return status();
@@ -301,48 +302,15 @@ async function dispatch(text) {
   return reply(text);
 }
 
-// ---------- read-back loop for the iPhone Shortcut (/voice/confirm) ----------
-// Each utterance is held and read back until the user says "send it". Every reply that
-// expects another utterance contains the word "again"; the Shortcut stops listening otherwise.
-const SEND = /^(?:(?:yes|yeah|ok(?:ay)?)[\s,]+)?(?:send(?: it)?|go(?: ahead)?|do it|yes|yep|yeah)[\s.!]*$/i;
-const CANCEL = /^(?:cancel|never ?mind|forget it|stop)[\s.!]*$/i;
-const CONFIRM_TTL = 10 * 60000;
-let pending = null; // { text, at }
-
-function confirmStep(raw) {
-  if (pending && Date.now() - pending.at > CONFIRM_TTL) pending = null;
-  const isTask = TASK_PREFIX.test(raw);
-  const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
-  if (!body) return "I didn't catch that. Say the task again.";
-  if (SEND.test(body)) {
-    if (!pending) {
-      // With nothing held, a bare "yes" answers an agent's yes-or-no question.
-      if (YES.test(body) && [...agents.values()].some((a) => a.awaiting)) {
-        log('voice answer: yes');
-        dispatch('yes').catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
-        return 'Sent.';
-      }
-      return 'Nothing is waiting to send. Say the task again.';
-    }
-    const { text } = pending;
-    pending = null;
-    log('voice confirmed:', text);
-    dispatch(text).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
-    return 'Sent.';
-  }
-  if (CANCEL.test(body)) { pending = null; return 'Cancelled. Nothing sent.'; }
-  if (isTask) {
-    const parsed = parseTask(body);
-    if (!parsed?.task) {
-      pending = null;
-      return `I heard: ${body}. I can't tell which project that's for. Say the task again, starting with in and the project name.`;
-    }
-    pending = { text: raw, at: Date.now() };
-    return `I heard: ${body}. That goes to ${spokenName(parsed.repo)}. Say send it, or say the task again.`;
-  }
-  pending = { text: raw, at: Date.now() };
-  return `I heard: ${body}. Say send it, or say it again.`;
-}
+// ---------- read-back loop for the iPhone Shortcut (/voice/confirm): confirm.mjs ----------
+const confirmStep = makeConfirm({
+  parseTask,
+  resolveProject: (spoken) => resolveRepo(spoken, false),
+  spokenName,
+  agentAwaiting: () => [...agents.values()].some((a) => a.awaiting),
+  dispatch: (text) => (typeof text === 'string' ? dispatch(text) : startTask(text)).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); }),
+  log,
+});
 
 async function poll() {
   let offset = 0;
@@ -507,7 +475,7 @@ function tts(req, res) {
 // ---------- voice endpoint for the iPhone Shortcut (firewalled to Tailscale) ----------
 if (cfg.voiceToken) {
   const want = Buffer.from(`Bearer ${cfg.voiceToken}`);
-  http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     const got = Buffer.from(String(req.headers.authorization || ''));
     const ok = got.length === want.length && crypto.timingSafeEqual(got, want);
     const h = String(req.headers.authorization || '');
@@ -516,12 +484,21 @@ if (cfg.voiceToken) {
     if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
     if (req.method !== 'POST' || !['/voice', '/voice/confirm', '/voice/send'].includes(req.url)) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
-    let body = '';
-    req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });
+    let body = '', tooBig = false;
+    req.setEncoding('utf8'); // a character split across chunks stays whole
+    req.on('data', (c) => {
+      if (tooBig) return;
+      body += c;
+      if (body.length <= 20000) return;
+      // Answer in words at once (a dropped connection is all the Shortcut could say otherwise),
+      // then close the connection instead of reading the rest.
+      tooBig = true;
+      res.writeHead(413, { 'content-type': 'text/plain', connection: 'close' })
+        .end('That was too long. Say it again, shorter.', () => req.destroy());
+    });
     req.on('end', () => {
-      let text = body;
-      try { const j = JSON.parse(body); if (j && typeof j.text === 'string') text = j.text; } catch { /* plain-text body */ }
-      text = String(text).trim();
+      if (tooBig) return;
+      const text = utterance(body, req.headers['content-type']);
       // /voice/send skips the read-back: the app's "Read back what I said" setting is off.
       if (req.url === '/voice/confirm' || (cfg.voiceConfirm && req.url !== '/voice/send')) {
         log('voice confirm:', text);
@@ -539,7 +516,14 @@ if (cfg.voiceToken) {
     const raw = String(err.rawPacket || '').slice(0, 400).replace(/(authorization\s*:)[^\r\n]*/gi, '$1 ****');
     log(`voice clientError ${err.code}: ${err.message}; raw: ${JSON.stringify(raw)}`);
     try { socket.end('HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nBad request. Check the Authorization header for extra characters.'); } catch { /* socket gone */ }
-  }).listen(cfg.voicePort, '0.0.0.0', () => log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`));
+  });
+  // The Shortcut's loop reuses its connection after speaking the read-back and dictating the next
+  // answer, often 10-30 seconds later. Node closes idle connections after 5 seconds by default, and
+  // a POST sent on one that was just closed fails on the phone ("network connection was lost" or a
+  // timeout) instead of being retried. Keep idle connections open longer than a turn takes.
+  server.keepAliveTimeout = 120_000;
+  server.headersTimeout = 125_000;
+  server.listen(cfg.voicePort, '0.0.0.0', () => log(`voice endpoint on 0.0.0.0:${cfg.voicePort}`));
 } else log('VOICE_TOKEN not set; voice endpoint disabled.');
 
 load();

@@ -53,7 +53,8 @@ test('"send it" with nothing held, cancel, and expiry', async () => {
   assert.match((await call('POST', '/voice/confirm', { body: 'cancel' })).body, /Cancelled/);
   await call('POST', '/voice/confirm', { body: 'task: in app, fix login' });
   advance(11 * 60_000);
-  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /Nothing is waiting/);
+  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /waited over ten minutes/);
+  assert.match((await call('POST', '/voice/confirm', { body: 'send it' })).body, /Nothing is waiting/, 'the expired hold is cleared');
   assert.equal(started.length, 0);
 });
 
@@ -152,4 +153,13 @@ test('a test call waits the asked delay (at most 20s), then rings like an agent'
   assert.equal(delivered.length, 1);
   assert.equal(delivered[0].from, 'Bridge');
   assert.equal(delivered[0].at - start, 20_000);
+});
+
+test('dictation variants of "send it" confirm', async () => {
+  for (const said of ['sent it', 'send it please', 'Please send it', 'send that', 'yes, send it']) {
+    const { call, started } = setup();
+    await call('POST', '/voice/confirm', { body: 'task: in app, fix login' });
+    assert.equal((await call('POST', '/voice/confirm', { body: `task: ${said}` })).body, 'Sent.', said);
+    assert.equal(started.length, 1, said);
+  }
 });
