@@ -243,7 +243,7 @@ final class GlassesController: ObservableObject {
         // leave a note on the home screen saying how far the full photo got.
         var fellBack = false, photoDown = false, streamRestarted = false, streamFired = false
         var bytes: (UInt64, UInt64)?, why = ""
-        var succeeded = false
+        var succeeded = false, fallbackWhy = ""
         func fire() {
             fired = true
             // Medium keeps the Bluetooth transfer quick; plenty for Claude to read a screen or sign.
@@ -270,81 +270,88 @@ final class GlassesController: ObservableObject {
             if photoDown { restartStream() } else { arm(3, .cameraBusy) }
         }
         defer {
-            if fellBack { lastError = note(succeeded ? "The fallback got a photo." : "The fallback failed too.") }
+            if fellBack { lastError = note(succeeded ? "The fallback got a photo." : "The fallback failed too: \(fallbackWhy.isEmpty ? "no reason given" : fallbackWhy).") }
         }
         #endif
-        for await event in events {
-            switch event {
-            #if !APP_STORE
-            case .photoStopped where fellBack && !streamRestarted:
-                photoDown = true
-                restartStream()
-            case .timeout(let gen, _) where gen == generation && fellBack && !streamRestarted:
-                restartStream()   // the shutter never said it let go; try the stream anyway
-            case .streaming where fellBack && !streamFired:
-                streamFired = true
-                try fireStreamStill()
-            case .progress, .photoError:
-                guard !fellBack else { break }   // leftovers from the abandoned full photo
-                if case .progress(let received, let total) = event {
-                    bytes = (received, total)
-                    arm(15, .photoNeverArrived)   // bytes are still crossing; keep waiting
-                } else if case .photoError(let message) = event, fired {
-                    fallBack(message)
-                } else if case .photoError(let message) = event {
-                    throw PhotoFailure.failed(message)
-                }
-            #endif
-            case .streaming where !photoStarting && !fired:
-                #if APP_STORE
-                fired = true
-                try fireStreamStill()
-                #else
-                // The stream only wakes the sensor; the shutter is started once frames prove it's up.
-                photoStarting = true
-                camera.photo.start()
-                arm(10, .cameraDidNotStart)   // the sensor is up; a fresh allowance for the shutter
-                #endif
-            case .streaming:
-                break
-            #if !APP_STORE
-            case .photoReady where !shutterReady:
-                shutterReady = true
-                // Stream and shutter compete for the sensor, and stop() returns before the stream lets
-                // go. Meta's sample says a capture fired in that beat is refused with no error and no
-                // bytes, so it just times out. Fire only once the stream reports it is down.
-                camera.stream.stop()
-                if camera.stream.state == .stopped { fire() } else { arm(5, .cameraBusy) }
-            case .streamStopped where shutterReady && !fired:
-                fire()
-            case .photoStopped where fired && !fellBack:
-                // Possibly just the end of a good capture with the data still on its way; give it a beat.
-                photoDown = true
-                arm(3, .photoNeverArrived)
-            case .timeout(let gen, .photoNeverArrived) where gen == generation && fired && !fellBack:
-                fallBack("it never arrived")
-            #endif
-            case .streamStopped, .photoReady, .photoStopped:
-                break
-            #if APP_STORE
-            case .progress, .photoError:
-                break
-            #endif
-            case .photo(let jpeg):
-                // A late full photo after the fallback started is still taken; it's the better picture.
-                camera.stream.stop()
+        do {
+            for await event in events {
+                switch event {
                 #if !APP_STORE
-                camera.photo.stop()
-                succeeded = true
+                case .photoStopped where fellBack && !streamRestarted:
+                    photoDown = true
+                    restartStream()
+                case .timeout(let gen, _) where gen == generation && fellBack && !streamRestarted:
+                    restartStream()   // the shutter never said it let go; try the stream anyway
+                case .streaming where fellBack && !streamFired:
+                    streamFired = true
+                    try fireStreamStill()
+                case .progress, .photoError:
+                    guard !fellBack else { break }   // leftovers from the abandoned full photo
+                    if case .progress(let received, let total) = event {
+                        bytes = (received, total)
+                        arm(15, .photoNeverArrived)   // bytes are still crossing; keep waiting
+                    } else if case .photoError(let message) = event, fired {
+                        fallBack(message)
+                    } else if case .photoError(let message) = event {
+                        throw PhotoFailure.failed(message)
+                    }
                 #endif
-                return jpeg
-            case .error(let message):
-                throw PhotoFailure.failed(message)
-            case .timeout(let gen, let failure) where gen == generation:
-                throw failure
-            case .timeout:
-                break   // fired before a later re-arm
+                case .streaming where !photoStarting && !fired:
+                    #if APP_STORE
+                    fired = true
+                    try fireStreamStill()
+                    #else
+                    // The stream only wakes the sensor; the shutter is started once frames prove it's up.
+                    photoStarting = true
+                    camera.photo.start()
+                    arm(10, .cameraDidNotStart)   // the sensor is up; a fresh allowance for the shutter
+                    #endif
+                case .streaming:
+                    break
+                #if !APP_STORE
+                case .photoReady where !shutterReady:
+                    shutterReady = true
+                    // Stream and shutter compete for the sensor, and stop() returns before the stream lets
+                    // go. Meta's sample says a capture fired in that beat is refused with no error and no
+                    // bytes, so it just times out. Fire only once the stream reports it is down.
+                    camera.stream.stop()
+                    if camera.stream.state == .stopped { fire() } else { arm(5, .cameraBusy) }
+                case .streamStopped where shutterReady && !fired:
+                    fire()
+                case .photoStopped where fired && !fellBack:
+                    // Possibly just the end of a good capture with the data still on its way; give it a beat.
+                    photoDown = true
+                    arm(3, .photoNeverArrived)
+                case .timeout(let gen, .photoNeverArrived) where gen == generation && fired && !fellBack:
+                    fallBack("it never arrived")
+                #endif
+                case .streamStopped, .photoReady, .photoStopped:
+                    break
+                #if APP_STORE
+                case .progress, .photoError:
+                    break
+                #endif
+                case .photo(let jpeg):
+                    // A late full photo after the fallback started is still taken; it's the better picture.
+                    camera.stream.stop()
+                    #if !APP_STORE
+                    camera.photo.stop()
+                    succeeded = true
+                    #endif
+                    return jpeg
+                case .error(let message):
+                    throw PhotoFailure.failed(message)
+                case .timeout(let gen, let failure) where gen == generation:
+                    throw failure
+                case .timeout:
+                    break   // fired before a later re-arm
+                }
             }
+        } catch {
+            #if !APP_STORE
+            fallbackWhy = error.localizedDescription
+            #endif
+            throw error
         }
         // The events never finish on their own, so getting here means the photo was cancelled.
         throw CancellationError()
