@@ -93,6 +93,15 @@ test('dictation that stops after the project name keeps the project and asks for
   assert.deepEqual(sent, ['task: in claude voice relay, send me a Telegram if you get this']);
 });
 
+test('the task after a project named on its own can come without the task prefix (glasses app)', async () => {
+  const { say, sent } = setup();
+  await say('task: in voice relay');
+  assert.equal(await say('change the voice'),
+    'I heard: change the voice. That goes to claude voice relay. Say send it, or say the task again.');
+  assert.equal(await say('send it'), 'Sent.');
+  assert.deepEqual(sent, ['task: in claude voice relay, change the voice']);
+});
+
 test('a task with no project is not held', async () => {
   const { say, sent } = setup();
   assert.match(await say('task: fix the bug'), /can't tell which project.*again/);

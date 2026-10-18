@@ -47,7 +47,9 @@ export function makeConfirm(deps) {
     }
     if (CANCEL.test(body)) { pending = null; return 'Cancelled. Nothing sent.'; }
 
-    if (isTask) {
+    // Once a project is held, the next utterance is its task, prefixed or not: the glasses app
+    // only adds "task:" to what starts with "in" or "on".
+    if (isTask || pending?.repo) {
       const parsed = deps.parseTask(body);
       if (parsed?.task) {
         pending = { text: `task: ${body}`, at: now() };
