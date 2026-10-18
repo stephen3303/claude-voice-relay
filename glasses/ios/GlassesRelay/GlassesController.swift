@@ -29,9 +29,18 @@ final class GlassesController: ObservableObject {
         }
     }
 
+    /// Set at launch by GlassesRelayApp. False means Wearables.configure() failed, and nothing may touch Wearables.shared.
+    nonisolated(unsafe) static var toolkitReady = false
+    nonisolated(unsafe) static var toolkitError: String?
+
     func start() async {
         guard !started else { return }
         started = true
+        guard Self.toolkitReady else {
+            registration = "Unavailable"
+            lastError = "Glasses features are off: the Meta toolkit didn't start (\(Self.toolkitError ?? "unknown error"))."
+            return
+        }
         registration = "\(Wearables.shared.registrationState)"
         Task { for await state in Wearables.shared.registrationStateStream() { registration = "\(state)" } }
         Task { await followDevices() }
@@ -44,6 +53,7 @@ final class GlassesController: ObservableObject {
     }
 
     func register() async {
+        guard Self.toolkitReady else { return }
         do { try await Wearables.shared.startRegistration() } catch { lastError = "\(error)" }
     }
 
@@ -130,6 +140,7 @@ final class GlassesController: ObservableObject {
 
     /// Opens the Meta AI app to ask; only call this from a tap.
     func allowCamera() async {
+        guard Self.toolkitReady else { return }
         do { cameraAllowed = try await Wearables.shared.requestPermission(.camera) == .granted }
         catch { lastError = "Camera permission: \(error)" }
     }
@@ -140,6 +151,7 @@ final class GlassesController: ObservableObject {
     /// stopped so the shutter has the sensor to itself → capture.
     func capturePhoto() async throws -> Data {
         try Store.shared.requirePro()
+        guard Self.toolkitReady else { throw PhotoFailure.noGlasses }
         // Launched from a Shortcut, the device list can arrive a beat after the app opens.
         for _ in 0..<10 where devices.isEmpty { try await Task.sleep(for: .milliseconds(500)) }
         guard let device = devices.first else { throw PhotoFailure.noGlasses }
