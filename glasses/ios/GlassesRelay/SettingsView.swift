@@ -21,6 +21,7 @@ struct SettingsView: View {
     // A deleted voice falls back to the best installed one; show that rather than a blank picker.
     @State private var voiceID = Conversation.voices.contains { $0.identifier == Conversation.voiceID } ? Conversation.voiceID : ""
     @State private var hiFi = Conversation.hiFiSpeech
+    @State private var natural = Conversation.naturalVoice
     @State private var previewer = AVSpeechSynthesizer()
     @State private var showPaywall = false
     @State private var showManage = false
@@ -64,13 +65,19 @@ struct SettingsView: View {
                         Conversation.voiceID = id
                         preview()
                     }
+                    if mode.wrappedValue != .demo {
+                        Toggle("Natural voice", isOn: $natural)
+                            .onChange(of: natural) { _, on in Conversation.naturalVoice = on }
+                    }
                     Toggle("High-quality speech", isOn: $hiFi)
                         .onChange(of: hiFi) { _, on in Conversation.hiFiSpeech = on }
                 } header: { Text("Voice") } footer: {
                     Text((readBack
                           ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
                           : "Bridge sends what you say after a 2-second pause, without repeating it.")
-                         + " The phone voice speaks when the natural voice isn't available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
+                         + " The phone voice speaks unless the natural voice is on and available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
+                         + (mode.wrappedValue == .pc ? " Natural voice sends each reply's text to OpenAI to be spoken, and needs an OpenAI key on the relay."
+                            : mode.wrappedValue == .cloud ? " Natural voice is spoken by Amazon Polly and needs Bridge Pro." : "")
                          + " High-quality speech plays replies over the glasses' music link, which sounds much better, but each reply starts and listening resumes about a second later.")
                 }
                 #if APP_STORE

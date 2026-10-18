@@ -83,7 +83,7 @@ final class Store: ObservableObject {
     }
 
     /// The one description of what Pro gives, used in the settings section and the subscription sheet.
-    static let summary = "Photos from your glasses, the natural voice on Bridge Cloud, and the Ask and Look actions for Shortcuts. Voice conversations stay free."
+    static let summary = "Photos from your glasses, the natural voice on Bridge Cloud (turn on Natural voice in Settings), and the Ask and Look actions for Shortcuts. Voice conversations stay free."
 
     enum Locked: LocalizedError {
         case needsPro
