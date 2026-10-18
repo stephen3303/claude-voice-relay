@@ -85,10 +85,11 @@ final class Conversation: NSObject, ObservableObject {
         synth.delegate = self
         NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             // A route change (e.g. HFP renegotiating 8k↔16k) stops the engine; rebuild the tap on the new format.
-            // Once something was heard, send it rather than throw it away with a restart.
+            // With read-back on, what was heard so far is read back before anything is sent, so keep it rather
+            // than throw it away with a restart. Without read-back it would go out cut short, so restart.
             Task { @MainActor in
                 guard let self, self.phase == .listening else { return }
-                if self.heard.isEmpty { self.restartListening() } else { self.finishTurn() }
+                if !self.heard.isEmpty && Self.readBack { self.finishTurn() } else { self.restartListening() }
             }
         }
     }

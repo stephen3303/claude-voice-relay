@@ -181,18 +181,23 @@ struct SettingsView: View {
         }
     }
 
+    /// Not during a conversation: the recognizer would hear the sample and send it as a turn.
     private func preview() {
         previewer.stopSpeaking(at: .immediate)
-        // Outside a conversation the default session follows the silent switch; a conversation's own stays as it is.
+        guard glasses.conversation.phase == .idle else { return }
+        // The default session follows the silent switch, and a finished conversation's one plays from the earpiece.
         let session = AVAudioSession.sharedInstance()
-        if session.category != .playAndRecord {
-            try? session.setCategory(.playback, mode: .spokenAudio)
-            try? session.setActive(true)
-        }
+        try? session.setCategory(.playback, mode: .spokenAudio)
+        try? session.setActive(true)
         let u = AVSpeechUtterance(string: "This is how Bridge will sound.")
         u.voice = Conversation.bestVoice()
         u.rate = 0.5
         previewer.speak(u)
+        // Hand the audio back (music the preview paused resumes) once it's done, unless a conversation started.
+        Task {
+            repeat { try? await Task.sleep(for: .milliseconds(300)) } while previewer.isSpeaking
+            if glasses.conversation.phase == .idle { try? session.setActive(false, options: .notifyOthersOnDeactivation) }
+        }
     }
 
     // MARK: glasses
