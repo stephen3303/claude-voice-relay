@@ -65,9 +65,20 @@ final class Conversation: NSObject, ObservableObject {
     }
     /// Natural voice: OpenAI text-to-speech from the PC relay (when it has a key), or Amazon Polly from Bridge Cloud
     /// (Bridge Pro). Off by default, so replies are spoken by the phone voice and no text goes out to be spoken.
+    /// Except for Bridge Pro users who already heard it on Bridge Cloud before the switch existed: theirs starts on.
     static var naturalVoice: Bool {
-        get { UserDefaults.standard.object(forKey: "naturalVoice") as? Bool ?? false }
+        get {
+            if let on = UserDefaults.standard.object(forKey: "naturalVoice") as? Bool { return on }
+            return UserDefaults.standard.bool(forKey: "naturalVoiceBefore") && Store.shared.isPro
+        }
         set { UserDefaults.standard.set(newValue, forKey: "naturalVoice") }
+    }
+    /// Once, at launch: notes whether this install was already on Bridge Cloud when the switch arrived. Pro is
+    /// checked when the voice is used, since StoreKit hasn't answered yet at launch.
+    static func noteNaturalVoiceBefore() {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "naturalVoiceBefore") == nil else { return }
+        d.set(d.object(forKey: "naturalVoice") == nil && d.string(forKey: "relayURL") == Relay.cloudAddress, forKey: "naturalVoiceBefore")
     }
     /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
     private var onHiFi = false
