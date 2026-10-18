@@ -294,7 +294,11 @@ final class Conversation: NSObject, ObservableObject {
                 guard let self, self.phase == .listening, self.heard.isEmpty else { return }
                 let limit = self.awaitingAgent ? self.agentHangup : self.idleHangup
                 if Date().timeIntervalSince(self.lastActivity) > limit {
+                    #if APP_STORE
+                    self.end(saying: "I'll hang up. Say Hey Siri, talk to Bridge when you need me.")
+                    #else
                     self.end(saying: "I'll hang up. Say Hey Meta, start Bridge when you need me.")
+                    #endif
                 }
             }
         }

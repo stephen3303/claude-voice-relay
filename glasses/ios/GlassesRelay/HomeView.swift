@@ -105,8 +105,13 @@ struct HomeView: View {
             }
             .buttonStyle(.bordered)
             .disabled(conversation.phase != .idle || !glasses.cameraAllowed)
+            #if APP_STORE
+            Text("Or say \"Hey Siri, talk to Bridge\".")
+                .font(.footnote).foregroundStyle(.secondary)
+            #else
             Text("Or say \"Hey Meta, start Bridge\" on your glasses.")
                 .font(.footnote).foregroundStyle(.secondary)
+            #endif
         }
         .controlSize(.large)
     }

@@ -21,7 +21,7 @@ struct WelcomeView: View {
                     .multilineTextAlignment(.center).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 16) {
-                Feature(symbol: "waveform", title: "Hands-free", text: "Say \"Hey Meta, start Bridge\" and speak your task.")
+                Feature(symbol: "waveform", title: "Hands-free", text: "Say \"Hey Siri, talk to Bridge\" and speak your task.")
                 Feature(symbol: "bubble.left.and.text.bubble.right", title: "Answers out loud", text: "Your agents' replies are read to you as they arrive.")
                 Feature(symbol: "camera", title: "Show, don't tell", text: "Ask about what you're looking at, or send a photo to an agent.")
             }

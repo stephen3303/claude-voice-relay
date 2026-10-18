@@ -8,8 +8,8 @@ final class Store: ObservableObject {
 
     /// Must match the auto-renewable subscriptions in App Store Connect (one subscription group).
     static let productIDs = ["com.talktobridge.bridge.pro.monthly", "com.talktobridge.bridge.pro.yearly"]
-    static let privacyURL = URL(string: "https://stephen3303.github.io/claude-voice-relay/privacy.html")!
-    static let termsURL = URL(string: "https://stephen3303.github.io/claude-voice-relay/terms.html")!
+    static let privacyURL = URL(string: "https://talktobridge.com/privacy.html")!
+    static let termsURL = URL(string: "https://talktobridge.com/terms.html")!
 
     #if APP_STORE
     @Published private(set) var isPro = false

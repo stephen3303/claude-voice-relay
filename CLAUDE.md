@@ -21,7 +21,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   Lambda, DynamoDB, KMS session key, Sign in with Apple, APNs push in `cloud/api/push.mjs` with the key
   in Secrets Manager `bridge/apns`, set by `cloud/setup/setup-apns.ps1`) and `BridgeWeb` (S3 + CloudFront for
   talktobridge.com, DNS at Cloudflare).
-- `site/` — the website (privacy, terms, support), on GitHub Pages now; talktobridge.com later.
+- `site/` — the website (home, privacy, terms, support) for the App Store product only, live at https://talktobridge.com
+  on GitHub Pages (Cloudflare DNS only); CloudFront (`BridgeWeb`) later. The app and listing link to talktobridge.com.
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.
 - `github-app.mjs`, `publish.mjs` — agents never hold a GitHub token: they commit and write a push request, and after
   the turn the relay mints a GitHub App token (`setup-github-app.mjs` creates the App) for that agent's repo only, and
@@ -67,9 +68,8 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
   talktobridge.com and www, pointing at the `CloudFrontTarget` output.
 - App Store: Stephen has enrolled. Still needed: the App Store Connect API key, the app record, and
   the Meta app ID and client token, stored with `glasses/setup-appstore-secrets.ps1`. Then run the
-  subscriptions workflow, then the App Store upload. Before that upload, `site/privacy.html` must cover
-  Bridge Cloud, the Bridge account (Sign in with Apple), push, spoken replies via Amazon Polly and the
-  Bridge Pro purchase record the app sends to Bridge Cloud (`/api/pro`); today it
-  covers self-hosting only. Also set App Store Server Notifications (Version 2, production and sandbox URLs)
+  subscriptions workflow, then the App Store upload. The site describes the App Store product only (Bridge
+  Cloud, Pro); `site/privacy.html` covers it, but still names "the developer of Bridge" and
+  support@talktobridge.com, which needs a real legal name and a working mailbox before upload. Also set App Store Server Notifications (Version 2, production and sandbox URLs)
   to the `AppStoreNotificationsUrl` output, so renewals and refunds reach Bridge Pro's cloud check (`cloud/api/storekit.mjs`).
 - Cloud agents (Fargate + GitHub App) aren't built yet; the cloud API answers tasks honestly.
