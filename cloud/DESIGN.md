@@ -48,8 +48,8 @@ Choices and why:
 | Plan | Price (proposal) | Claude usage | Includes |
 |---|---|---|---|
 | Free | $0 | user's own PC (self-hosted relay) | voice, read-back, inbox |
-| Pro Connect (BYO key) | $4.99/mo or $39.99/yr | customer's Anthropic API key | hosted agents, photos, Shortcuts, Files |
-| Pro | $19.99/mo or $179.99/yr | included: 30 agent tasks/month, unlimited quick photo answers (fair use) | same |
+| Pro Connect (BYO key) | $4.99/mo or $49.99/yr | customer's Anthropic API key | hosted agents, photos, Shortcuts, Files |
+| Pro | $19.99/mo or $179.99/yr (placeholder, not yet confirmed) | included: 30 agent tasks/month, unlimited quick photo answers (fair use) | same |
 
 Cost per included user, worst case: about 30 tasks × ~$1.50 (Sonnet 5.5 with prompt caching) ≈ $45. So the
 allowance is metered in DynamoDB and enforced before a task starts. The app says "You've used 25 of 30 tasks this
