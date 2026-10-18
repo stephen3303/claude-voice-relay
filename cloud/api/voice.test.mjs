@@ -205,6 +205,7 @@ test('confirm and send treat JSON without a text string as nothing said', async 
   const { call, started } = setup();
   assert.match((await call('POST', '/voice/send', { body: '{"msg":"x"}' })).body, /didn't catch that/);
   assert.match((await call('POST', '/voice/confirm', { body: '{"text":null}' })).body, /didn't catch that/);
+  assert.match((await call('POST', '/voice/send', { body: 'null' })).body, /didn't catch that/);
   assert.equal(started.length, 0);
 });
 

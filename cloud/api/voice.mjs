@@ -41,7 +41,7 @@ function saidOf(raw) {
   const body = raw.toString('utf8');
   let j;
   try { j = JSON.parse(body); } catch { return body.trim(); }
-  if (j && typeof j === 'object') return typeof j.text === 'string' ? j.text.trim() : null;
+  if (j === null || typeof j === 'object') return typeof j?.text === 'string' ? j.text.trim() : null;
   return body.trim();   // a bare number or string that happens to parse as JSON
 }
 

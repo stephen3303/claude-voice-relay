@@ -10,6 +10,7 @@ import { createHash, createPublicKey } from 'node:crypto';
 import { makeHandler, LOOK_PROMPT, INBOX_KEEP_S } from './voice.mjs';
 import { makeAuth } from './auth.mjs';
 import { makeApns, makeNotifier, http2Send } from './push.mjs';
+import { makeSpeak } from './speech.mjs';
 
 const TABLE = process.env.TABLE;
 const LOOK_MODEL = process.env.LOOK_MODEL || 'us.anthropic.claude-haiku-5-5';
@@ -160,33 +161,11 @@ async function look(jpeg, said) {
   return r.output?.message?.content?.find((c) => c.text)?.text?.trim() || "I couldn't make out the photo.";
 }
 
-// The app's spoken replies. The generative engine is Polly's most natural. Ruth also has a neural voice, tried
-// only when the generative one is throttled, stalled or unavailable (not on errors a retry can't fix). Each call
-// has a time limit, so both fit inside the app's 20 s wait instead of producing audio nobody hears.
-const RETRY_NEURAL = new Set(['ThrottlingException', 'ServiceFailureException', 'EngineNotSupportedException', 'TimeoutError', 'AbortError']);
-const spoken = new Map();   // short fixed lines ("Sent.") are spoken again and again: keep their audio
-async function speak(text) {
-  const cached = spoken.get(text);
-  if (cached) return cached;
-  const params = { Text: text, VoiceId: SPEECH_VOICE, OutputFormat: 'mp3', SampleRate: '24000' };
-  // 8 s + 6 s leaves room for the budget writes and a cold start inside the app's 20 s wait.
-  const synth = async (Engine, ms) => {
-    const r = await polly.send(new SynthesizeSpeechCommand({ ...params, Engine }), { abortSignal: AbortSignal.timeout(ms) });
-    return r.AudioStream.transformToByteArray();
-  };
-  let mp3;
-  try { mp3 = await synth('generative', 8000); }
-  catch (e) {
-    if (!RETRY_NEURAL.has(e.name)) throw e;
-    console.warn('generative speech failed, using neural:', e.name, e.message);
-    mp3 = await synth('neural', 6000);
-  }
-  if (text.length <= 120) {
-    if (spoken.size >= 200) spoken.delete(spoken.keys().next().value);
-    spoken.set(text, mp3);
-  }
-  return mp3;
-}
+// The app's spoken replies (speech.mjs).
+const speak = makeSpeak({
+  voice: SPEECH_VOICE,
+  synth: async (params, options) => (await polly.send(new SynthesizeSpeechCommand(params), options)).AudioStream.transformToByteArray(),
+});
 
 // Cloud agents (Fargate, GitHub App) are build step 4 in cloud/DESIGN.md. Until then a confirmed task
 // is acknowledged honestly instead of pretending to run.
