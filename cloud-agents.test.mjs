@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { cloudArgs, cloudEnv, parseCloud, runCloud, CLOUD_PROMPT } from './cloud-agents.mjs';
+import { cloudArgs, cloudEnv, parseCloud, runCloud, makeCloudTurn, CLOUD_PROMPT } from './cloud-agents.mjs';
 
 function fakeSpawn({ stdout = '', stderr = '', code = 0, hang = false } = {}) {
   const calls = [];
@@ -30,9 +30,11 @@ test('cloudArgs starts a new cloud session, or continues one by id, with only fi
   for (const bad of ['--resume', 'a b', 'x;rm', '', 'x'.repeat(101)]) assert.throws(() => cloudArgs(bad), /Bad cloud session id/, bad);
 });
 
-test('cloudEnv drops the setup token and API key so the claude.ai sign-in is used', () => {
-  const env = { PATH: '/bin', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat', ANTHROPIC_API_KEY: 'sk-ant-api' };
-  assert.deepEqual(cloudEnv(env), { PATH: '/bin' });
+test('cloudEnv passes only what the CLI needs, never the relay\'s secrets or the setup token', () => {
+  const env = { Path: 'C:\\Windows', USERPROFILE: 'C:\\Users\\steph', APPDATA: 'x', SystemRoot: 'C:\\Windows', HTTPS_PROXY: 'p',
+    CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat', ANTHROPIC_API_KEY: 'sk-ant-api', VOICE_TOKEN: 'v', AGENT_GH_TOKEN: 'g',
+    GITHUB_APP_KEY_FILE: 'k.pem', OPENAI_API_KEY: 'o' };
+  assert.deepEqual(Object.keys(cloudEnv(env)).sort(), ['APPDATA', 'HTTPS_PROXY', 'Path', 'SystemRoot', 'USERPROFILE']);
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'sk-ant-oat'); // the relay's own environment is untouched
 });
 
@@ -71,4 +73,84 @@ test('runCloud kills a CLI that never answers', async () => {
   const { spawn, calls } = fakeSpawn({ hang: true });
   await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x', timeoutMs: 20 }), /no answer after .*Claude app/);
   assert.equal(calls.killed, true);
+});
+
+test('runCloud rejects when claude is not installed', async () => {
+  const spawn = () => {
+    const p = new EventEmitter();
+    p.stdout = new EventEmitter(); p.stderr = new EventEmitter(); p.stdin = new EventEmitter();
+    p.stdin.end = () => setImmediate(() => p.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' })));
+    return p;
+  };
+  await assert.rejects(runCloud({ spawn, env: {}, cwd: '/p', prompt: 'x', timeoutMs: 1000 }), /ENOENT/);
+});
+
+function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, creds = { token: 't' }, exists = true } = {}) {
+  const runs = [], said = [], spoken = [], released = [];
+  const agentGitHub = {
+    pinNow: async () => {},
+    credentials: async () => creds,
+    release: async (c) => { released.push(c); },
+  };
+  const cloudTurn = makeCloudTurn({
+    run: async (o) => { runs.push(o); if (reply instanceof Error) throw reply; return reply; },
+    agentGitHub, exists: () => exists, say: (t, o) => said.push(o?.spoken ?? t), speakResult: (a, r) => spoken.push(r.result),
+  });
+  return { cloudTurn, runs, said, spoken, released };
+}
+const newAgent = () => ({ name: 'trading bot', repoPath: '/p/trading-bot', cloudNew: true });
+
+test('cloudTurn starts a new task as a session after the repo check, then continues it', async () => {
+  const h = turnHarness();
+  const a = newAgent();
+  await h.cloudTurn(a, 'add a stop-loss');
+  assert.deepEqual(h.runs[0], { cwd: '/p/trading-bot', sessionId: undefined, prompt: 'add a stop-loss' });
+  assert.deepEqual(h.released, [{ token: 't' }]);
+  assert.deepEqual(h.spoken, ['SPOKEN: Done.']);
+  assert.equal(a.cloudId, 'cse_1');
+  assert.equal(a.cloudNew, false);
+  await h.cloudTurn(a, 'Yes, go ahead.');
+  assert.equal(h.runs[1].sessionId, 'cse_1');
+  assert.equal(h.released.length, 1); // the check runs once per task
+});
+
+test('cloudTurn starts nothing for a repo without the protection the relay requires', async () => {
+  const h = turnHarness({ creds: null });
+  const a = newAgent();
+  await assert.rejects(h.cloudTurn(a, 'x'), /isn't set up for agents/);
+  assert.equal(h.runs.length, 0);
+  assert.equal(a.cloudNew, true); // nothing started, so the task can be retried
+});
+
+test('cloudTurn refuses a reply with no session to go to', async () => {
+  for (const a of [{ name: 'bot', repoPath: '/p', sessionId: 'docker-1' }, { name: 'bot', repoPath: '/p' }]) {
+    const h = turnHarness();
+    await assert.rejects(h.cloudTurn(a, 'Yes, go ahead.'), /Start a new task/);
+    assert.equal(h.runs.length, 0);
+  }
+});
+
+test('a failed first turn is not retried as a new session by the next reply', async () => {
+  const h = turnHarness({ reply: new Error('no answer after 60 minutes') });
+  const a = newAgent();
+  await assert.rejects(h.cloudTurn(a, 'add a stop-loss'), /no answer/);
+  await assert.rejects(h.cloudTurn(a, 'Yes, go ahead.'), /Start a new task/);
+  assert.equal(h.runs.length, 1);
+});
+
+test('cloudTurn says when a follow-up was only queued, and stays quiet once stopped', async () => {
+  const q = turnHarness({ reply: { result: '', is_error: false, session_id: 'cse_1', url: 'u1', queued: true } });
+  const a = { name: 'bot', repoPath: '/p', cloudId: 'cse_1' };
+  await q.cloudTurn(a, 'and the tests');
+  assert.deepEqual(q.said, ['Sent to bot. Its answer will be in the Claude app.']);
+  assert.equal(q.spoken.length, 0);
+  const s = turnHarness();
+  const b = { ...newAgent(), stopped: true };
+  await s.cloudTurn(b, 'x');
+  assert.equal(s.spoken.length + s.said.length, 0);
+});
+
+test('cloudTurn refuses a folder that does not exist', async () => {
+  const h = turnHarness({ exists: false });
+  await assert.rejects(h.cloudTurn(newAgent(), 'x'), /doesn't exist yet/);
 });

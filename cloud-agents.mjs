@@ -8,8 +8,8 @@
 // reaches the session, but the answer is then only in the app.
 //
 // Cloud sessions need the PC's Claude Code signed in with a claude.ai account (`claude auth login`).
-// A CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) can only make model requests, so it's
-// removed from the environment here or it would take precedence over that sign-in.
+// A CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) can only make model requests, so it's kept out
+// of the CLI's environment (cloudEnv) or it would take precedence over that sign-in.
 
 export const CLOUD_PROMPT = [
   'You are running in a claude.ai cloud session started by voice from the Bridge app.',
@@ -27,11 +27,15 @@ export function cloudArgs(sessionId) {
     ...(sessionId ? ['--cloud', sessionId] : ['--cloud'])];
 }
 
+// The CLI runs on the host with the repo as its folder, so it gets only what it needs to run and sign in,
+// never the relay's .env (VOICE_TOKEN, GitHub App key, the setup token). Windows names are case-insensitive.
+const ENV_ALLOW = new Set(['PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'USERNAME', 'USER',
+  'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)', 'SYSTEMROOT', 'SYSTEMDRIVE',
+  'WINDIR', 'COMSPEC', 'OS', 'COMPUTERNAME', 'ALLUSERSPROFILE', 'PUBLIC', 'COMMONPROGRAMFILES', 'PROCESSOR_ARCHITECTURE',
+  'NUMBER_OF_PROCESSORS', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM', 'XDG_CONFIG_HOME', 'CLAUDE_CONFIG_DIR',
+  'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE']);
 export function cloudEnv(env) {
-  const e = { ...env };
-  delete e.CLAUDE_CODE_OAUTH_TOKEN;
-  delete e.ANTHROPIC_API_KEY;
-  return e;
+  return Object.fromEntries(Object.entries(env).filter(([k]) => ENV_ALLOW.has(k.toUpperCase())));
 }
 
 // What the CLI printed -> { result, is_error, session_id, url, queued }.
@@ -68,4 +72,35 @@ export function runCloud({ spawn, claudeBin = 'claude', env, cwd, sessionId, pro
     p.stdin.on('error', () => {});
     p.stdin.end(prompt);
   });
+}
+
+// One agent turn in cloud mode. `a` is the relay's agent record: a.cloudNew is set by a new task, and only
+// a new task starts a cloud session; a reply goes to a.cloudId. agentGitHub is github-app.mjs's.
+export function makeCloudTurn({ run = runCloud, agentGitHub, exists, say, speakResult, log = () => {} }) {
+  return async function cloudTurn(a, prompt) {
+    if (!exists(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
+    // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
+    // failed after the session may have started) would start one with only that one line, next to an orphan
+    // that can still push.
+    if (!a.cloudId && !a.cloudNew) throw new Error(`I lost track of its cloud session; it may be in the Claude app. Start a new task for ${a.name}.`);
+    // The session pushes through the Claude GitHub app, not the relay, so the repo must have the same
+    // protected default branch the relay requires before it pushes (README: GitHub access for agents).
+    if (a.cloudNew) {
+      await agentGitHub.pinNow(a);
+      const creds = await agentGitHub.credentials(a);
+      if (!creds) throw new Error("its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.");
+      await agentGitHub.release(creds);
+    }
+    a.cloudNew = false; // from here the session may exist, so a failure means start over
+    const r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt });
+    if (a.stopped) return;
+    if (r.session_id && r.session_id !== a.cloudId) log(a.name, 'cloud session', r.session_id, r.url || '');
+    a.cloudId = r.session_id || a.cloudId;
+    a.cloudUrl = r.url || a.cloudUrl;
+    if (r.queued) {
+      a.awaiting = false; a.question = '';
+      return say(`${a.name}: sent. Its answer will be in the Claude app.`, { spoken: `Sent to ${a.name}. Its answer will be in the Claude app.` });
+    }
+    speakResult(a, r);
+  };
 }

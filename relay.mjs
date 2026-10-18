@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
-import { runCloud } from './cloud-agents.mjs';
+import { runCloud, makeCloudTurn } from './cloud-agents.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -287,33 +287,10 @@ function speakResult(a, r) {
 
 // AGENT_MODE=cloud: the turn runs in a claude.ai cloud session (cloud-agents.mjs) on the folder's GitHub
 // remote, so it shows in the Claude app. The session pushes and opens its own pull request.
-async function cloudTurn(a, prompt) {
-  if (!fs.existsSync(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
-  // Only a new task starts a cloud session. A reply with no session to go to (its conversation ran on the PC
-  // before cloud mode, or the first turn failed after the session may have started) would start one with only
-  // that one line, next to an orphan that can still push.
-  if (!a.cloudId && !a.cloudNew) throw new Error(`I lost track of its cloud session; it may be in the Claude app. Start a new task for ${a.name}.`);
-  // The session pushes through the Claude GitHub app, not the relay, so the repo must have the same
-  // protected default branch the relay requires before it pushes (README: GitHub access for agents).
-  if (a.cloudNew) {
-    await agentGitHub.pinNow(a);
-    const creds = await agentGitHub.credentials(a);
-    if (!creds) throw new Error(`its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.`);
-    await agentGitHub.release(creds);
-  }
-  a.cloudNew = false; // from here the session may exist, so a failure means start over
-  const r = await runCloud({ spawn, claudeBin: process.env.CLAUDE_BIN || 'claude', env: process.env,
-    cwd: a.repoPath, sessionId: a.cloudId, prompt });
-  if (a.stopped) return;
-  if (r.session_id && r.session_id !== a.cloudId) log(a.name, 'cloud session', r.session_id, r.url || '');
-  a.cloudId = r.session_id || a.cloudId;
-  a.cloudUrl = r.url || a.cloudUrl;
-  if (r.queued) {
-    a.awaiting = false; a.question = '';
-    return say(`${a.name}: sent. Its answer will be in the Claude app.`, { spoken: `Sent to ${a.name}. Its answer will be in the Claude app.` });
-  }
-  speakResult(a, r);
-}
+const cloudTurn = makeCloudTurn({
+  run: (o) => runCloud({ spawn, claudeBin: process.env.CLAUDE_BIN || 'claude', env: process.env, ...o }),
+  agentGitHub, exists: fs.existsSync, say, speakResult, log,
+});
 
 // `photo` (optional) is a host file copied into the container for this turn only, then deleted.
 // It goes in /tmp, never /work, so an agent can't commit it to the repo.
