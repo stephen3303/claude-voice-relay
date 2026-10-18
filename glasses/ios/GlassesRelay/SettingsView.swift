@@ -6,6 +6,7 @@ import AuthenticationServices
 struct SettingsView: View {
     @EnvironmentObject var glasses: GlassesController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
     @ObservedObject private var store = Store.shared
     @ObservedObject private var account = Account.shared
     @AppStorage("relayURL") private var relayURL = ""
@@ -88,6 +89,7 @@ struct SettingsView: View {
                         if account.signedIn { relayURL = Relay.cloudAddress }
                     }
                 }
+                .signInWithAppleButtonStyle(scheme == .dark ? .white : .black)
                 .frame(height: 44)
             }
             if let e = account.error { Text(e).font(.footnote).foregroundStyle(.red) }

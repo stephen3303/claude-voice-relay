@@ -37,7 +37,7 @@ struct GlassesRelayApp: App {
             ("Relay", "I heard: add a stop-loss check to the order router. That goes to trading bot. Say send it, or say the task again."),
             ("You", "Send it"),
             ("Relay", "Sent."),
-            ("Agent", "trading bot: Added the stop-loss check and a test for it, and pushed. Want me to lower the default to two percent?"),
+            ("Agent", "Added the stop-loss check and a test for it, and pushed. Want me to lower the default to two percent?"),
             ("You", "Yes"),
         ]
     }
