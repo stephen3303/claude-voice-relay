@@ -144,6 +144,9 @@ with its full transcript, and you can pick it up there. The relay still speaks t
 - It needs Claude Code on the PC signed in with your claude.ai account: run `claude auth login` once
   (and `claude update`; older versions don't wait for a follow-up's answer, so you hear "sent" and read it in the app).
   The `CLAUDE_CODE_OAUTH_TOKEN` setup token can't start cloud sessions; the relay keeps it away from them.
+- The relay starts `claude` without a shell, like the photo answers do, so it must be the native
+  install (`claude.exe`, from `irm https://claude.ai/install.ps1 | iex`), not npm's `claude.cmd`;
+  or set `CLAUDE_BIN` in `.env` to the full path of `claude.exe`.
 - Photos can't go to cloud agents (they're files on the PC); quick "what am I looking at" photos still work.
 - "Stop" only stops the relay listening; stop the session itself in the Claude app.
 
