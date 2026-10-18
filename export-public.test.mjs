@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripAppStore, publicReadme, publicProject, included, exportPublic } from './export-public.mjs';
@@ -17,6 +18,31 @@ test('leaves other conditions alone, including inside APP_STORE blocks', () => {
 
 test('refuses unbalanced blocks', () => {
   assert.throws(() => stripAppStore('#if APP_STORE\nx'), /unbalanced/);
+});
+
+test('keeps an #if !APP_STORE branch and drops its #else', () => {
+  const src = ['#if !APP_STORE', 'free', '#else', 'paid', '#endif'].join('\n');
+  assert.equal(stripAppStore(src), 'free');
+});
+
+test('refuses #elseif inside an APP_STORE block', () => {
+  assert.throws(() => stripAppStore('#if APP_STORE\na\n#elseif DEBUG\nb\n#endif'), /elseif/);
+});
+
+test('a failed export leaves the destination untouched', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bridge-src-'));
+  const dest = mkdtempSync(join(tmpdir(), 'bridge-dest-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    writeFileSync(join(root, 'relay.mjs'), 'const host = "api.talktobridge.com";\n');
+    execFileSync('git', ['add', 'relay.mjs'], { cwd: root });
+    writeFileSync(join(dest, 'keep.txt'), 'mine');
+    assert.throws(() => exportPublic(dest, { root }), /relay\.mjs/);
+    assert.equal(readFileSync(join(dest, 'keep.txt'), 'utf8'), 'mine');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(dest, { recursive: true, force: true });
+  }
 });
 
 test('drops the paid README sections', () => {
