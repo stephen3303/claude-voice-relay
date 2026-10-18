@@ -67,6 +67,13 @@ export function makePro(deps) {
 
   const revokedIn = (owner, id) => [...(owner?.revoked ?? [])].includes(id);
 
+  // Pro until e.until, unless e is refunded, including by a refund that lands between the check and the write.
+  async function grant(user, e) {
+    if (revokedIn(await deps.store.owner(e.tx), e.transactionId)) return;
+    await deps.store.setPro(user, e);
+    if (revokedIn(await deps.store.owner(e.tx), e.transactionId)) await deps.store.dropPro(user, e.transactionId);
+  }
+
   /** POST /api/pro: the app's latest Bridge Pro transaction, for this account. */
   async function claim(user, jws) {
     let e;
@@ -77,11 +84,7 @@ export function makePro(deps) {
       return { status: 409, body: { error: 'That subscription belongs to another Bridge account.' } };
     }
     // A refunded transaction stays refunded, even though the copy on the phone still says it's paid.
-    if (e.until && !revokedIn(await deps.store.owner(e.tx), e.transactionId)) {
-      await deps.store.setPro(user, e);
-      // A refund that landed between the check and the write: undo the write.
-      if (revokedIn(await deps.store.owner(e.tx), e.transactionId)) await deps.store.dropPro(user, e.transactionId);
-    }
+    if (e.until) await grant(user, e);
     const pro = await isPro(user);
     return { status: 200, body: { pro } };
   }
@@ -102,7 +105,7 @@ export function makePro(deps) {
     } else {
       const owner = await deps.store.owner(t.tx);
       // No owner yet: the app hasn't reported this purchase. It will, and the claim decides whose it is.
-      if (owner?.user && !revokedIn(owner, t.transactionId)) await deps.store.setPro(owner.user, t);
+      if (owner?.user) await grant(owner.user, t);
     }
     return { status: 200, body: { ok: true } };
   }
