@@ -176,12 +176,13 @@ const proStore = {
     return r.Item ?? null;
   },
   async claim(tx, user) {
+    // Under the account first, so deleting it (deleteUser) frees the subscription even with no Pro left. A stray
+    // entry is harmless: freeing only removes an owner that is this account.
+    await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `USER#${user}`, sk: `PROTX#${tx}`, tx } }));
     try {
       await db.send(new UpdateCommand({ TableName: TABLE, Key: { pk: `PRO#${tx}`, sk: 'OWNER' },
         UpdateExpression: 'SET #user = :user', ConditionExpression: 'attribute_not_exists(#user) OR #user = :user',
         ExpressionAttributeNames: { '#user': 'user' }, ExpressionAttributeValues: { ':user': user } }));
-      // Under the account too, so deleting it (deleteUser) frees the subscription even with no Pro left.
-      await db.send(new PutCommand({ TableName: TABLE, Item: { pk: `USER#${user}`, sk: `PROTX#${tx}`, tx } }));
       return true;
     } catch (e) {
       if (e.name === 'ConditionalCheckFailedException') return false;
