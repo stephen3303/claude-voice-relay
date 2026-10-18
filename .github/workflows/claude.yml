@@ -1,7 +1,8 @@
 # Mention @claude in a PR or issue comment to have Claude answer or make a change; it can use the
 # subagents in .claude/agents ("@claude ask the security-reviewer to look at auth.mjs").
 # Only the repo owner and collaborators can trigger it, since the repo is public, and only on their own
-# issues and same-repo PRs: Claude runs code here, so it must not act on a stranger's text or code.
+# issues and same-repo PRs, and Claude reads only the owner's comments in the thread: Claude runs code
+# here, so it must not act on a stranger's text or code.
 # No id-token permission, so nothing here can get an OIDC token for the AWS deploy role.
 name: Claude
 on:
@@ -61,6 +62,9 @@ jobs:
         if: steps.gate.outputs.ok
         with:
           github_token: ${{ github.token }}
+          # Anyone can comment on a public issue or PR, so Claude sees only the owner's comments and the
+          # Claude review's. Add a collaborator's username here if one ever joins.
+          include_comments_by_actor: ${{ github.repository_owner }},github-actions[bot]
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: |
