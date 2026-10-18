@@ -92,6 +92,7 @@ final class Conversation: NSObject, ObservableObject {
         phase = .thinking
         self.trigger = trigger
         micRetries = 0
+        onHiFi = false   // a photo answer (look) speaks without listening after it; begin sets the session up afresh
         Task {
             guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; end(saying: nil); return }
             do { try configureAudioForGlasses() } catch { status = "Audio setup failed: \(error.localizedDescription)"; end(saying: nil); return }
@@ -150,6 +151,10 @@ final class Conversation: NSObject, ObservableObject {
     /// Playback only, so iOS routes to the glasses over A2DP. Not in an agent call: CallKit owns that session.
     private func useHiFiOutput() {
         guard Self.hiFiSpeech, trigger != .call, !onHiFi else { return }
+        // Only with the glasses' mic connected: without it there's nothing to switch back to, and the phone's speaker
+        // or mic is already full quality.
+        let session = AVAudioSession.sharedInstance()
+        guard session.availableInputs?.contains(where: { $0.portType == .bluetoothHFP }) == true else { return }
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
             onHiFi = true
