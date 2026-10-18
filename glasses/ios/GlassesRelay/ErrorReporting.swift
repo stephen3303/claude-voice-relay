@@ -50,7 +50,10 @@ enum ErrorReporting {
         guard started else { return }
         // Not set up yet, a wrong token, or the phone is locked: the app already says what to do, nothing is broken.
         if let failure = error as? Relay.Failure {
-            guard case .http(let code) = failure, code != 401, code != 403 else { return }
+            switch failure {
+            case .notConfigured, .noAddress, .badAddress, .noToken, .locked, .http(401), .http(403): return
+            case .keychain, .http: break
+            }
         }
         // The glasses off, the camera not allowed: the app says so, and it's not a bug.
         if let failure = error as? GlassesController.PhotoFailure {
@@ -63,9 +66,9 @@ enum ErrorReporting {
         if error is CancellationError { return }
         if let code = (error as? URLError)?.code, offline.contains(code) { return }
         let ns = error as NSError
-        // Bridge's own errors and URLError describe themselves in fixed words. Others (the Meta toolkit, the system)
-        // go by domain and code alone, since their text can name the glasses or the device.
-        let ownWords = error is Relay.Failure || error is GlassesController.PhotoFailure || error is URLError
+        // Bridge's own errors describe themselves in fixed words. Others go by domain and code alone: the Meta
+        // toolkit's text can name the glasses, and some URLError texts name your PC.
+        let ownWords = error is Relay.Failure || error is GlassesController.PhotoFailure
         let clean = NSError(domain: ns.domain, code: ns.code,
                             userInfo: ownWords ? [NSLocalizedDescriptionKey: error.localizedDescription] : [:])
         SentrySDK.capture(error: clean) { scope in scope.setTag(value: place, key: "where") }
