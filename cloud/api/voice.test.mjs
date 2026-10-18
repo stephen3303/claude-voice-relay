@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeHandler } from './voice.mjs';
 
 function setup() {
-  const held = new Map(), msgs = new Map(), started = [], looked = [];
+  const held = new Map(), msgs = new Map(), started = [], looked = [], devices = new Map(), listening = [], delivered = [];
   let clock = 1_000_000;
   const store = {
     getHeld: async (u) => held.get(u) ?? null,
@@ -15,6 +15,13 @@ function setup() {
     store,
     look: async (jpeg, said) => { looked.push({ size: jpeg.length, said }); return 'A whiteboard with a diagram.'; },
     startTask: async (u, t) => { started.push(t); return 'Sent.'; },
+    devices: {
+      save: async (u, d) => devices.set(`${u}/${d.device}`, d),
+      remove: async (u, id) => devices.delete(`${u}/${id}`),
+      markListening: async (u) => listening.push(u),
+      stopListening: async (u) => listening.push(`stop:${u}`),
+    },
+    deliver: async (u, text, from) => delivered.push({ u, text, from, at: clock }),
     now: () => clock,
     sleep: async (ms) => { clock += ms; },
   });
@@ -22,7 +29,7 @@ function setup() {
     requestContext: { http: { method }, authorizer: user ? { jwt: { claims: { sub: user } } } : undefined },
     rawPath: `/api${path}`, body, isBase64Encoded: !!base64, queryStringParameters: query, headers,
   });
-  return { call, started, looked, store, advance: (ms) => (clock += ms) };
+  return { call, started, looked, store, devices, listening, delivered, advance: (ms) => (clock += ms), now: () => clock };
 }
 
 test('needs a signed-in user', async () => {
@@ -97,6 +104,55 @@ test('send starts the task at once, with or without a project', async () => {
 test('unknown routes are 404', async () => {
   const { call } = setup();
   assert.equal((await call('GET', '/nope')).statusCode, 404);
+});
+
+test('a long inbox poll marks a conversation as open; a one-off check or the end of a conversation does not', async () => {
+  const { call, listening, store } = setup();
+  await call('GET', '/voice/inbox', { query: { wait: '0' } });
+  assert.deepEqual(listening, []);
+  await store.addMessage('u1', 'hi');
+  await call('GET', '/voice/inbox', { query: { after: '0' } });
+  assert.deepEqual(listening, ['u1']);
+  assert.equal((await call('DELETE', '/voice/listening')).statusCode, 200);
+  assert.deepEqual(listening, ['u1', 'stop:u1']);
+});
+
+test('a failed push registration answers with an error the app can retry on', async () => {
+  const { call, devices } = setup();
+  devices.set = () => { throw new Error('throttled'); };
+  const r = await call('POST', '/push/register', { body: JSON.stringify({ device: 'p', token: 'ab'.repeat(32) }) });
+  assert.equal(r.statusCode, 500);
+});
+
+test('a phone registers its push tokens and headset state, and can unregister', async () => {
+  const { call, devices } = setup();
+  const body = { device: 'phone-1', token: 'AB'.repeat(32), voipToken: 'cd'.repeat(32), env: 'sandbox', headset: true, calls: true };
+  assert.equal((await call('POST', '/push/register', { body: JSON.stringify(body) })).statusCode, 200);
+  const d = devices.get('u1/phone-1');
+  assert.equal(d.token, 'ab'.repeat(32));   // stored lowercase
+  assert.deepEqual([d.env, d.headset, d.calls], ['sandbox', true, true]);
+  await call('POST', '/push/register', { body: JSON.stringify({ ...body, headset: false, calls: 'yes', env: 'other' }) });
+  assert.deepEqual([devices.get('u1/phone-1').headset, devices.get('u1/phone-1').calls, devices.get('u1/phone-1').env], [false, false, 'production']);
+  assert.equal((await call('DELETE', '/push/register', { query: { device: 'phone-1' } })).statusCode, 200);
+  assert.equal(devices.size, 0);
+});
+
+test('registration needs a device ID and a real token', async () => {
+  const { call, devices } = setup();
+  for (const body of ['junk', JSON.stringify({ token: 'ab'.repeat(32) }), JSON.stringify({ device: 'p', token: 'not hex' }),
+    JSON.stringify({ device: '../x', token: 'ab'.repeat(32) })]) {
+    assert.equal((await call('POST', '/push/register', { body })).statusCode, 400, body);
+  }
+  assert.equal(devices.size, 0);
+});
+
+test('a test call waits the asked delay (at most 20s), then rings like an agent', async () => {
+  const { call, delivered, now } = setup();
+  const start = now();
+  await call('POST', '/push/test', { body: JSON.stringify({ delay: 90 }) });
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].from, 'Bridge');
+  assert.equal(delivered[0].at - start, 20_000);
 });
 
 test('dictation variants of "send it" confirm', async () => {

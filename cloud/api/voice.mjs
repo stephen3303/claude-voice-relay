@@ -1,6 +1,6 @@
 // Bridge Cloud voice API: the relay's protocol (/voice/confirm, /voice/inbox, /voice/photo)
-// for signed-in Pro users, plus /voice/send (no read-back). One Lambda behind API Gateway, whose
-// Lambda authorizer checks the Bridge session (auth.mjs).
+// for signed-in Pro users, plus /voice/send (no read-back) and the phone's push registration
+// (push.mjs). One Lambda behind API Gateway, whose Lambda authorizer checks the Bridge session (auth.mjs).
 // Dependencies are passed in, so tests run it with fakes and no AWS.
 
 import { userOf } from './auth.mjs';
@@ -14,6 +14,8 @@ const SEND_TO = /^(?:send|give|show)\s+(?:this|it|that)(?:\s+(?:photo|picture))?
 const HOLD_MS = 10 * 60_000;          // an unconfirmed task expires, as on the relay
 const INBOX_KEEP_S = 7 * 24 * 3600;   // inbox messages are kept a week (DynamoDB TTL)
 const PHOTO_MAX = 10 * 1024 * 1024;
+const TOKEN = /^[0-9a-f]{32,200}$/i;   // APNs device tokens are hex
+const TEST_CALL = 'This is Bridge, checking that I can reach you. Say goodbye to hang up.';
 
 export const LOOK_PROMPT = [
   'The user is wearing smart glasses, may be driving, and just took this photo.',
@@ -25,6 +27,8 @@ export const LOOK_PROMPT = [
  * deps.store: { getHeld(user), setHeld(user, held|null), addMessage(user, text), messagesAfter(user, id) }
  * deps.look(jpegBytes, said) -> spoken answer (Claude on Bedrock)
  * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not)
+ * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
+ * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.now() -> ms, deps.sleep(ms)
  */
 export function makeHandler(deps) {
@@ -79,6 +83,19 @@ export function makeHandler(deps) {
     }
   }
 
+  // The app reports its push tokens, and whether headphones or glasses are connected, whenever they change.
+  async function register(user, b) {
+    const device = typeof b?.device === 'string' && /^[\w-]{1,64}$/.test(b.device) ? b.device : null;
+    const token = TOKEN.test(b?.token ?? '') ? b.token.toLowerCase() : undefined;
+    const voipToken = TOKEN.test(b?.voipToken ?? '') ? b.voipToken.toLowerCase() : undefined;
+    if (!device || (!token && !voipToken)) return json(400, { error: 'Need a device ID and a push token.' });
+    await deps.devices.save(user, {
+      device, token, voipToken, env: b.env === 'sandbox' ? 'sandbox' : 'production',
+      headset: b.headset === true, calls: b.calls === true, at: now(),
+    });
+    return json(200, { ok: true });
+  }
+
   async function photo(user, jpeg, said) {
     if (!jpeg?.length) return 'The photo was empty. Try again.';
     if (jpeg.length > PHOTO_MAX) return 'That photo is too large.';
@@ -103,7 +120,35 @@ export function makeHandler(deps) {
         try { const j = JSON.parse(said); if (typeof j?.text === 'string') said = j.text; } catch { /* plain text */ }
         return text(200, await send(user, said.trim()));
       }
-      if (route === 'GET /voice/inbox') return json(200, await inbox(user, event.queryStringParameters));
+      if (route === 'GET /voice/inbox') {
+        // A conversation is open while the app long-polls, so agents' messages need no push.
+        // A one-off check (wait=0, e.g. Settings > Test connection) isn't a conversation.
+        if (event.queryStringParameters?.wait !== '0') await deps.devices.markListening(user);
+        return json(200, await inbox(user, event.queryStringParameters));
+      }
+      if (route === 'DELETE /voice/listening') {
+        // The conversation ended: push again right away instead of after the listening window.
+        await deps.devices.stopListening(user);
+        return json(200, { ok: true });
+      }
+      if (route === 'POST /push/register') {
+        let b = null;
+        try { b = JSON.parse(raw.toString('utf8')); } catch { /* bad JSON */ }
+        return await register(user, b);
+      }
+      if (route === 'DELETE /push/register') {
+        const device = event.queryStringParameters?.device;
+        if (device) await deps.devices.remove(user, device);
+        return json(200, { ok: true });
+      }
+      if (route === 'POST /push/test') {
+        // "Test call" in the app: waits, so there's time to lock the phone, then rings like an agent would.
+        let delay = 0;
+        try { delay = Math.min(20, Math.max(0, Number(JSON.parse(raw.toString('utf8')).delay) || 0)); } catch { /* none */ }
+        if (delay) await sleep(delay * 1000);
+        await deps.deliver(user, TEST_CALL, 'Bridge');
+        return json(200, { ok: true });
+      }
       if (route === 'POST /voice/photo') {
         let said = '';
         try { said = decodeURIComponent(event.headers?.['x-question'] || '').trim(); } catch { /* keep empty */ }
@@ -112,6 +157,8 @@ export function makeHandler(deps) {
       return text(404, 'Not found.');
     } catch (e) {
       console.error(route, e);
+      // The app retries push registration on a failure, so it must see one; voice routes speak the error instead.
+      if (/^\S+ \/(push\/|voice\/listening)/.test(route)) return json(500, { error: 'Bridge Cloud hit an error.' });
       return text(200, "Sorry, Bridge Cloud hit an error. Try again in a moment.");
     }
   };

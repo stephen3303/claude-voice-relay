@@ -12,11 +12,12 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json` 
 - `glasses/ios` — the Bridge iPhone app (SwiftUI, XcodeGen `project.yml`, Meta Wearables DAT 1.0.1).
   Two flavours from one source: personal (sideloaded, everything unlocked, experimental Meta camera
   API) and App Store (`APP_STORE` compilation condition: StoreKit Bridge Pro, Sign in with Apple,
-  Bridge Cloud, `AppStore.entitlements`). Screens: `HomeView` (main), `SettingsView`, `HelpView`,
+  Bridge Cloud, agent calls via PushKit + CallKit in `Push.swift`, `AppStore.entitlements`). Screens: `HomeView` (main), `SettingsView`, `HelpView`,
   `HistoryView`, `WelcomeView` (App Store first launch).
 - `cloud/` — Bridge Cloud on AWS (account 651325958035, us-east-1), CDK in `cloud/infra`, Lambda code
   in `cloud/api`. `DESIGN.md` is the architecture and build order. Stacks: `BridgeApi` (HTTP API,
-  Lambda, DynamoDB, KMS session key, Sign in with Apple) and `BridgeWeb` (S3 + CloudFront for
+  Lambda, DynamoDB, KMS session key, Sign in with Apple, APNs push in `cloud/api/push.mjs` with the key
+  in Secrets Manager `bridge/apns`, set by `cloud/setup/setup-apns.ps1`) and `BridgeWeb` (S3 + CloudFront for
   talktobridge.com, DNS at Cloudflare).
 - `site/` — the website (privacy, terms, support), on GitHub Pages now; talktobridge.com later.
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.

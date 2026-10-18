@@ -40,8 +40,9 @@ targets:
           TeamID: $(DEVELOPMENT_TEAM)
           Analytics: { OptOut: true }
           CrashReporting: { OptOut: true }
-        # bluetooth/external-accessory: links the toolkit uses; audio: keeps the conversation alive in your pocket
-        UIBackgroundModes: [audio, bluetooth-central, bluetooth-peripheral, external-accessory]
+        # bluetooth/external-accessory: links the toolkit uses; audio: keeps the conversation alive in your pocket;
+        # voip: an agent's call (PushKit + CallKit, Push.swift) reaches the app while it's in the background
+        UIBackgroundModes: [audio, bluetooth-central, bluetooth-peripheral, external-accessory, voip]
         UISupportedExternalAccessoryProtocols: [com.meta.ar.wearable]
         NSBluetoothAlwaysUsageDescription: Connects to your Meta glasses.
         NSLocalNetworkUsageDescription: Lets your phone find and connect to your glasses over Wi-Fi.
@@ -64,4 +65,4 @@ targets:
         CLIENT_TOKEN: "0"
         # The App Store flavour (no experimental Meta features, Pro sold via StoreKit) is selected with
         # SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) APP_STORE" on the xcodebuild command line,
-        # and signed with CODE_SIGN_ENTITLEMENTS=AppStore.entitlements (Sign in with Apple).
+        # and signed with CODE_SIGN_ENTITLEMENTS=AppStore.entitlements (Sign in with Apple, push, time-sensitive).

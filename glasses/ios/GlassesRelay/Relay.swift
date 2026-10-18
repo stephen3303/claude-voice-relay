@@ -100,6 +100,30 @@ final class Relay {
         return "I heard: \(body). Say send it, or say it again."
     }
 
+    /// A Bridge Cloud call outside the voice protocol (push registration, ending a conversation),
+    /// with the Bridge session, or `session` when the Keychain no longer holds it (signing out).
+    @discardableResult
+    func cloud(_ method: String, _ path: String, session: String? = nil, body: [String: Any]? = nil,
+               timeout: TimeInterval = 15) async throws -> Data {
+        guard let bearer = session ?? Keychain.read(Account.sessionKey), let url = URL(string: "\(Account.cloudURL)/\(path)")
+        else { throw Failure.notConfigured }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = timeout
+        req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        return try await fetch(req)
+    }
+
+    /// The conversation ended: Bridge Cloud can ring the phone again straight away.
+    func stoppedListening() async {
+        guard isCloud else { return }
+        try? await cloud("DELETE", "api/voice/listening", timeout: 5)
+    }
+
     private func request(_ path: String, timeout: TimeInterval) throws -> URLRequest {
         let base: String, bearer: String
         if isCloud {

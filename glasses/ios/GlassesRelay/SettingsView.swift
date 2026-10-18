@@ -9,6 +9,7 @@ struct SettingsView: View {
     @Environment(\.colorScheme) private var scheme
     @ObservedObject private var store = Store.shared
     @ObservedObject private var account = Account.shared
+    @ObservedObject private var push = Push.shared
     @AppStorage("relayURL") private var relayURL = ""
     @State private var url = Relay.shared.isDemo || Relay.shared.isCloud ? "" : Relay.shared.baseURL
     @State private var token = Relay.shared.token
@@ -34,6 +35,7 @@ struct SettingsView: View {
             case .pc: relayURL = url.trimmingCharacters(in: .whitespaces)
             }
             testResult = ""
+            push.refresh()   // the cloud learns whether it can reach this phone
         }
     }
 
@@ -54,6 +56,7 @@ struct SettingsView: View {
                          : "Bridge sends what you say after a 2-second pause, without repeating it.")
                 }
                 #if APP_STORE
+                if account.signedIn && mode.wrappedValue == .cloud { callsSection }
                 proSection
                 #endif
                 Section("About") {
@@ -95,6 +98,18 @@ struct SettingsView: View {
             if let e = account.error { Text(e).font(.footnote).foregroundStyle(.red) }
         } header: { Text("Account") } footer: {
             Text("An account lets Bridge Cloud run your agents, so you don't need a PC.")
+        }
+    }
+
+    // MARK: calls (App Store build, Bridge Cloud)
+
+    private var callsSection: some View {
+        Section {
+            Toggle("Agents can call me", isOn: $push.callsAllowed)
+            Button("Test call") { Task { await push.testCall() } }
+            if !push.status.isEmpty { Text(push.status).font(.footnote) }
+        } header: { Text("Calls") } footer: {
+            Text("With glasses or headphones connected, an agent that wants you rings like a phone call. Otherwise you get a notification.")
         }
     }
 

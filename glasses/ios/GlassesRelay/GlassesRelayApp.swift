@@ -3,6 +3,7 @@ import MWDATCore
 
 @main
 struct GlassesRelayApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate   // push tokens (Push.swift)
     @StateObject private var glasses = GlassesController.shared
 
     init() {

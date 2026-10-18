@@ -34,6 +34,24 @@ App Store Server Notifications v2 ──> Lambda: subscription state per user
 GitHub App webhooks ──> Lambda: which repos each user installed it on
 ```
 
+## Agents start the conversation (push)
+
+When an agent posts to the inbox, `deliver` (cloud/api/index.mjs) also pushes it over APNs (cloud/api/push.mjs) to each of
+the user's phones, unless the app polled the inbox in the last 45 seconds (a conversation is already open and will read it):
+
+- **Headphones, glasses or a car connected, and "Agents can call me" on:** a VoIP push. The app reports it to CallKit as an
+  incoming call from "Bridge: <project>". Answering it (lock screen, or a tap on the glasses or AirPods) starts a
+  conversation whose first line is the agent's message. CallKit is the only way iOS lets a backgrounded app open the
+  microphone, which is why this is a call and not a notification.
+- **Otherwise:** a time-sensitive notification. Tapping it, or its Talk button, opens Bridge and starts the conversation.
+  If Bridge is open and a headset is connected, the conversation starts without the banner.
+
+The app registers both tokens with `POST /api/push/register` and re-sends whenever the audio route changes, so the cloud
+knows which to use. iOS requires every VoIP push to become a reported call, so when the phone's state was stale (no
+headset after all, or already talking) the app reports the call and ends it at once, and shows the notification instead.
+The APNs key (.p8) is in Secrets Manager as `bridge/apns` (cloud/setup/setup-apns.ps1); without it messages still reach
+the inbox and nothing rings.
+
 Choices and why:
 - **Fargate tasks, not long-running servers:** an agent task runs for minutes, then the container exits,
   so idle cost is zero. Public subnets with a public IP and no NAT gateway: a NAT costs about $32/month idle.

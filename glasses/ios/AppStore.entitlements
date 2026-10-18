@@ -1,12 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- App Store build only (CODE_SIGN_ENTITLEMENTS in glasses-appstore.yml): a free Apple ID can't sign
-     Sign in with Apple, so the sideloaded personal build has no entitlements. -->
+     these, so the sideloaded personal build has no entitlements (and gets no push). -->
 <plist version="1.0">
 <dict>
+	<!-- Bridge Cloud accounts (Account.swift) -->
 	<key>com.apple.developer.applesignin</key>
 	<array>
 		<string>Default</string>
 	</array>
+	<!-- Agents' calls and notifications (Push.swift); the App Store export switches it to production -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<!-- Agents' notifications break through Focus -->
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
 </dict>
 </plist>

@@ -6,7 +6,8 @@ import Speech
 /// Ends when you say "goodbye", or after a stretch of silence (longer while an agent is working).
 @MainActor
 final class Conversation: NSObject, ObservableObject {
-    enum Trigger { case glasses, button }
+    /// .call: an agent rang and the user answered (Push.swift); CallKit owns the audio session.
+    enum Trigger { case glasses, button, call }
     enum Phase: String { case idle = "Idle", listening = "Listening", thinking = "Thinking", speaking = "Speaking" }
 
     @Published var phase: Phase = .idle
@@ -24,6 +25,9 @@ final class Conversation: NSObject, ObservableObject {
     @Published var status = ""
     /// Takes a photo with the glasses; set by GlassesController.
     var takePhoto: (() async throws -> Data)?
+    /// Called once when this conversation is over; an agent call hangs up its CallKit call here.
+    var onEnded: (@MainActor () -> Void)?
+    private var trigger: Trigger = .button
 
     private let engine = AVAudioEngine()
     private let synth = AVSpeechSynthesizer()
@@ -70,16 +74,18 @@ final class Conversation: NSObject, ObservableObject {
     func begin(trigger: Trigger) {
         guard phase == .idle else { return }
         phase = .thinking
+        self.trigger = trigger
         Task {
-            guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; phase = .idle; return }
-            do { try configureAudioForGlasses() } catch { status = "Audio setup failed: \(error.localizedDescription)"; phase = .idle; return }
+            guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; end(saying: nil); return }
+            do { try configureAudioForGlasses() } catch { status = "Audio setup failed: \(error.localizedDescription)"; end(saying: nil); return }
             // Let the Bluetooth route settle before relying on it (Meta's guidance: ~2s).
             try? await Task.sleep(for: .seconds(trigger == .glasses ? 2 : 0.5))
             lastActivity = Date()
             awaitingAgent = false
             startWatchdog()
             inboxTask = Task { await pollInbox() }
-            await say("Go ahead.")
+            // An agent called: its message (read from the inbox) is the greeting.
+            if trigger != .call { await say("Go ahead.") }
             await announcePending()
             startListening()
         }
@@ -92,7 +98,12 @@ final class Conversation: NSObject, ObservableObject {
             inboxTask?.cancel(); inboxTask = nil
             if let goodbye { await say(goodbye) }
             phase = .idle
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            // In a call, CallKit deactivates the session when the call ends.
+            if trigger != .call { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+            let ended = onEnded
+            onEnded = nil
+            ended?()
+            await Relay.shared.stoppedListening()
         }
     }
 
@@ -102,7 +113,7 @@ final class Conversation: NSObject, ObservableObject {
         let session = AVAudioSession.sharedInstance()
         // HFP is the only Bluetooth profile that carries the glasses' microphone.
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
-        try session.setActive(true)
+        if trigger != .call { try session.setActive(true) }   // CallKit activates it for a call
         if let hfp = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
             try session.setPreferredInput(hfp)
             status = "Using \(hfp.portName)"
