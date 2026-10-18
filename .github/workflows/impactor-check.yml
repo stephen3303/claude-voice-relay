@@ -58,12 +58,12 @@ jobs:
           set -e
           grep -v ' DEBUG ' out.txt > result.txt || true
           tail -20 result.txt
-          if grep -Eiq '\b503\b|-80045|plist error|<html' result.txt; then
-            verdict="Apple rejected the sign-in request itself (exit $code)"; ok=false
-          elif grep -Eiq 'anisette error|tunnel error|timed out' result.txt || [ "$code" = 124 ]; then
-            verdict="Couldn't reach the anisette server or Apple (exit $code)"; ok=false
-          elif grep -Eiq 'SRP error -20[0-9]{3}|entered incorrectly' result.txt; then
+          if grep -Eiq 'SRP error -20[0-9]{3}|entered incorrectly' result.txt; then
             verdict="Apple answered the sign-in request; the made-up Apple ID was refused as expected"; ok=true
+          elif grep -Eiq 'HTTP[^0-9]*503|status[^0-9]*503|-80045|plist error|<html' result.txt; then
+            verdict="Apple rejected the sign-in request itself (exit $code)"; ok=false
+          elif grep -Eiq 'anisette error|tunnel error' result.txt || [ "$code" = 124 ]; then
+            verdict="Couldn't reach the anisette server or Apple (exit $code)"; ok=false
           else
             verdict="No verdict: Apple's account-refused answer never came (exit $code)"; ok=false
           fi
