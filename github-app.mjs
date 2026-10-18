@@ -10,6 +10,8 @@ const API = 'https://api.github.com';
 // Reuse a token only while it has nearly its full hour left, so every turn gets about 55 minutes.
 // A turn that runs longer than that gets a 401 on its next push.
 const REUSE_MS = 55 * 60_000;
+// Asked for explicitly, so widening the App later doesn't widen agent tokens.
+const TOKEN_PERMISSIONS = { contents: 'write', pull_requests: 'write', metadata: 'read' };
 
 // owner/repo from a GitHub remote: https://github.com/o/r(.git), git@github.com:o/r.git, ssh://git@github.com/o/r.
 // Only GitHub's own name characters, so a crafted remote can't steer the App's API calls to another path.
@@ -60,7 +62,7 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
     if (hit && hit.expires - now() > REUSE_MS) return hit.token;
     try {
       const inst = await call('GET', `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/installation`);
-      const t = await call('POST', `/app/installations/${inst.id}/access_tokens`, { body: { repositories: [repo] } });
+      const t = await call('POST', `/app/installations/${inst.id}/access_tokens`, { body: { repositories: [repo], permissions: TOKEN_PERMISSIONS } });
       cache.set(id, { token: t.token, expires: Date.parse(t.expires_at) });
       return t.token;
     } catch (e) {

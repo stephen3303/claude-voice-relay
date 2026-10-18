@@ -60,7 +60,10 @@ test('tokenFor asks for a token scoped to the one repository, and reuses it whil
   assert.equal(await app.tokenFor('stephen3303', 'claude-voice-relay'), 'ghs_1');
   const mint = calls.find((c) => c.url.endsWith('/access_tokens'));
   assert.equal(mint.method, 'POST');
-  assert.deepEqual(mint.body, { repositories: ['claude-voice-relay'] });
+  assert.deepEqual(mint.body, {
+    repositories: ['claude-voice-relay'],
+    permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
+  });
   assert.match(mint.headers.Authorization, /^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
 
   advance(4 * 60_000);
