@@ -60,7 +60,7 @@ jobs:
               sleep 8
               xcrun simctl io "$UDID" screenshot "shots/bridge-$view-$look.png"
               # If the app isn't in front, say why: its console and any crash report.
-              xcrun simctl spawn "$UDID" launchctl list | grep -i glassesrelay || echo "app not running after launch ($look $view)"
+              xcrun simctl spawn "$UDID" launchctl list | grep -i talktobridge || echo "app not running after launch ($look $view)"
             done
           done
           cat shots/console-*.txt || true
