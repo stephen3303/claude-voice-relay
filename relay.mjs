@@ -234,6 +234,7 @@ async function ensureContainer(a) {
     if (!moved || unsafeMount(moved, PROTECTED)) throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
     log(`${a.name}: moved from ${a.repoPath} to ${moved}.`);
     a.repoPath = moved;
+    a.sessionId = null;   // its session belongs to the old folder
     save();
   }
   // Docker would mount a missing folder as a new empty one.
