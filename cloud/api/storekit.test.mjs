@@ -129,6 +129,21 @@ test("a purchase can't be lent: another account, another app or another product 
   assert.equal((await pro.claim('u2', jws(tx({ originalTransactionId: '2000', environment: 'Sandbox' })))).status, 200, 'App Review buys in the sandbox');
 });
 
+test('plan says which kind of Pro: paid, sandbox (smaller allowances) or none', async () => {
+  const { pro, pros, notice, advance } = setup();
+  assert.equal(await pro.plan('u1'), null);
+  await pro.claim('u1', jws(tx()));
+  assert.equal(await pro.plan('u1'), 'Production');
+  await pro.claim('u2', jws(tx({ originalTransactionId: '2000', transactionId: '2001', environment: 'Sandbox' })));
+  assert.equal(await pro.plan('u2'), 'Sandbox');
+  pros.set('u3', { ...pros.get('u1'), env: undefined });
+  assert.equal(await pro.plan('u3'), 'Sandbox', 'a record without an environment gets the smaller allowances');
+  await pro.notify(notice('REFUND', tx({ originalTransactionId: '2000', transactionId: '2001', environment: 'Sandbox', revocationDate: NOW })));
+  assert.equal(await pro.plan('u2'), null, 'refunded');
+  advance(30 * DAY);
+  assert.equal(await pro.plan('u1'), null, 'expired');
+});
+
 test('a renewal notification extends Pro without the app', async () => {
   const { pro, notice, advance } = setup();
   await pro.claim('u1', jws(tx()));
