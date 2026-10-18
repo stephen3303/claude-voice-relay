@@ -89,9 +89,10 @@ Tested from my phone: the relay has been verified end to end from an iPhone.
 Agents never hold a GitHub token, yours or any other. They commit on a branch and ask for it to be
 pushed; after the turn the relay mints a token from its own GitHub App that only covers that agent's
 repository, with contents and pull request access and nothing else (no workflows, secrets, settings
-or other repos). A separate, throwaway container that runs none of the agent's code pushes the
-branch with it, the relay opens the pull request (or updates the open one) and says which, and the
-token is revoked straight away. Commits and pull requests show as `<app-name>[bot]`. Agents can't
+or other repos). One throwaway container copies the branch out of the repo with no token and no
+network, and a second one, which gets the token and nothing of the agent's but that copy, pushes it.
+The relay opens the pull request (or updates the open one), says which, and revokes the token
+straight away. Commits and pull requests show as `<app-name>[bot]`. Agents can't
 use `gh` or fetch private repos, since they have no credentials.
 
 The relay only hands out a token for a repo whose default branch is protected as below, and never

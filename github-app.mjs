@@ -203,6 +203,13 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     };
   }
 
+  // Called before each turn, so a new folder is pinned to its origin before the agent can change it.
+  async function pinNow(a) {
+    if (!ghApp && !fallbackToken) return;
+    const remote = parseRemote(await getRemote(a.repoPath));
+    if (remote) pin(a, `${remote.owner}/${remote.repo}`.toLowerCase());
+  }
+
   const issued = new Set(); // App tokens handed out and not yet released
 
   // { token, owner, repo } for pushing the agent's work to its own GitHub repo, or null.
@@ -228,5 +235,5 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
     await ghApp.revoke(creds.token);
   }
 
-  return { identity, credentials, release, isPinned: (repoPath) => !!pins?.[keyOf(repoPath)] };
+  return { identity, pinNow, credentials, release, isPinned: (repoPath) => !!pins?.[keyOf(repoPath)] };
 }

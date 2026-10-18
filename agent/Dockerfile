@@ -7,7 +7,7 @@ RUN apt-get update \
 RUN npm install -g @anthropic-ai/claude-code
 USER node
 # Mirror the host's line-ending policy and trust the bind-mounted repo. There's no GitHub credential here:
-# agents only commit, and the relay pushes from a separate run of this image (publish.mjs) that gets the token.
+# agents only commit, and the relay pushes from separate runs of this image (publish.mjs); only the last gets the token.
 RUN mkdir -p /home/node/.claude \
  && git config --global core.autocrlf input \
  && git config --global --add safe.directory '*' \

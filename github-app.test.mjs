@@ -188,6 +188,20 @@ test('an agent gets a token for its pinned repo only, and commits as the App bot
   assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(pinsFile, 'utf8'))), ['stephen3303/claude-voice-relay']);
 });
 
+test('a folder pinned before the turn keeps that pin when the agent changes origin', async () => {
+  const { gh, minted, state, pinsFile } = agentGitHub();
+  await gh.pinNow(agent);
+  assert.deepEqual(minted, []); // pinning mints nothing
+  assert.deepEqual(Object.values(JSON.parse(fs.readFileSync(pinsFile, 'utf8'))), ['stephen3303/claude-voice-relay']);
+  state.remote = 'https://github.com/someone-else/claude-voice-relay.git'; // same name, another owner
+  assert.equal(await gh.credentials(agent), null);
+  assert.deepEqual(minted, []);
+  // Without any GitHub access, nothing is pinned.
+  const off = agentGitHub({ ghApp: null });
+  await off.gh.pinNow(agent);
+  assert.equal(off.gh.isPinned(agent.repoPath), false);
+});
+
 test('the identity a turn commits as never carries a token', async () => {
   const { gh } = agentGitHub();
   assert.deepEqual(Object.keys(await gh.identity()).sort(),

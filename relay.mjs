@@ -11,7 +11,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
-import { makePublisher, REQUEST_FILE, MAX_REQUEST, PUSH_SCRIPT } from './publish.mjs';
+import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -135,20 +135,30 @@ const publisher = makePublisher({
     { maxBuffer: 2 * MAX_REQUEST });
     return stdout.startsWith('found\n') ? stdout.slice(6) : null;
   },
-  // The token goes only into this throwaway container: no agent code runs in it, and the agent's repo is
-  // mounted read-only and read through git's transport, never with its hooks or config.
-  push: async ({ a, branch, repo, token }) => {
-    // Named, so a push that times out (which only stops the docker client) can be removed with its token.
-    const name = `${a.container}-push-${Date.now()}`;
-    try {
-      await run('docker', ['run', '--rm', '--name', name, '-v', `${a.repoPath}:/src:ro`,
-        '-e', 'GH_TOKEN', '-e', 'BRANCH', '-e', 'REPO', cfg.image, 'sh', '-c', PUSH_SCRIPT],
-      { env: { ...process.env, GH_TOKEN: token, BRANCH: branch, REPO: repo }, timeout: 5 * 60_000 });
-    } catch (e) {
-      await run('docker', ['rm', '-f', name]).catch(() => {});
-      throw e;
-    }
-  },
+  // FETCH_SCRIPT reads the agent's repo with no token and no network; its bundle is piped straight into
+  // PUSH_SCRIPT's container, the only one that gets the token. Both are named so a failure or timeout
+  // (which only stops the docker clients) removes them.
+  push: ({ a, branch, repo, token }) => new Promise((resolve, reject) => {
+    const names = ['fetch', 'push'].map((n) => `${a.container}-${n}-${Date.now()}`);
+    const fetcher = spawn('docker', ['run', '--rm', '--name', names[0], '--network', 'none', '-v', `${a.repoPath}:/src:ro`,
+      '-e', 'BRANCH', cfg.image, 'sh', '-c', FETCH_SCRIPT],
+    { windowsHide: true, env: { ...process.env, BRANCH: branch }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const pusher = spawn('docker', ['run', '--rm', '-i', '--name', names[1],
+      '-e', 'GH_TOKEN', '-e', 'BRANCH', '-e', 'REPO', cfg.image, 'sh', '-c', PUSH_SCRIPT],
+    { windowsHide: true, env: { ...process.env, GH_TOKEN: token, BRANCH: branch, REPO: repo }, stdio: ['pipe', 'ignore', 'pipe'] });
+    pusher.stdin.on('error', () => {}); // the pusher failing first closes the pipe
+    fetcher.stdout.pipe(pusher.stdin);
+    let err = '';
+    for (const p of [fetcher, pusher]) p.stderr.on('data', (d) => { err = (err + d).slice(-400); });
+    const timer = setTimeout(() => { fetcher.kill(); pusher.kill(); }, 5 * 60_000);
+    Promise.all([fetcher, pusher].map((p) => new Promise((done) => { p.on('error', () => done(-1)); p.on('close', done); })))
+      .then(async (codes) => {
+        clearTimeout(timer);
+        if (codes.every((c) => c === 0)) return resolve();
+        for (const n of names) await run('docker', ['rm', '-f', n]).catch(() => {});
+        reject(new Error(`exit ${codes.join('/')}: ${err.trim()}`));
+      });
+  }),
 });
 
 // ---------- agent state ----------
@@ -271,6 +281,7 @@ async function turn(a, prompt, photo) {
     // A request left by a turn that failed or was stopped belongs to that turn, not this one.
     // The folder is made here (in a git repo only) so the agent only has to write the file.
     await run('docker', ['exec', a.container, 'sh', '-c', 'rm -f "$1"; [ -d /work/.git ] && mkdir -p "$(dirname "$1")" 2>/dev/null; true', 'sh', REQUEST_FILE]);
+    await agentGitHub.pinNow(a);
     if (photo) {
       await run('docker', ['cp', photo, `${a.container}:${photoIn}`]);
       fs.rmSync(photo, { force: true });

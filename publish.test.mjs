@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { makePublisher, parseRequest, validBranch, PUSH_SCRIPT } from './publish.mjs';
+import { makePublisher, parseRequest, validBranch, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
 
 const agent = { name: 'voice relay', repoPath: '/p/claude-voice-relay' };
 const request = (r) => JSON.stringify({ branch: 'fix/stop-loss', title: 'Fix the stop-loss check', body: 'Details', ...r });
@@ -117,21 +117,22 @@ test('the push script copies the branch without running the agent repo\'s hooks 
   const remote = path.join(dir, 'remote', 'o', 'r.git');
   fs.mkdirSync(remote, { recursive: true });
   git(remote, 'init', '-q', '--bare');
-  // Same script, with the container's paths moved into the temp folder and github.com pointed at it.
-  const script = PUSH_SCRIPT.replace('file:///src', `file://${src}`).replaceAll('/tmp/r', path.join(dir, 'r'));
-  const r = spawnSync('sh', ['-c', script], {
-    encoding: 'utf8',
+  // The same two scripts, piped together as the relay does, with the containers' paths moved into the
+  // temp folder and github.com pointed at it. The fetch runs without the token, as in its container.
+  const fetched = spawnSync('sh', ['-c', FETCH_SCRIPT.replace('file:///src', `file://${src}`).replaceAll('/tmp/r', path.join(dir, 'r'))],
+    { env: { ...process.env, BRANCH: 'fix/x' } });
+  assert.equal(fetched.status, 0, String(fetched.stderr));
+  const pushed = spawnSync('sh', ['-c', PUSH_SCRIPT.replaceAll('/tmp/', `${dir}/`)], {
+    input: fetched.stdout, encoding: 'utf8',
     env: { ...process.env, BRANCH: 'fix/x', REPO: 'o/r', GH_TOKEN: 't', GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: `url.file://${path.join(dir, 'remote')}/.insteadOf`, GIT_CONFIG_VALUE_0: 'https://github.com/' },
   });
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(pushed.status, 0, pushed.stderr);
   assert.equal(git(remote, 'log', '--format=%s', 'fix/x').trim(), 'work\ninit');
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f.startsWith('pwned')), []);
 });
 
-test('the token is out of the environment while the agent repo is read', () => {
-  const lines = PUSH_SCRIPT.split('\n');
-  const fetch = lines.findIndex((l) => / fetch /.test(l));
-  assert.ok(lines.slice(0, fetch).some((l) => /unset GH_TOKEN/.test(l)));
-  assert.doesNotMatch(lines[fetch], /GH_TOKEN|\$T/);
+test('the token and the agent repo never meet in one container', () => {
+  assert.doesNotMatch(FETCH_SCRIPT, /GH_TOKEN|REPO/);
+  assert.doesNotMatch(PUSH_SCRIPT, /\/src/);
 });

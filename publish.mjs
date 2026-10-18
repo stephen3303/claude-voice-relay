@@ -1,7 +1,7 @@
 // Pushing an agent's work, so the agent never holds a GitHub token. The agent commits on a branch and
 // writes a request file; after its turn the relay reads the request, mints a token for that agent's repo
-// (github-app.mjs), and a throwaway container that never runs the agent's code or reads its git config
-// copies the branch out of the repo and pushes it. The relay then opens the pull request itself.
+// (github-app.mjs), and two throwaway containers copy the branch out of the repo and push it (see
+// FETCH_SCRIPT). The relay then opens the pull request itself.
 // Dependencies are passed in, so tests run it without Docker or GitHub.
 
 // Inside .git, so the request is never committed.
@@ -25,26 +25,35 @@ export function parseRequest(text) {
   return { branch: r.branch, title, body };
 }
 
-// The fixed script the push container runs. The agent's repo is mounted read-only at /src and is only
-// read through git's own transport into a fresh repo, so its hooks never run. Reading it does parse its
-// config (git treats that as safe for fetches, and a test checks the known ways to run code), so the
-// fetch also runs without the token in its environment and without any other config; the token reaches
-// only the push, which touches nothing but the fresh repo.
-export const PUSH_SCRIPT = [
+// Two fixed scripts, run in two throwaway containers whose only link is a git bundle piped from one to the
+// other. The first gets the agent's repo read-only at /src and no token: it copies the branch into a fresh
+// repo through git's own transport (so the agent's hooks never run; its config is parsed, which git treats
+// as safe for a fetch, and a test checks the known ways to run code) and writes it out as a bundle. The
+// second gets the token and nothing of the agent's but that bundle, which is plain data: it unpacks it
+// into a fresh repo and pushes. So whatever the agent's repo could make the first one do, the token is
+// in neither its environment, its files nor its memory.
+export const FETCH_SCRIPT = [
   'set -e',
-  'T="$GH_TOKEN"; unset GH_TOKEN',
   'git init -q --bare /tmp/r',
   'cd /tmp/r',
   // Its only setting lets git read /src, which belongs to another user (-c doesn't reach upload-pack).
   `git config -f /tmp/r/fetch.gitconfig safe.directory '*'`,
-  `GIT_CONFIG_GLOBAL=/tmp/r/fetch.gitconfig GIT_CONFIG_NOSYSTEM=1 git fetch -q --no-tags file:///src "+refs/heads/$BRANCH:refs/heads/$BRANCH"`,
-  `GH_TOKEN="$T" git -c credential.helper= -c credential.helper='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' push -q "https://github.com/$REPO.git" "refs/heads/$BRANCH:refs/heads/$BRANCH"`,
+  `GIT_CONFIG_GLOBAL=/tmp/r/fetch.gitconfig GIT_CONFIG_NOSYSTEM=1 git fetch -q --no-tags file:///src "+refs/heads/$BRANCH:refs/heads/$BRANCH" </dev/null`,
+  'git bundle create -q - "refs/heads/$BRANCH"',
+].join('\n');
+export const PUSH_SCRIPT = [
+  'set -e',
+  'cat > /tmp/branch.bundle',
+  'git init -q --bare /tmp/p',
+  'cd /tmp/p',
+  'git fetch -q /tmp/branch.bundle "+refs/heads/$BRANCH:refs/heads/$BRANCH"',
+  `git -c credential.helper= -c credential.helper='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f' push -q "https://github.com/$REPO.git" "refs/heads/$BRANCH:refs/heads/$BRANCH"`,
 ].join('\n');
 
 /**
  * deps.readRequest(a) -> the request file's text (and deletes it), or null when the agent made none
  * deps.agentGitHub -> { credentials(a), release(creds) } from github-app.mjs
- * deps.push({ a, branch, repo, token }) -> runs PUSH_SCRIPT in a container; throws on failure
+ * deps.push({ a, branch, repo, token }) -> runs FETCH_SCRIPT and PUSH_SCRIPT in their containers; throws on failure
  * deps.fetch, deps.log
  */
 export function makePublisher({ readRequest, agentGitHub, push, fetch = globalThis.fetch, log = () => {} }) {

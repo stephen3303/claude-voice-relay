@@ -25,8 +25,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.
 - `github-app.mjs`, `publish.mjs` — agents never hold a GitHub token: they commit and write a push request, and after
   the turn the relay mints a GitHub App token (`setup-github-app.mjs` creates the App) for that agent's repo only, and
-  only if its default branch has the README's rulesets. A throwaway container pushes the branch with it (never running
-  the agent repo's hooks or config), the relay opens the PR, and the token is revoked. The App key and each folder's pinned
+  only if its default branch has the README's rulesets. One throwaway container copies the branch out as a bundle with no
+  token, a second gets only the bundle and the token and pushes, the relay opens the PR, and the token is revoked. The App key and each folder's pinned
   repo (`github-pins.json`) live in `%USERPROFILE%\.bridge`. The relay refuses to mount its own folder, `.bridge` or
   anything above them, so agents work on this repo from a second clone.
 
