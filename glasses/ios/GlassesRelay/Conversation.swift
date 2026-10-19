@@ -526,7 +526,7 @@ final class Conversation: NSObject, ObservableObject {
         // earlier invitation open, and doesn't let it run out while it's being read: an agent's message read out after
         // "Ready to send it?" mustn't eat your "yes".
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let invites = line.hasSuffix("?") || line == "Go ahead."
+        let invites = line.hasSuffix("?") || line == "Go ahead." || line.hasSuffix("Say it again.")
         let started = Date()
         let remaining = invitedUntil.timeIntervalSince(started)
         defer {
