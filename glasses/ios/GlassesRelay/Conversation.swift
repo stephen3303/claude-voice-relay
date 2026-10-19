@@ -165,7 +165,8 @@ final class Conversation: NSObject, ObservableObject {
             // An agent called: its message (read from the inbox) is the greeting.
             if trigger != .call { await say("Go ahead.") }
             await announcePending()
-            // Answering an agent's call is answering it, whether or not its message ended in a question.
+            // Answering an agent's call opens the answer window, whether or not its message ended in a question.
+            // (With the window set to Never, every turn starts with "Bridge", as that setting says.)
             if trigger == .call { invitedUntil = Date().addingTimeInterval(Self.answerWindow) }
             startListening()
         }
