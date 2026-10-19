@@ -29,8 +29,9 @@ function spokenDuration(s) {
 
 function spokenDollars(x) {
   if (x < 0.01) return 'less than a cent';
-  if (x < 1) { const c = Math.round(x * 100); return c === 1 ? '1 cent' : `${c} cents`; }
-  return `${x.toFixed(2).replace(/\.00$/, '')} dollars`;
+  if (x < 0.995) { const c = Math.round(x * 100); return c === 1 ? '1 cent' : `${c} cents`; }
+  const d = x.toFixed(2).replace(/\.00$/, '');
+  return d === '1' ? '1 dollar' : `${d} dollars`;
 }
 
 // /usage in print mode: "Total cost: $0.0041\nTotal duration (API): 2m 3s\n...". It's this session's cost

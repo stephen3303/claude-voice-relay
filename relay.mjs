@@ -462,6 +462,7 @@ async function sessionInfo({ kind, agent }) {
         p.stdout.on('data', (d) => (buf += d));
         p.on('error', reject);
         p.on('close', () => { clearTimeout(timer); try { resolve(String(JSON.parse(buf.trim().split('\n').pop()).result || '')); } catch { reject(new Error('no answer from Claude Code')); } });
+        p.stdin.on('error', () => {}); // docker exec exiting first (container just removed) closes the pipe
         p.stdin.end(`/${kind}`);
       });
       return kind === 'usage' ? spokenUsage(a.name, out) : spokenContext(a.name, out);

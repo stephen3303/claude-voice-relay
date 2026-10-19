@@ -37,6 +37,7 @@ test('usage is spoken in dollars and minutes', () => {
   assert.equal(spokenUsage('X', 'Total cost: $0.0041\nTotal duration (API):  1s'), 'X has used less than a cent at API prices on this task, with 1 second of model time.');
   assert.equal(spokenUsage('X', 'Total cost: $12.5'), 'X has used 12.50 dollars at API prices on this task.');
   assert.equal(spokenUsage('X', 'Total cost: $3.00\nTotal duration (API): 1h 2m'), 'X has used 3 dollars at API prices on this task, with 62 minutes of model time.');
+  assert.equal(spokenUsage('X', 'Total cost: $0.997'), 'X has used 1 dollar at API prices on this task.');
   assert.equal(spokenUsage('X', 'Total cost: $.'), "I couldn't read X's usage.");
   assert.equal(spokenUsage('X', 'Unknown command'), "I couldn't read X's usage.");
 });
