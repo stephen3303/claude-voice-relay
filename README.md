@@ -158,6 +158,17 @@ with its full transcript, and you can pick it up there. The relay still speaks t
   not npm's `claude.cmd`; or set `CLAUDE_BIN` in `.env` to the full path of `claude.exe`.
 - Photos can't go to cloud agents (they're files on the PC); quick "what am I looking at" photos still work.
 - "Stop" ends the relay's wait; stop the session itself in the Claude app.
+- **As threads in a claude.ai project (optional):** set `BRIDGE_ROUTINE_URL` and `BRIDGE_ROUTINE_TOKEN`
+  to a project routine's API trigger. When a task ends with an answer (not a question), the relay
+  starts that routine with an empty request, and its run, a new thread in the project, finds the session
+  (its first message starts with "Bridge voice task:") and records what you asked, what was done and
+  any pull request, with a link. The request is empty because a project routine refuses text; only
+  `https://api.anthropic.com/v1/claude_code/routines/trig_.../fire` is accepted as the URL. A failed
+  start is only logged, and so is a setup mistake, at startup. It runs once per task, when the first
+  answer that isn't a question comes back; follow-ups continue in the session the thread links to.
+  Sessions started before the routine was set up are never recorded. Each recorded task is a full
+  thread, so it uses more of your Claude usage. The request can't say which session it's for, so two
+  tasks finishing at the same moment can both land in one thread.
 
 ## Use Bridge from Claude (custom connector)
 Bridge Cloud is also a remote MCP server, so Claude (claude.ai, the Claude apps, Claude Code) can

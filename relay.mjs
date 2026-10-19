@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
-import { runCloud, makeCloudTurn, resolveClaude } from './cloud-agents.mjs';
+import { runCloud, makeCloudTurn, resolveClaude, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +39,10 @@ const cfg = {
   agentGhToken: process.env.AGENT_GH_TOKEN || '',
   // AGENT_MODE=cloud runs tasks as claude.ai cloud sessions (cloud-agents.mjs) instead of Docker on this PC.
   cloud: process.env.AGENT_MODE === 'cloud',
+  // Cloud mode only: a claude.ai project routine's API trigger, started after each finished task so the
+  // task shows up as a thread in that project (cloud-agents.mjs, fireRoutine).
+  routineUrl: process.env.BRIDGE_ROUTINE_URL || '',
+  routineToken: process.env.BRIDGE_ROUTINE_TOKEN || '',
 };
 
 const log = (...a) => {
@@ -55,6 +59,12 @@ const voiceOff = !cfg.voiceToken ? 'VOICE_TOKEN is missing from .env'
   : cfg.voiceToken.length < 24 ? 'VOICE_TOKEN is shorter than 24 characters' : '';
 if (cfg.cloud) log('Agents run as claude.ai cloud sessions (AGENT_MODE=cloud).');
 else if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
+const routineOn = cfg.cloud && !!cfg.routineUrl && !!cfg.routineToken && routineUrlOk(cfg.routineUrl);
+if (!cfg.cloud && (cfg.routineUrl || cfg.routineToken)) log('WARNING: BRIDGE_ROUTINE_URL is set but AGENT_MODE is not cloud; tasks are not sent to the project.');
+else if (cfg.cloud && !cfg.routineUrl && cfg.routineToken) log('WARNING: BRIDGE_ROUTINE_TOKEN is set but BRIDGE_ROUTINE_URL is missing; tasks are not sent to the project.');
+else if (cfg.cloud && cfg.routineUrl && !cfg.routineToken) log('WARNING: BRIDGE_ROUTINE_URL is set but BRIDGE_ROUTINE_TOKEN is missing; tasks are not sent to the project.');
+else if (cfg.cloud && cfg.routineUrl && !routineOn) log("WARNING: BRIDGE_ROUTINE_URL isn't a routine API trigger URL (https://api.anthropic.com/v1/claude_code/routines/trig_.../fire); tasks are not sent to the project.");
+else if (routineOn) log('Finished tasks are recorded as threads in the claude.ai project (BRIDGE_ROUTINE_URL).');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
 const VOICE_PROMPT = [
@@ -169,8 +179,8 @@ const publisher = makePublisher({
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
 function save() {
-  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, cloudId, cloudUrl, awaiting, question, lastAt }) =>
-    ({ name, repoPath, container, sessionId, cloudId, cloudUrl, awaiting, question, lastAt }));
+  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudToRecord, awaiting, question, lastAt }) =>
+    ({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudToRecord, awaiting, question, lastAt }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
 }
 function load() {
@@ -315,6 +325,14 @@ const cloudTurn = makeCloudTurn({
   },
   unsafe: (folder) => unsafeMount(folder, PROTECTED),
   exists: fs.existsSync, say, speakResult, save, log,
+  mark: routineOn,
+  // The spoken answer is already out, so a failed fire is only logged.
+  onDone(a) {
+    if (!routineOn) return;
+    fireRoutine({ url: cfg.routineUrl, token: cfg.routineToken })
+      .then((id) => log(a.name, 'project routine started', id))
+      .catch((e) => log(a.name, 'project routine failed:', e.message));
+  },
 });
 // A cloud turn's CLI would outlive the relay (and keep its session waiting) when start.ps1 restarts it.
 process.on('exit', () => { for (const a of agents.values()) a.proc?.kill(); });
@@ -378,7 +396,7 @@ async function startTask(body) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
     a.repoPath = parsed.repo;
   }
-  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; // a new task gets fresh context
+  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; a.cloudToRecord = false; // a new task gets fresh context
   a.cloudNew = true; // and, in cloud mode, a new cloud session
   say(`Starting ${name}.`);
   turn(a, parsed.task);
@@ -516,8 +534,10 @@ function quickLook(file, said) {
   const prompt = `${LOOK_PROMPT}\n\nThey said: "${said || 'What am I looking at?'}"`;
   return new Promise((resolve, reject) => {
     // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
+    // It may need the setup token to sign in, but never the routine's token.
+    const { BRIDGE_ROUTINE_TOKEN: _, ...env } = process.env;
     const p = spawn(process.env.CLAUDE_BIN || 'claude', ['-p', '--output-format', 'json', '--allowedTools', 'Read'],
-      { cwd: dir, windowsHide: true });
+      { cwd: dir, windowsHide: true, env });
     let out = '', err = '';
     const timer = setTimeout(() => p.kill(), 120000);
     const done = (fn) => { clearTimeout(timer); fs.rmSync(dir, { recursive: true, force: true }); fn(); };
