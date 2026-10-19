@@ -534,8 +534,10 @@ function quickLook(file, said) {
   const prompt = `${LOOK_PROMPT}\n\nThey said: "${said || 'What am I looking at?'}"`;
   return new Promise((resolve, reject) => {
     // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
+    // It may need the setup token to sign in, but never the routine's token.
+    const { BRIDGE_ROUTINE_TOKEN: _, ...env } = process.env;
     const p = spawn(process.env.CLAUDE_BIN || 'claude', ['-p', '--output-format', 'json', '--allowedTools', 'Read'],
-      { cwd: dir, windowsHide: true });
+      { cwd: dir, windowsHide: true, env });
     let out = '', err = '';
     const timer = setTimeout(() => p.kill(), 120000);
     const done = (fn) => { clearTimeout(timer); fs.rmSync(dir, { recursive: true, force: true }); fn(); };

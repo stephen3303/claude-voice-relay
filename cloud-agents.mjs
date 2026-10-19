@@ -194,7 +194,7 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       return say(`${a.name}: sent. Its answer will be in the Claude app.`, { spoken: `Sent to ${a.name}. Its answer will be in the Claude app.` });
     }
     speakResult(a, r);
-    if (!a.awaiting && !r.is_error && a.cloudToRecord) {
+    if (!a.awaiting && !r.is_error && r.result.trim() && a.cloudToRecord) {
       a.cloudToRecord = false; save();
       onDone(a);
     }

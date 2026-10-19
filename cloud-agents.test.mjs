@@ -241,6 +241,9 @@ test('a finished answer starts the project routine; a question or a queued follo
   // A session from before the marker (saved in state.json) can't be found by the routine, so it never fires.
   await yes.cloudTurn({ name: 'old', repoPath: '/p', cloudId: 'cse_2' }, 'and the tests');
   assert.deepEqual(yes.done, ['bot']);
+  const empty = turnHarness({ reply: { result: '  ', is_error: false, session_id: 'cse_1' } });
+  await empty.cloudTurn(newAgent(), 'add a stop-loss');
+  assert.deepEqual(empty.done, []); // a turn that said nothing records nothing
   const err = turnHarness({ reply: { result: 'SPOKEN: The tests failed.', is_error: true, session_id: 'cse_1' } });
   await err.cloudTurn(newAgent(), 'add a stop-loss');
   assert.deepEqual(err.done, []);
