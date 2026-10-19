@@ -81,7 +81,7 @@ const VOICE_PROMPT = [
   'no code, file paths, markdown, or symbols that read badly aloud.',
   'If you need a decision, stop and make the SPOKEN line a single yes-or-no question, then continue after the user answers.',
   'Everything above the SPOKEN line may be as detailed as you like; the user reads it later.',
-  'Put the same line in the spoken field of your structured reply, and set needs_answer only when it is that yes-or-no question.',
+  'Put the same line in the spoken field of your structured reply, and set needs_answer whenever it asks the user something you need answered.',
 ].join(' ');
 // Agents hold no GitHub credentials: the relay pushes for them after the turn (publish.mjs).
 const PUBLISH = [

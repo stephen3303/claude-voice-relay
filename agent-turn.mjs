@@ -9,7 +9,7 @@ export const REPLY_SCHEMA = {
   type: 'object',
   properties: {
     spoken: { type: 'string', description: 'One or two plain sentences read aloud: no code, file paths, markdown or symbols.' },
-    needs_answer: { type: 'boolean', description: 'True only when the spoken line is a yes-or-no question you need answered before you continue.' },
+    needs_answer: { type: 'boolean', description: 'True when the spoken line asks the user something you need answered before you continue; false for a finished answer, even one that ends in a question mark.' },
   },
   required: ['spoken', 'needs_answer'],
   additionalProperties: false,

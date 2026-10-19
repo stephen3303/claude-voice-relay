@@ -61,6 +61,12 @@ test('the stream reader still reads a plain json result, and ignores junk lines'
   assert.equal(makeStreamReader().result(), null);
 });
 
+test('the result event wins over lines printed after it', () => {
+  const reader = makeStreamReader();
+  reader.push('{"type":"result","subtype":"success","result":"x"}\n{"type":"system","subtype":"hook"}\n');
+  assert.equal(reader.result().type, 'result');
+});
+
 test('a turn cut off before its result event has no result', () => {
   const reader = makeStreamReader();
   reader.push('{"type":"system","subtype":"init","session_id":"s"}\n{"type":"assistant","message":{"content":[]}}\n');
