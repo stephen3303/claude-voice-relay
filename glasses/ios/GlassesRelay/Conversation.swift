@@ -381,7 +381,7 @@ final class Conversation: NSObject, ObservableObject {
                 await say("Yes?")
                 // Answered even when the answer window is set to Never: that's what "Yes?" asked for.
                 invitedUntil = max(invitedUntil, Date().addingTimeInterval(10))
-                startListening()
+                if conversing { startListening() }   // not if it was hung up while "Yes?" was said
             }
             return
         }
@@ -441,9 +441,10 @@ final class Conversation: NSObject, ObservableObject {
     /// "Bridge, what's the status?" → "what's the status?"; nil when no sentence starts with "Bridge" (or "Hey Bridge").
     /// Talk just before it in the same breath is dropped ("...see you then. Bridge, what's new?" → "what's new?"),
     /// but "the bridge was closed" is not a call. Tolerates the recognizer's punctuation and capitals; just "Bridge" gives "".
-    /// `answering`: only a leading "Bridge," set off by punctuation, so an answer like "Bridge the gap" is kept whole.
+    /// `answering`: only a leading "Bridge," set off by punctuation or before a read-back answer ("Bridge yes"), so an
+    /// answer like "Bridge the gap" is kept whole.
     nonisolated static func afterWakeWord(_ text: String, answering: Bool = false) -> String? {
-        let pattern = try! NSRegularExpression(pattern: answering ? #"^\W*(?:(?:hey|ok|okay)\W+)?bridge(?:[,.!?:;]+\s*|\s*$)"#
+        let pattern = try! NSRegularExpression(pattern: answering ? #"^\W*(?:(?:hey|ok|okay)\W+)?bridge(?:[,.!?:;]+\s*|\s*$|\s+(?=(?:yes|no|send|cancel|change|goodbye)\b))"#
                                                                   : #"(?:^|[.!?]\s+)\W*(?:(?:hey|ok|okay)\W+)?bridge\b(?!['’-])\W*"#,
                                                options: [.caseInsensitive])
         guard let m = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).first,
