@@ -21,7 +21,7 @@ gh secret set APPLE_TEAM_ID      -R $repo -b $team.Trim()
 gh secret set ASC_KEY_ID         -R $repo -b $keyId.Trim()
 gh secret set ASC_ISSUER_ID      -R $repo -b $issuer.Trim()
 gh secret set ASC_KEY_P8_BASE64  -R $repo -b $b64
-if ($metaId.Trim()) {
+if ($metaId.Trim() -and $metaToken.Trim()) {
   gh secret set META_APP_ID        -R $repo -b $metaId.Trim()
   gh secret set META_CLIENT_TOKEN  -R $repo -b $metaToken.Trim()
 }

@@ -10,6 +10,7 @@
 #                               unset the build uses "0" (Meta Developer Mode, fine for TestFlight)
 # Optional, for crash reports (glasses/setup-sentry-secrets.ps1):
 #   SENTRY_DSN, SENTRY_AUTH_TOKEN secrets; SENTRY_ORG, SENTRY_PROJECT variables
+# The home-screen name is "Bridge Voice": "Bridge" is another developer's app on the App Store (ITMS-90129).
 name: Glasses App Store upload
 on:
   workflow_dispatch:
@@ -62,6 +63,7 @@ jobs:
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic CODE_SIGN_ENTITLEMENTS=AppStore.entitlements \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            'APP_DISPLAY_NAME=Bridge Voice' \
             META_APP_ID="${META_APP_ID:-0}" CLIENT_TOKEN="${META_CLIENT_TOKEN:-0}" SENTRY_DSN="$SENTRY_DSN" \
             'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) APP_STORE' \
             archive | xcbeautify --renderer github-actions
