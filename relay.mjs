@@ -453,8 +453,10 @@ async function sessionInfo({ kind, agent }) {
   const lines = await Promise.all(list.map(async (a) => {
     if (!a.sessionId) return `${a.name} has no conversation yet.`;
     try {
-      if (!a.busy) await ensureContainer(a); // mid-turn it's running, and a rebuilt image would replace it
-      if (!a.sessionId) return `${a.name} has no conversation yet.`; // a moved folder drops its session
+      // Only a running container is asked: starting one here could race a turn's ensureContainer, and a
+      // stopped agent has used nothing since its last turn.
+      const state = await hostValue('docker', ['inspect', '--format', '{{.State.Status}}', a.container]);
+      if (state !== 'running') return `${a.name} isn't running right now. Ask again after its next turn.`;
       const out = await new Promise((resolve, reject) => {
         const p = spawn('docker', ['exec', '-i', '-w', '/work', a.container, 'claude', ...infoArgs(a.sessionId)], { windowsHide: true });
         let buf = '';
@@ -478,7 +480,8 @@ async function sessionInfo({ kind, agent }) {
 async function dispatch(text) {
   if (TASK_PREFIX.test(text)) return startTask(text.replace(TASK_PREFIX, ''));
   if (/^\/?status\b/i.test(text)) return status();
-  const info = infoCommand(text, (rest) => { const a = findAgentPrefix(rest); return a && norm(a.name) === norm(rest) ? a : null; });
+  // A prefix match, as for replies, so a misheard "trading bots" still finds the agent instead of becoming a paid turn.
+  const info = infoCommand(text, findAgentPrefix);
   if (info) return sessionInfo(info);
   if (/^\/?(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^\/?(stop|kill)\s*/i, ''));
   // "full" used to show the whole reply in Telegram; keep it from reaching an agent as a prompt.
