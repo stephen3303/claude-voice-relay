@@ -137,7 +137,8 @@ moved: each task is a claude.ai cloud session that shows in the Claude app.
   the relay's own `cloud-agents.mjs`, writes each answer to the inbox (and ntfy), fires the project routine, marks the
   agent idle and exits. When Claude Code refreshes the login, the runner writes the new one back.
 - **Setup**: `cloud/setup/setup-owner.ps1` on the PC stores the token's hash, signs a new claude.ai login in and stores
-  it, and writes the projects.
+  it, and writes the projects. `cloud/setup/deploy-branch.ps1` deploys BridgeApi from an unmerged branch on the PC and
+  then runs it, to try a change before it's merged.
 - **Cost** at about 10 tasks a day: roughly $5 to $8 a month, nearly all Fargate time while a session works and
   Secrets Manager; nothing runs between tasks.
 - **Known limits**: two runners starting at once with an expired login can race on its refresh and sign the
