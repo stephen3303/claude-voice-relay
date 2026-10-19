@@ -34,7 +34,7 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
    App Manager key can't do). Then run `glasses/setup-appstore-secrets.ps1`, which stores `ASC_KEY_ID`,
    `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` and `APPLE_TEAM_ID` as repository secrets. Leave the Meta
    prompts empty until step 7; the build then uses Meta Developer Mode, which is fine for TestFlight.
-7. **Meta, for production:** in the Wearables Developer Center, name the app **Bridge Voice** (the App Store build's
+7. **Meta, for production:** in the Wearables Developer Center, name the app **Talk to Bridge** (the App Store build's
    home-screen name; "Bridge" is taken on the App Store), set the app's Apple Team ID to the paid team,
    take its **App ID** and **Client Token** into the `META_APP_ID` and `META_CLIENT_TOKEN` secrets,
    and publish a release channel for App Store users. Ask Meta how DAT apps meet Apple's MFi
@@ -45,7 +45,7 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
 
 ## Listing
 
-- **Name:** Bridge: Voice for Code Agents (if taken: Bridge Voice Relay)
+- **Name:** Bridge: Voice for Code Agents (if taken: Talk to Bridge Relay)
 - **Subtitle:** Talk to your coding agents
 - **Category:** Developer Tools (secondary: Productivity)
 - **Age rating:** 4+ (no objectionable content; answers come from the user's own agents)
