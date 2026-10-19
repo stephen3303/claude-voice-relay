@@ -45,12 +45,21 @@ final class Conversation: NSObject, ObservableObject {
     private var lastActivity = Date()
     /// Set after "Sent.": an agent is working, so stay on the line for its answer.
     private var awaitingAgent = false
+    /// Bridge just asked something ("Go ahead.", "Ready to send it?"), so the next thing said is an answer and
+    /// doesn't need to start with "Bridge".
+    private var invited = false
 
     /// Settings > "Read back what I said". On: the relay reads your words back ("Ready to send it?") and waits for a yes.
     /// Off: your words go straight to the agents, so wait for a longer pause before sending.
     static var readBack: Bool {
         get { UserDefaults.standard.object(forKey: "readBack") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "readBack") }
+    }
+    /// Settings > "Only answer to \"Bridge\"". On: while listening, speech is ignored unless it starts with "Bridge"
+    /// (or answers a question Bridge just asked), so talk around you isn't sent to your agents.
+    static var wakeWord: Bool {
+        get { UserDefaults.standard.object(forKey: "wakeWord") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "wakeWord") }
     }
     /// The phone voice picked in Settings (an AVSpeechSynthesisVoice identifier); empty means the best installed one.
     static var voiceID: String {
@@ -327,11 +336,34 @@ final class Conversation: NSObject, ObservableObject {
 
     private func finishTurn() {
         guard phase == .listening else { return }
-        let text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         stopListening()   // never listen while speaking, or the recognizer hears the reply
-        guard !text.isEmpty else { startListening(); return }
-        transcript.append(("You", text))
+        guard !raw.isEmpty else { startListening(); return }
+        let wasInvited = invited
+        invited = false
+        var said = raw
+        if Self.wakeWord, !wasInvited {
+            // Not for Bridge: drop it without a word, and don't count it as activity, so talk around you neither
+            // reaches the agents nor keeps the line open.
+            guard let rest = Self.afterWakeWord(raw) else {
+                status = "Ignored: start with \"Bridge\""
+                startListening(); return
+            }
+            said = rest
+        } else if let rest = Self.afterWakeWord(raw) {
+            said = rest
+        }
         lastActivity = Date()
+        // Just "Bridge": ask, and take the next thing said without the wake word.
+        guard !said.isEmpty else {
+            Task {
+                await say("Yes?")
+                startListening()
+            }
+            return
+        }
+        let text = said
+        transcript.append(("You", text))
 
         // Recognizer output can carry capitals and trailing punctuation ("Goodbye.").
         let lower = text.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
@@ -381,6 +413,16 @@ final class Conversation: NSObject, ObservableObject {
             await say(reply)
             phase = .idle
         }
+    }
+
+    /// "Bridge, what's the status?" → "what's the status?"; nil when no sentence starts with "Bridge" (or "Hey Bridge").
+    /// Talk just before it in the same breath is dropped ("...see you then. Bridge, what's new?" → "what's new?"),
+    /// but "the bridge was closed" is not a call. Tolerates the recognizer's punctuation and capitals; just "Bridge" gives "".
+    nonisolated static func afterWakeWord(_ text: String) -> String? {
+        let pattern = try! NSRegularExpression(pattern: #"(?:^|[.!?]\s+)\W*(?:(?:hey|ok|okay)\W+)?bridge\b\W*"#, options: [.caseInsensitive])
+        guard let m = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).first,
+              let r = Range(m.range, in: text) else { return nil }
+        return String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// "In trading bot, add a check" starts a task, as the Shortcut's "task:" prefix does.
@@ -440,6 +482,9 @@ final class Conversation: NSObject, ObservableObject {
 
     private func say(_ text: String) async {
         phase = .speaking
+        // Whatever Bridge says last decides whether the next thing heard needs "Bridge" in front of it.
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        invited = line.hasSuffix("?") || line == "Go ahead."
         await useHiFiOutput()
         // The natural voice when it's turned on in Settings: from the relay when it has a key, or from Bridge Cloud with
         // Bridge Pro; otherwise (or on any failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.

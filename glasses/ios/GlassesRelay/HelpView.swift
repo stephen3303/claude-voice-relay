@@ -21,6 +21,7 @@ struct HelpView: View {
                     #endif
                 }
                 Section("Talking to your agents") {
+                    HelpItem("Say \"Bridge\" first", "While Bridge is listening, start what you say with \"Bridge\": \"Bridge, what's the status?\" Anything else is ignored, so people talking around you aren't sent to your agents. Right after Bridge says \"Go ahead\" or asks you something, just answer. Say \"Bridge\" on its own and it asks \"Yes?\" Turn this off in Settings > Voice.")
                     HelpItem("Start a task", "Begin with \"in\" and the project's name: \"In trading bot, add a stop-loss check.\"")
                     HelpItem("Read-back", "With Read back on, Bridge reads your message back like Siri does: \"Here's your message to Claude for trading bot, ... Ready to send it?\" Say \"send\" or \"yes\" to send it, \"change it\" to say it differently, or \"cancel\" or \"no\". Nothing is sent until you say yes. Turn it off in Settings to send after a 2-second pause instead.")
                     HelpItem("Answers", "While a conversation is open, your agents' replies are read to you as they arrive. Answer a yes-or-no question with \"yes\".")

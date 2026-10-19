@@ -22,6 +22,7 @@ struct SettingsView: View {
     @State private var testResult = ""
     @State private var photoResult = ""
     @State private var readBack = Conversation.readBack
+    @State private var wakeWord = Conversation.wakeWord
     // A deleted voice falls back to the best installed one; show that rather than a blank picker.
     @State private var voiceID = Conversation.voices.contains { $0.identifier == Conversation.voiceID } ? Conversation.voiceID : ""
     @State private var hiFi = Conversation.hiFiSpeech
@@ -65,6 +66,8 @@ struct SettingsView: View {
                 Section {
                     Toggle("Read back what I said", isOn: $readBack)
                         .onChange(of: readBack) { _, on in Conversation.readBack = on }
+                    Toggle("Only answer to \"Bridge\"", isOn: $wakeWord)
+                        .onChange(of: wakeWord) { _, on in Conversation.wakeWord = on }
                     Picker("Phone voice", selection: $voiceID) {
                         Text("Best installed").tag("")
                         ForEach(Conversation.voices, id: \.identifier) { Text(Conversation.label($0)).tag($0.identifier) }
@@ -86,6 +89,7 @@ struct SettingsView: View {
                     Text((readBack
                           ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
                           : "Bridge sends what you say after a 2-second pause, without repeating it.")
+                         + (wakeWord ? " While listening, Bridge ignores anything that doesn't start with \"Bridge\", except an answer to a question it just asked." : "")
                          + " The phone voice speaks unless the natural voice is on and available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
                          + (mode.wrappedValue == .pc ? " Natural voice sends each reply's text to OpenAI to be spoken, and needs an OpenAI key on the relay."
                             : mode.wrappedValue == .cloud ? " Natural voice is spoken by Amazon Polly and needs Bridge Pro." : "")
