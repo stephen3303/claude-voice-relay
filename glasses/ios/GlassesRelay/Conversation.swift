@@ -48,6 +48,8 @@ final class Conversation: NSObject, ObservableObject {
     /// Bridge just asked something ("Go ahead.", "Ready to send it?"), so what's said next, until then, is an answer
     /// and doesn't need to start with "Bridge".
     private var invitedUntil = Date.distantPast
+    /// When the first words of the current turn were heard: an answer started inside the window counts, however long it runs.
+    private var turnStarted: Date?
 
     /// Settings > "Read back what I said". On: the relay reads your words back ("Ready to send it?") and waits for a yes.
     /// Off: your words go straight to the agents, so wait for a longer pause before sending.
@@ -238,6 +240,7 @@ final class Conversation: NSObject, ObservableObject {
         // A route change (the switch back from A2DP) can restart listening while a retry is queued; never run two.
         stopListening()
         heard = ""
+        turnStarted = nil
         phase = .listening
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
@@ -292,6 +295,7 @@ final class Conversation: NSObject, ObservableObject {
                 // Only the current session: a cancelled one still calls back once.
                 guard let self, self.phase == .listening, self.request === req else { return }
                 if let result {
+                    if self.heard.isEmpty { self.turnStarted = Date() }
                     self.heard = result.bestTranscription.formattedString
                     self.armSilenceTimer()
                     if result.isFinal { self.finishTurn() }
@@ -356,7 +360,7 @@ final class Conversation: NSObject, ObservableObject {
         let raw = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         stopListening()   // never listen while speaking, or the recognizer hears the reply
         guard !raw.isEmpty else { startListening(); return }
-        let invited = Date() < invitedUntil
+        let invited = (turnStarted ?? Date()) < invitedUntil
         invitedUntil = .distantPast
         var said = raw
         if Self.wakeWord, !invited {
