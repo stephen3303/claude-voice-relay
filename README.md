@@ -164,9 +164,11 @@ with its full transcript, and you can pick it up there. The relay still speaks t
   (its first message starts with "Bridge voice task:") and records what you asked, what was done and
   any pull request, with a link. The request is empty because a project routine refuses text; only
   `https://api.anthropic.com/v1/claude_code/routines/trig_.../fire` is accepted as the URL. A failed
-  start is only logged. It fires after each turn that ends with an answer, so a follow-up on a
-  finished task gets its own thread with only what's new; sessions started before this setting never
-  fire. Each recorded turn is a full thread, so it uses more of your Claude usage.
+  start is only logged, and so is a setup mistake, at startup. It runs once per task, when the first
+  answer that isn't a question comes back; follow-ups continue in the session the thread links to.
+  Sessions started before the routine was set up are never recorded. Each recorded task is a full
+  thread, so it uses more of your Claude usage. The request can't say which session it's for, so two
+  tasks finishing at the same moment can both land in one thread.
 
 ## Use Bridge from Claude (custom connector)
 Bridge Cloud is also a remote MCP server, so Claude (claude.ai, the Claude apps, Claude Code) can

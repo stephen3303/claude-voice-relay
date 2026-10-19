@@ -100,7 +100,7 @@ export const BRIDGE_MARK = 'Bridge voice task:';
 // whose run is a new thread in the user's project; that thread finds the finished session and records it
 // there. A project routine refuses text with the fire, so the request is empty and the thread looks the
 // session up itself. Only Anthropic's routine endpoint is accepted, so the token can't be sent elsewhere.
-const ROUTINE_URL = /^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/trig_[A-Za-z0-9]{1,64}\/fire$/;
+const ROUTINE_URL = /^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/trig_[A-Za-z0-9_-]{1,64}\/fire$/;
 export const routineUrlOk = (url) => ROUTINE_URL.test(String(url));
 export async function fireRoutine({ fetch = globalThis.fetch, url, token, timeoutMs = 30_000 }) {
   if (!routineUrlOk(url)) throw new Error('BRIDGE_ROUTINE_URL is not a routine API trigger URL.');
@@ -148,12 +148,12 @@ export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeou
 // a new task starts a cloud session; a reply goes to a.cloudId. checkRepo(a) resolves to why the repo
 // can't have a cloud agent, or '' when it can. unsafe(folder) is true for the relay's own folder, the
 // folder holding its keys, or one above them: the CLI runs there on the host and may bundle it.
-// onDone(a) runs when a turn ends with an answer that isn't a question or an error, so the routine records
-// finished work. A task that asked something fires once its answer's turn finishes; a later follow-up on a
-// finished task fires again, and that thread records only what's new (the routine keeps what it covered).
-// Only a session whose first message carried BRIDGE_MARK (a.cloudMarked) fires: the routine can't find others.
+// With mark (the routine is set up), a new session's first message carries BRIDGE_MARK and the session is
+// due a record (a.cloudToRecord). onDone(a) then runs once per session, when a turn first ends with an answer
+// that isn't a question or an error: each run is a full project thread, so follow-ups don't start more; the
+// thread links the session, where they continue. A session without the mark never fires: the routine can't find it.
 export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, save = () => {}, log = () => {},
-  onDone = () => {} }) {
+  mark = false, onDone = () => {} }) {
   return async function cloudTurn(a, prompt) {
     // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
     // failed after the session may have started) would start one with only that one line, next to an orphan
@@ -177,8 +177,8 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       a.cloudId = id; a.cloudUrl = url; save();
       log(a.name, 'cloud session', id, url);
     };
-    const task = fresh ? `${BRIDGE_MARK} ${asTask(prompt)}` : prompt;
-    if (fresh) a.cloudMarked = true;
+    const task = fresh && mark ? `${BRIDGE_MARK} ${asTask(prompt)}` : prompt;
+    if (fresh) a.cloudToRecord = mark;
     try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt: task, onSession, onSpawn: (p) => { a.proc = p; } }); }
     catch (e) {
       // The session was created before the failure: a reply can still go to it.
@@ -194,6 +194,9 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       return say(`${a.name}: sent. Its answer will be in the Claude app.`, { spoken: `Sent to ${a.name}. Its answer will be in the Claude app.` });
     }
     speakResult(a, r);
-    if (!a.awaiting && !r.is_error && a.cloudMarked) onDone(a);
+    if (!a.awaiting && !r.is_error && a.cloudToRecord) {
+      a.cloudToRecord = false; save();
+      onDone(a);
+    }
   };
 }

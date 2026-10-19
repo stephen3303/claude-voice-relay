@@ -60,7 +60,11 @@ const voiceOff = !cfg.voiceToken ? 'VOICE_TOKEN is missing from .env'
 if (cfg.cloud) log('Agents run as claude.ai cloud sessions (AGENT_MODE=cloud).');
 else if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
 const routineOn = cfg.cloud && !!cfg.routineUrl && !!cfg.routineToken && routineUrlOk(cfg.routineUrl);
-if (cfg.cloud && cfg.routineUrl && !routineOn) log('WARNING: BRIDGE_ROUTINE_URL or BRIDGE_ROUTINE_TOKEN is wrong or missing; finished tasks are not sent to the project.');
+if (!cfg.cloud && (cfg.routineUrl || cfg.routineToken)) log('WARNING: BRIDGE_ROUTINE_URL is set but AGENT_MODE is not cloud; tasks are not sent to the project.');
+else if (cfg.cloud && !cfg.routineUrl && cfg.routineToken) log('WARNING: BRIDGE_ROUTINE_TOKEN is set but BRIDGE_ROUTINE_URL is missing; tasks are not sent to the project.');
+else if (cfg.cloud && cfg.routineUrl && !cfg.routineToken) log('WARNING: BRIDGE_ROUTINE_URL is set but BRIDGE_ROUTINE_TOKEN is missing; tasks are not sent to the project.');
+else if (cfg.cloud && cfg.routineUrl && !routineOn) log("WARNING: BRIDGE_ROUTINE_URL isn't a routine API trigger URL (https://api.anthropic.com/v1/claude_code/routines/trig_.../fire); tasks are not sent to the project.");
+else if (routineOn) log('Finished tasks are recorded as threads in the claude.ai project (BRIDGE_ROUTINE_URL).');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
 const VOICE_PROMPT = [
@@ -175,8 +179,8 @@ const publisher = makePublisher({
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
 function save() {
-  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudMarked, awaiting, question, lastAt }) =>
-    ({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudMarked, awaiting, question, lastAt }));
+  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudToRecord, awaiting, question, lastAt }) =>
+    ({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudToRecord, awaiting, question, lastAt }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
 }
 function load() {
@@ -321,6 +325,7 @@ const cloudTurn = makeCloudTurn({
   },
   unsafe: (folder) => unsafeMount(folder, PROTECTED),
   exists: fs.existsSync, say, speakResult, save, log,
+  mark: routineOn,
   // The spoken answer is already out, so a failed fire is only logged.
   onDone(a) {
     if (!routineOn) return;
@@ -391,7 +396,7 @@ async function startTask(body) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
     a.repoPath = parsed.repo;
   }
-  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; a.cloudMarked = false; // a new task gets fresh context
+  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; a.cloudToRecord = false; // a new task gets fresh context
   a.cloudNew = true; // and, in cloud mode, a new cloud session
   say(`Starting ${name}.`);
   turn(a, parsed.task);

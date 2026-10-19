@@ -85,7 +85,7 @@ test('runCloud rejects when claude is not installed', async () => {
   await assert.rejects(runCloud({ spawn, claudeBin: '/usr/bin/claude', env: {}, cwd: '/p', prompt: 'x', timeoutMs: 1000 }), /ENOENT/);
 });
 
-function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true, unsafe = false, during } = {}) {
+function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true, unsafe = false, during, mark = true } = {}) {
   const runs = [], said = [], spoken = [], checked = [], saves = [], done = [];
   const cloudTurn = makeCloudTurn({
     run: async (o) => { runs.push(o); if (during) during(o); if (reply instanceof Error) throw reply; return reply; },
@@ -94,7 +94,7 @@ function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, sessi
     unsafe: () => unsafe,
     exists: () => exists, say: (t, o) => said.push(o?.spoken ?? t),
     speakResult: (a, r) => { spoken.push(r.result); a.awaiting = r.result.endsWith('?'); },
-    onDone: (a) => done.push(a.name),
+    onDone: (a) => done.push(a.name), mark,
   });
   return { cloudTurn, runs, said, spoken, checked, saves, done };
 }
@@ -201,7 +201,7 @@ test('runCloud refuses a claude that is not a full path, or lives in the project
 test('a new session id is saved as soon as the CLI reports it, and the child is kept for stop', async () => {
   const seen = {};
   const a = newAgent();
-  const h = turnHarness({ during: (o) => {
+  const h = turnHarness({ mark: false, during: (o) => {
     o.onSpawn('child');
     seen.proc = a.proc;
     o.onSession('cse_5', 'https://claude.ai/code/cse_5');
@@ -233,10 +233,10 @@ test('a finished answer starts the project routine; a question or a queued follo
   const ask = turnHarness({ reply: { result: 'SPOKEN: Should I push it?', is_error: false, session_id: 'cse_1' } });
   await ask.cloudTurn(newAgent(), 'add a stop-loss');
   assert.deepEqual(ask.done, []);
-  await ask.cloudTurn(Object.assign(newAgent(), { cloudNew: false, cloudId: 'cse_1', cloudMarked: true }), 'yes');
+  await ask.cloudTurn(Object.assign(newAgent(), { cloudNew: false, cloudId: 'cse_1', cloudToRecord: true }), 'yes');
   assert.deepEqual(ask.done, []); // still a question
   const yes = turnHarness();
-  await yes.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1', cloudMarked: true }, 'yes');
+  await yes.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1', cloudToRecord: true }, 'yes');
   assert.deepEqual(yes.done, ['bot']); // the answer after a question records the task
   // A session from before the marker (saved in state.json) can't be found by the routine, so it never fires.
   await yes.cloudTurn({ name: 'old', repoPath: '/p', cloudId: 'cse_2' }, 'and the tests');
@@ -245,8 +245,25 @@ test('a finished answer starts the project routine; a question or a queued follo
   await err.cloudTurn(newAgent(), 'add a stop-loss');
   assert.deepEqual(err.done, []);
   const q = turnHarness({ reply: { result: '', is_error: false, session_id: 'cse_1', queued: true } });
-  await q.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1', cloudMarked: true }, 'and the tests');
+  await q.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1', cloudToRecord: true }, 'and the tests');
   assert.deepEqual(q.done, []);
+});
+
+test('a session is recorded once, and without the routine nothing is marked or recorded', async () => {
+  const h = turnHarness();
+  const a = newAgent();
+  await h.cloudTurn(a, 'add a stop-loss');
+  await h.cloudTurn(a, 'and the tests');
+  assert.deepEqual(h.done, ['trading bot']); // follow-ups don't start more threads
+  a.cloudNew = true; a.cloudId = null; // a new task is a new session, recorded again
+  await h.cloudTurn(a, 'now the docs');
+  assert.deepEqual(h.done, ['trading bot', 'trading bot']);
+  const off = turnHarness({ mark: false });
+  const b = newAgent();
+  await off.cloudTurn(b, 'add a stop-loss');
+  assert.equal(off.runs[0].prompt, 'add a stop-loss');
+  assert.equal(b.cloudToRecord, false);
+  assert.deepEqual(off.done, []);
 });
 
 test('only the first message of a session is marked, and a slash command is still not run', async () => {
@@ -273,6 +290,7 @@ test('fireRoutine posts an empty request to the routine endpoint only', async ()
     await assert.rejects(fireRoutine({ fetch, url: bad, token: 'sk-x' }), /not a routine API trigger URL/);
   }
   assert.equal(calls.length, 1);
+  assert.equal(routineUrlOk('https://api.anthropic.com/v1/claude_code/routines/trig_01a-B_c/fire'), true);
   const no = async () => ({ ok: false, status: 403, json: async () => ({}) });
   await assert.rejects(fireRoutine({ fetch: no, url, token: 'sk-x' }), /answered 403/);
 });
