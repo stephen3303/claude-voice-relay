@@ -46,9 +46,8 @@ final class Conversation: NSObject, ObservableObject {
     /// Set after "Sent.": an agent is working, so stay on the line for its answer.
     private var awaitingAgent = false
     /// Bridge just asked something ("Go ahead.", "Ready to send it?"), so what's said next, until then, is an answer
-    /// and doesn't need to start with "Bridge". Long enough to answer, short enough that later talk around you isn't sent.
+    /// and doesn't need to start with "Bridge".
     private var invitedUntil = Date.distantPast
-    private let answerWindow: TimeInterval = 30
 
     /// Settings > "Read back what I said". On: the relay reads your words back ("Ready to send it?") and waits for a yes.
     /// Off: your words go straight to the agents, so wait for a longer pause before sending.
@@ -61,6 +60,19 @@ final class Conversation: NSObject, ObservableObject {
     static var wakeWord: Bool {
         get { UserDefaults.standard.object(forKey: "wakeWord") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "wakeWord") }
+    }
+    /// Settings > "Answer without \"Bridge\"": seconds after Bridge asks something during which the answer needn't start
+    /// with "Bridge". Long enough to answer, short enough that later talk around you isn't sent; 0 always needs it.
+    static let answerWindows: [TimeInterval] = [0, 10, 20, 30, 60]
+    static var answerWindow: TimeInterval {
+        get { UserDefaults.standard.object(forKey: "answerWindow") as? TimeInterval ?? 30 }
+        set { UserDefaults.standard.set(newValue, forKey: "answerWindow") }
+    }
+    /// Settings > "Hang up after quiet": seconds of silence before Bridge hangs up; 0 waits for "goodbye".
+    static let hangUpChoices: [TimeInterval] = [25, 60, 5 * 60, 15 * 60, 0]
+    static var hangUpAfter: TimeInterval {
+        get { UserDefaults.standard.object(forKey: "hangUpAfter") as? TimeInterval ?? 25 }
+        set { UserDefaults.standard.set(newValue, forKey: "hangUpAfter") }
     }
     /// The phone voice picked in Settings (an AVSpeechSynthesisVoice identifier); empty means the best installed one.
     static var voiceID: String {
@@ -109,8 +121,7 @@ final class Conversation: NSObject, ObservableObject {
 
     /// Pause after you stop talking before your turn is sent.
     private var endOfTurn: TimeInterval { Self.readBack ? 1.4 : 2.0 }
-    /// Hang up after this much silence, or the longer one while an agent is working.
-    private let idleHangup: TimeInterval = 25
+    /// While an agent is working, stay on the line at least this long for its answer.
     private let agentHangup: TimeInterval = 15 * 60
     /// Agent messages older than this are not read out when a conversation starts.
     private let maxBacklogAge = 30 * 60
@@ -320,8 +331,8 @@ final class Conversation: NSObject, ObservableObject {
         watchdog?.invalidate()
         watchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.phase == .listening, self.heard.isEmpty else { return }
-                let limit = self.awaitingAgent ? self.agentHangup : self.idleHangup
+                guard let self, self.phase == .listening, self.heard.isEmpty, Self.hangUpAfter > 0 else { return }
+                let limit = self.awaitingAgent ? max(self.agentHangup, Self.hangUpAfter) : Self.hangUpAfter
                 if Date().timeIntervalSince(self.lastActivity) > limit {
                     #if APP_STORE
                     self.end(saying: "I'll hang up. Say Hey Siri, talk to Bridge when you need me.")
@@ -490,7 +501,7 @@ final class Conversation: NSObject, ObservableObject {
         // earlier invitation alone: an agent's message read out after "Ready to send it?" mustn't eat your "yes".
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let invites = line.hasSuffix("?") || line == "Go ahead."
-        defer { if invites { invitedUntil = Date().addingTimeInterval(answerWindow) } }
+        defer { if invites { invitedUntil = Date().addingTimeInterval(Self.answerWindow) } }
         await useHiFiOutput()
         // The natural voice when it's turned on in Settings: from the relay when it has a key, or from Bridge Cloud with
         // Bridge Pro; otherwise (or on any failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.

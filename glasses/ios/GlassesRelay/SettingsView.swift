@@ -23,6 +23,8 @@ struct SettingsView: View {
     @State private var photoResult = ""
     @State private var readBack = Conversation.readBack
     @State private var wakeWord = Conversation.wakeWord
+    @State private var answerWindow = Conversation.answerWindow
+    @State private var hangUpAfter = Conversation.hangUpAfter
     // A deleted voice falls back to the best installed one; show that rather than a blank picker.
     @State private var voiceID = Conversation.voices.contains { $0.identifier == Conversation.voiceID } ? Conversation.voiceID : ""
     @State private var hiFi = Conversation.hiFiSpeech
@@ -68,6 +70,16 @@ struct SettingsView: View {
                         .onChange(of: readBack) { _, on in Conversation.readBack = on }
                     Toggle("Only answer to \"Bridge\"", isOn: $wakeWord)
                         .onChange(of: wakeWord) { _, on in Conversation.wakeWord = on }
+                    if wakeWord {
+                        Picker("Answer without \"Bridge\"", selection: $answerWindow) {
+                            ForEach(Conversation.answerWindows, id: \.self) { Text(Self.duration($0, zero: "Never")).tag($0) }
+                        }
+                        .onChange(of: answerWindow) { _, seconds in Conversation.answerWindow = seconds }
+                    }
+                    Picker("Hang up after quiet", selection: $hangUpAfter) {
+                        ForEach(Conversation.hangUpChoices, id: \.self) { Text(Self.duration($0, zero: "Never")).tag($0) }
+                    }
+                    .onChange(of: hangUpAfter) { _, seconds in Conversation.hangUpAfter = seconds }
                     Picker("Phone voice", selection: $voiceID) {
                         Text("Best installed").tag("")
                         ForEach(Conversation.voices, id: \.identifier) { Text(Conversation.label($0)).tag($0.identifier) }
@@ -89,7 +101,8 @@ struct SettingsView: View {
                     Text((readBack
                           ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
                           : "Bridge sends what you say after a 2-second pause, without repeating it.")
-                         + (wakeWord ? " While listening, Bridge ignores anything that doesn't start with \"Bridge\", except an answer to a question it just asked." : "")
+                         + wakeWordNote
+                         + (hangUpAfter == 0 ? " Bridge stays on until you say \"goodbye\", which uses more battery and keeps the glasses on call-quality audio." : "")
                          + " The phone voice speaks unless the natural voice is on and available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
                          + (mode.wrappedValue == .pc ? " Natural voice sends each reply's text to OpenAI to be spoken, and needs an OpenAI key on the relay."
                             : mode.wrappedValue == .cloud ? " Natural voice is spoken by Amazon Polly and needs Bridge Pro." : "")
@@ -113,6 +126,18 @@ struct SettingsView: View {
             .manageSubscriptionsSheet(isPresented: $showManage)
             #endif
         }
+    }
+
+    /// "25 seconds", "5 minutes"; `zero` for 0.
+    private static func duration(_ seconds: TimeInterval, zero: String) -> String {
+        let s = Int(seconds)
+        return s == 0 ? zero : s < 60 ? "\(s) seconds" : s == 60 ? "1 minute" : "\(s / 60) minutes"
+    }
+
+    private var wakeWordNote: String {
+        guard wakeWord else { return "" }
+        let note = " While listening, Bridge ignores anything that doesn't start with \"Bridge\""
+        return answerWindow == 0 ? note + "." : note + ", except an answer within \(Int(answerWindow)) seconds of a question it asked."
     }
 
     #if APP_STORE
