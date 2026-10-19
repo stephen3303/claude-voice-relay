@@ -369,11 +369,13 @@ final class Conversation: NSObject, ObservableObject {
             // reaches the agents nor keeps the line open.
             guard let rest = Self.afterWakeWord(raw) else {
                 status = "Ignored: start with \"Bridge\""
-                startListening(); return
+                relistenAfterAnnouncements(); return
             }
             said = rest
         } else if Self.wakeWord, let rest = Self.afterWakeWord(raw, answering: true) {
             said = rest   // "Bridge, yes" as an answer; but "Bridge the gap..." is the answer itself
+        } else if Self.wakeWord, let rest = Self.afterWakeWord(raw), Self.forRelay(rest) != rest || Self.wantsPhoto(rest) {
+            said = rest   // "Bridge in trading bot ..." or "Bridge what am I looking at" with no comma: still a command
         }
         lastActivity = Date()
         // Just "Bridge": ask, and take the next thing said without the wake word.
@@ -382,7 +384,7 @@ final class Conversation: NSObject, ObservableObject {
                 await say("Yes?")
                 // Answered even when the answer window is set to Never: that's what "Yes?" asked for.
                 invitedUntil = max(invitedUntil, Date().addingTimeInterval(10))
-                if conversing { startListening() }   // not if it was hung up while "Yes?" was said
+                relistenAfterAnnouncements()
             }
             return
         }
@@ -419,6 +421,16 @@ final class Conversation: NSObject, ObservableObject {
             await announcePending()
             lastActivity = Date()
             startListening()
+        }
+    }
+
+    /// Back to listening, first reading any agent message that arrived meanwhile: it was held because someone was
+    /// talking, and an ignored turn or a "Yes?" doesn't pass through the reply path that would read it.
+    private func relistenAfterAnnouncements() {
+        guard !announcements.isEmpty else { if conversing { startListening() }; return }
+        Task {
+            await announcePending()
+            if conversing { startListening() }   // not if it was hung up meanwhile
         }
     }
 
