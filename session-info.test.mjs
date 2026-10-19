@@ -16,6 +16,7 @@ test('usage and context are commands, alone or with an agent name', () => {
   assert.deepEqual(infoCommand('/context', find), { kind: 'context', agent: null });
   assert.deepEqual(infoCommand('usage for trading bot?', find), { kind: 'usage', agent: bot });
   assert.deepEqual(infoCommand('Context trading bot', find), { kind: 'context', agent: bot });
+  assert.deepEqual(infoCommand('usage for', find), { kind: 'usage', agent: null });
 });
 
 test('a longer sentence stays a message to the agent', () => {
@@ -36,11 +37,13 @@ test('usage is spoken in dollars and minutes', () => {
   assert.equal(spokenUsage('X', 'Total cost: $0.0041\nTotal duration (API):  1s'), 'X has used less than a cent at API prices on this task, with 1 second of model time.');
   assert.equal(spokenUsage('X', 'Total cost: $12.5'), 'X has used 12.50 dollars at API prices on this task.');
   assert.equal(spokenUsage('X', 'Total cost: $3.00\nTotal duration (API): 1h 2m'), 'X has used 3 dollars at API prices on this task, with 62 minutes of model time.');
+  assert.equal(spokenUsage('X', 'Total cost: $.'), "I couldn't read X's usage.");
   assert.equal(spokenUsage('X', 'Unknown command'), "I couldn't read X's usage.");
 });
 
 test('context is spoken as a percentage of the window', () => {
   assert.equal(spokenContext('Trading bot', CONTEXT), 'Trading bot is using 34 percent of its context, out of 500 thousand tokens.');
   assert.equal(spokenContext('X', '**Tokens:** 400k / 1m (40%)'), 'X is using 40 percent of its context, out of 1 million tokens.');
+  assert.equal(spokenContext('X', '**Tokens:** 34000 / 200000 (17%)'), 'X is using 17 percent of its context, out of 200000 tokens.');
   assert.equal(spokenContext('X', ''), "I couldn't read X's context.");
 });

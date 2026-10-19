@@ -36,7 +36,7 @@ function spokenDollars(x) {
 // /usage in print mode: "Total cost: $0.0041\nTotal duration (API): 2m 3s\n...". It's this session's cost
 // at API prices; a subscription's plan limits aren't in it.
 export function spokenUsage(name, out) {
-  const cost = /Total cost:\s*\$([\d.]+)/i.exec(out || '');
+  const cost = /Total cost:\s*\$(\d+(?:\.\d+)?)/i.exec(out || '');
   if (!cost) return `I couldn't read ${name}'s usage.`;
   const api = /Total duration \(API\):\s*([^\n]+)/i.exec(out);
   return `${name} has used ${spokenDollars(Number(cost[1]))} at API prices on this task` +
@@ -47,6 +47,7 @@ export function spokenUsage(name, out) {
 export function spokenContext(name, out) {
   const m = /Tokens:\**\s*([\d.]+)k?\s*\/\s*([\d.]+)(k|m)?\s*\((\d+(?:\.\d+)?)%\)/i.exec(out || '');
   if (!m) return `I couldn't read ${name}'s context.`;
-  const total = m[3]?.toLowerCase() === 'm' ? `${m[2]} million` : `${m[2]} thousand`;
+  const unit = { k: ' thousand', m: ' million' }[m[3]?.toLowerCase()] || '';
+  const total = `${m[2]}${unit}`;
   return `${name} is using ${Math.round(Number(m[4]))} percent of its context, out of ${total} tokens.`;
 }
