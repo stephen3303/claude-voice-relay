@@ -11,6 +11,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
+import { makeNtfy } from './ntfy.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
 
 const run = promisify(execFile);
@@ -31,6 +32,9 @@ const cfg = {
   openaiKey: process.env.OPENAI_API_KEY || '',
   ttsModel: process.env.TTS_MODEL || 'gpt-4o-mini-tts',
   ttsVoice: process.env.TTS_VOICE || 'coral',
+  // Phone alerts through ntfy for replies and "needs you" notices, so they reach you with Bridge closed.
+  ntfyTopic: process.env.NTFY_TOPIC || '',
+  ntfyServer: process.env.NTFY_SERVER || 'https://ntfy.sh',
   hookPort: Number(process.env.HOOK_PORT || 47878),
   image: process.env.AGENT_IMAGE || 'claude-voice-agent:latest',
   githubAppId: process.env.GITHUB_APP_ID || '',
@@ -43,6 +47,7 @@ const log = (...a) => {
   console.log(line);
   fs.appendFileSync(path.join(LOG_DIR, 'relay.log'), line + '\n');
 };
+const ntfy = makeNtfy({ topic: cfg.ntfyTopic, server: cfg.ntfyServer, log });
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 
 // The voice endpoint is the only way in and can start agents that push to GitHub, so it needs a
@@ -87,8 +92,10 @@ try {
 } catch { /* first run */ }
 const inboxWaiters = new Set();
 // `text` goes to the log; `spoken` replaces what the glasses read aloud (e.g. the reply without the agent's name in front).
-function say(text, { spoken } = {}) {
+// `alert` also sends it to the phone through ntfy.
+function say(text, { spoken, alert } = {}) {
   log('say:', text);
+  if (alert) ntfy.send(String(spoken ?? text));
   outbox.push({ id: ++outboxId, at: Date.now(), text: String(spoken ?? text) });
   if (outbox.length > 50) outbox.shift();
   // Write then rename, so stopping the relay mid-write can't leave a truncated file.
@@ -294,13 +301,13 @@ async function turn(a, prompt, photo) {
     a.awaiting = line.endsWith('?');
     a.question = a.awaiting ? line : ''; // "status" repeats it, in case the app missed it
     say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
-      { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line });
+      { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line, alert: true });
     const pushed = !a.stopped && await publisher.publish(a);
-    if (pushed) say(`${a.name}: ${pushed}`, { spoken: pushed });
+    if (pushed) say(`${a.name}: ${pushed}`, { spoken: pushed, alert: true });
   } catch (e) {
     if (a.stopped) return;
     log(a.name, 'turn failed:', e.message);
-    say(`${a.name} failed. ${e.message.slice(0, 200)}`);
+    say(`${a.name} failed. ${e.message.slice(0, 200)}`, { alert: true });
   } finally {
     if (photo) {
       fs.rmSync(photo, { force: true });
@@ -398,7 +405,7 @@ http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; if (body.length > 100000) req.destroy(); });
   req.on('end', () => {
-    try { const { text } = JSON.parse(body); if (text) say(String(text)); } catch { /* ignore */ }
+    try { const { text } = JSON.parse(body); if (text) say(String(text), { alert: true }); } catch { /* ignore */ }
     res.writeHead(204).end();
   });
 }).listen(cfg.hookPort, '127.0.0.1', () => log(`hook endpoint on 127.0.0.1:${cfg.hookPort}`));
