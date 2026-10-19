@@ -438,7 +438,7 @@ final class Conversation: NSObject, ObservableObject {
     /// `answering`: only a leading "Bridge," set off by punctuation, so an answer like "Bridge the gap" is kept whole.
     nonisolated static func afterWakeWord(_ text: String, answering: Bool = false) -> String? {
         let pattern = try! NSRegularExpression(pattern: answering ? #"^\W*(?:(?:hey|ok|okay)\W+)?bridge(?:[,.!?:;]+\s*|\s*$)"#
-                                                                  : #"(?:^|[.!?]\s+)\W*(?:(?:hey|ok|okay)\W+)?bridge\b\W*"#,
+                                                                  : #"(?:^|[.!?]\s+)\W*(?:(?:hey|ok|okay)\W+)?bridge\b(?!['’-])\W*"#,
                                                options: [.caseInsensitive])
         guard let m = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).first,
               let r = Range(m.range, in: text) else { return nil }
