@@ -150,6 +150,7 @@ final class Conversation: NSObject, ObservableObject {
         onHiFi = false
         awaitingHFP = false
         conversing = true
+        invitedUntil = .distantPast   // a window left from the last conversation doesn't carry over
         Task {
             guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; end(saying: nil); return }
             do { try configureAudioForGlasses() } catch { status = "Audio setup failed: \(error.localizedDescription)"; end(saying: nil); return }
