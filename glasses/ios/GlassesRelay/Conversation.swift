@@ -241,6 +241,8 @@ final class Conversation: NSObject, ObservableObject {
         phase = .listening
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
+        // Off by default; the wake word needs it to tell "Bridge, yes" from "Bridge the gap", and a sentence break from none.
+        req.addsPunctuation = true
         if recognizer?.supportsOnDeviceRecognition == true { req.requiresOnDeviceRecognition = true }
         request = req
 

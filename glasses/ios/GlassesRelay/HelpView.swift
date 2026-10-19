@@ -21,14 +21,14 @@ struct HelpView: View {
                     #endif
                 }
                 Section("Talking to your agents") {
-                    HelpItem("Say \"Bridge\" first", "While Bridge is listening, start what you say with \"Bridge\": \"Bridge, what's the status?\" Anything else is ignored, so people talking around you aren't sent to your agents. Right after Bridge says \"Go ahead\" or asks you something, just answer (within 30 seconds; change that or turn this off in Settings > Voice). Say \"Bridge\" on its own and it asks \"Yes?\"")
+                    HelpItem("Say \"Bridge\" first", "While Bridge is listening, start what you say with \"Bridge\": \"Bridge, what's the status?\" Anything else is ignored, so people talking around you aren't sent to your agents. Right after Bridge says \"Go ahead\" or asks you something, just answer (Settings > Voice sets how long you have, or turns this off). Say \"Bridge\" on its own and it asks \"Yes?\"")
                     HelpItem("Start a task", "Begin with \"in\" and the project's name: \"In trading bot, add a stop-loss check.\"")
                     HelpItem("Read-back", "With Read back on, Bridge reads your message back like Siri does: \"Here's your message to Claude for trading bot, ... Ready to send it?\" Say \"send\" or \"yes\" to send it, \"change it\" to say it differently, or \"cancel\" or \"no\". Nothing is sent until you say yes. Turn it off in Settings to send after a 2-second pause instead.")
                     HelpItem("Answers", "While a conversation is open, your agents' replies are read to you as they arrive. Answer a yes-or-no question with \"yes\".")
                     #if APP_STORE
                     HelpItem("Calls from your agents", "With Bridge Cloud, an agent that has something for you rings like a phone call when glasses or headphones are connected. Answer it to hear the message and reply. Otherwise you get a notification. Turn it off in Settings > Calls.")
                     #endif
-                    HelpItem("Finish", "Say \"Bridge, goodbye\" or \"Bridge, hang up\" (just \"goodbye\" works if \"Only answer to Bridge\" is off). Bridge also hangs up after a quiet spell (25 seconds unless you change it in Settings > Voice), and waits longer while an agent is working.")
+                    HelpItem("Finish", "Say \"Bridge, goodbye\" or \"Bridge, hang up\" (just \"goodbye\" works if \"Only answer to Bridge\" is off). Bridge also hangs up after a quiet spell (set how long, or Never, in Settings > Voice), and waits longer while an agent is working.")
                 }
                 Section("Photos (Bridge Pro)") {
                     HelpItem("Ask about what you see", "Say \"What am I looking at?\" or \"Look at this, what does the error say?\", or tap Look.")
