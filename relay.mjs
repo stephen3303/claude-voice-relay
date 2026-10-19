@@ -454,6 +454,7 @@ async function sessionInfo({ kind, agent }) {
     if (!a.sessionId) return `${a.name} has no conversation yet.`;
     try {
       if (!a.busy) await ensureContainer(a); // mid-turn it's running, and a rebuilt image would replace it
+      if (!a.sessionId) return `${a.name} has no conversation yet.`; // a moved folder drops its session
       const out = await new Promise((resolve, reject) => {
         const p = spawn('docker', ['exec', '-i', '-w', '/work', a.container, 'claude', ...infoArgs(a.sessionId)], { windowsHide: true });
         let buf = '';
