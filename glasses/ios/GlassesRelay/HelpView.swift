@@ -28,7 +28,7 @@ struct HelpView: View {
                     #if APP_STORE
                     HelpItem("Calls from your agents", "With Bridge Cloud, an agent that has something for you rings like a phone call when glasses or headphones are connected. Answer it to hear the message and reply. Otherwise you get a notification. Turn it off in Settings > Calls.")
                     #endif
-                    HelpItem("Finish", "Say \"goodbye\" or \"hang up\". Bridge also hangs up after a quiet spell (25 seconds unless you change it in Settings > Voice), and waits longer while an agent is working.")
+                    HelpItem("Finish", "Say \"Bridge, goodbye\" or \"Bridge, hang up\" (just \"goodbye\" works if \"Only answer to Bridge\" is off). Bridge also hangs up after a quiet spell (25 seconds unless you change it in Settings > Voice), and waits longer while an agent is working.")
                 }
                 Section("Photos (Bridge Pro)") {
                     HelpItem("Ask about what you see", "Say \"What am I looking at?\" or \"Look at this, what does the error say?\", or tap Look.")

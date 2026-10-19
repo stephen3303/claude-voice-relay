@@ -162,6 +162,8 @@ final class Conversation: NSObject, ObservableObject {
             // An agent called: its message (read from the inbox) is the greeting.
             if trigger != .call { await say("Go ahead.") }
             await announcePending()
+            // Answering an agent's call is answering it, whether or not its message ended in a question.
+            if trigger == .call { invitedUntil = Date().addingTimeInterval(Self.answerWindow) }
             startListening()
         }
     }

@@ -101,8 +101,7 @@ struct SettingsView: View {
                     Text((readBack
                           ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
                           : "Bridge sends what you say after a 2-second pause, without repeating it.")
-                         + wakeWordNote
-                         + (hangUpAfter == 0 ? " Bridge stays on until you say \"goodbye\", which uses more battery and keeps the glasses on call-quality audio." : "")
+                         + listeningNote
                          + " The phone voice speaks unless the natural voice is on and available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
                          + (mode.wrappedValue == .pc ? " Natural voice sends each reply's text to OpenAI to be spoken, and needs an OpenAI key on the relay."
                             : mode.wrappedValue == .cloud ? " Natural voice is spoken by Amazon Polly and needs Bridge Pro." : "")
@@ -134,10 +133,12 @@ struct SettingsView: View {
         return s == 0 ? zero : s < 60 ? "\(s) seconds" : s == 60 ? "1 minute" : "\(s / 60) minutes"
     }
 
-    private var wakeWordNote: String {
-        guard wakeWord else { return "" }
+    private var listeningNote: String {
+        guard wakeWord else { return hangUpAfter == 0 ? " Bridge stays on until you say \"goodbye\", which uses more battery and keeps the glasses on call-quality audio." : "" }
         let note = " While listening, Bridge ignores anything that doesn't start with \"Bridge\""
-        return answerWindow == 0 ? note + "." : note + ", except an answer within \(Int(answerWindow)) seconds of a question it asked."
+        let answers = answerWindow == 0 ? "." : ", except an answer within \(Int(answerWindow)) seconds of a question it asked."
+        let stays = hangUpAfter == 0 ? " Bridge stays on until you say \"Bridge, goodbye\", which uses more battery and keeps the glasses on call-quality audio." : ""
+        return note + answers + stays
     }
 
     #if APP_STORE
