@@ -335,3 +335,22 @@ test('sandbox Pro gets a few photo answers a day; paid Pro has no photo cap', as
   for (let i = 0; i < 7; i++) assert.match((await photo('u2')).body, /whiteboard/);
   assert.equal(budget.has(`PHOTO#u2/${day}`), false);
 });
+
+test('with nothing held, "yes" answers an agent that asked, but "send it" does not', async () => {
+  const started = [];
+  let waiting = true;
+  const handler = makeHandler({
+    store: { getHeld: async () => null, setHeld: async () => {} },
+    startTask: async (u, t) => { started.push(t); return 'Sent to trading bot.'; },
+    agentAwaiting: async () => waiting,
+    pro: { plan: async () => null },
+  });
+  const say = (body) => handler({ requestContext: { http: { method: 'POST' }, authorizer: { lambda: { sub: 'owner' } } },
+    rawPath: '/api/voice/confirm', body });
+  assert.equal((await say('yes')).body, 'Sent to trading bot.');
+  assert.deepEqual(started, [{ project: null, task: 'yes' }]);
+  assert.match((await say('send it')).body, /nothing to send/);
+  waiting = false;
+  assert.match((await say('yes')).body, /nothing to send/);
+  assert.equal(started.length, 1);
+});

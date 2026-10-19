@@ -4,6 +4,7 @@
 // with the key's public half and hands the routes `sub`.
 // Dependencies are passed in, so tests run with fakes and no network.
 import { createPublicKey, createVerify } from 'node:crypto';
+import { OWNER } from './owner.mjs';
 
 export const APPLE_ISSUER = 'https://appleid.apple.com';
 export const SESSION_DAYS = 30;
@@ -48,6 +49,7 @@ export const userOf = (event) =>
  * deps.sign(bytes) -> RS256 signature bytes (KMS)
  * deps.publicJwk() -> the signing key as a JWK (n, e)
  * deps.deleteUser(sub) -> removes everything stored for the account
+ * deps.isOwner(bearer) -> true for the owner token (owner.mjs), optional
  * deps.now() -> ms
  */
 export function makeAuth(deps) {
@@ -68,6 +70,8 @@ export function makeAuth(deps) {
   async function authorize(event) {
     const header = event.headers?.authorization ?? event.identitySource?.[0] ?? '';
     try {
+      const bearer = header.replace(/^Bearer\s+/i, '');
+      if (deps.isOwner && await deps.isOwner(bearer)) return { isAuthorized: true, context: { sub: OWNER } };
       const claims = await verify(header.replace(/^Bearer\s+/i, ''), sessionKey, deps.issuer);
       return { isAuthorized: true, context: { sub: claims.sub } };
     } catch {

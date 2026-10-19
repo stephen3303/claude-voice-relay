@@ -5,7 +5,8 @@ name: Cloud deploy
 on:
   push:
     branches: [main]
-    paths: ["cloud/infra/**", "cloud/api/**", "site/**", ".github/workflows/cloud-deploy.yml"]
+    # The agent runner image (cloud/runner) also copies the relay modules it reuses.
+    paths: ["cloud/infra/**", "cloud/api/**", "cloud/runner/**", "cloud-agents.mjs", "agent-turn.mjs", "ntfy.mjs", "site/**", ".github/workflows/cloud-deploy.yml"]
   workflow_dispatch:
 
 permissions:

@@ -11,13 +11,21 @@ import * as secrets from 'aws-cdk-lib/aws-secretsmanager';
 import * as apigw from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { HttpLambdaAuthorizer, HttpLambdaResponseType } from 'aws-cdk-lib/aws-apigatewayv2-authorizers';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { IgnoreMode } from 'aws-cdk-lib';
 import { fileURLToPath } from 'node:url';
 
 const API_DIR = fileURLToPath(new URL('../../api', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const LOOK_MODEL = 'us.anthropic.claude-haiku-5-5';   // quick photo answers: fast and cheap
 const BUNDLE_ID = 'com.talktobridge.bridge';     // Apple identity tokens' audience, and the push topic
 const ISSUER = 'https://talktobridge.com';           // Bridge session tokens' issuer
 const APNS_SECRET = 'bridge/apns';                   // { teamId, keyId, key }: cloud/setup/setup-apns.ps1
+// The owner account (cloud/api/owner.mjs), both made by cloud/setup/setup-owner.ps1, never by CDK:
+const OWNER_SECRET = 'bridge/owner';                 // { tokenHash }: the owner token's SHA-256
+const OWNER_CLAUDE_SECRET = 'bridge/owner-claude';   // the owner's claude.ai login (+ routine, ntfy), runner only
 
 export class ApiStack extends Stack {
   constructor(scope, id, props) {
@@ -62,6 +70,61 @@ export class ApiStack extends Stack {
       conditions: { StringEquals: { 'aws:RequestedRegion': this.region } },
     }));
 
+    // ---------- agent runner (cloud/runner): one Fargate task per busy agent of the owner ----------
+    // Public subnets with a public IP and no NAT gateway (about $32 a month idle): the task only calls out
+    // (claude.ai, GitHub, AWS APIs) and takes no connections in. Nothing runs between tasks.
+    const vpc = new ec2.Vpc(this, 'RunnerVpc', {
+      maxAzs: 2, natGateways: 0,   // the region's zones are in cdk.json, so synth needs no AWS lookup
+      subnetConfiguration: [{ name: 'public', subnetType: ec2.SubnetType.PUBLIC }],
+    });
+    const runnerSg = new ec2.SecurityGroup(this, 'RunnerSg', { vpc, description: 'Agent runner: outbound only', allowAllOutbound: true });
+    const cluster = new ecs.Cluster(this, 'Runners', { vpc });
+    const runnerTask = new ecs.FargateTaskDefinition(this, 'Runner', {
+      cpu: 512, memoryLimitMiB: 1024,
+      runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.X86_64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
+    });
+    runnerTask.addContainer('runner', {
+      // Built from the repo root with only what cloud/runner/Dockerfile copies (it reuses the relay's modules).
+      image: ecs.ContainerImage.fromAsset(REPO_ROOT, {
+        file: 'cloud/runner/Dockerfile',
+        platform: Platform.LINUX_AMD64,
+        ignoreMode: IgnoreMode.DOCKER,
+        exclude: ['*', '!cloud-agents.mjs', '!agent-turn.mjs', '!ntfy.mjs', '!cloud/api/*.mjs', 'cloud/api/*.test.mjs',
+          '!cloud/runner/*.mjs', 'cloud/runner/*.test.mjs', '!cloud/runner/package.json', '!cloud/runner/package-lock.json',
+          '!cloud/runner/Dockerfile'],
+      }),
+      environment: { TABLE: table.tableName, CLAUDE_SECRET: OWNER_CLAUDE_SECRET },
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'runner',
+        logGroup: new logs.LogGroup(this, 'RunnerLogs', { retention: logs.RetentionDays.ONE_MONTH }) }),
+    });
+    // Its agent's record and the inbox: item reads and writes only.
+    runnerTask.taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+      resources: [table.tableArn],
+    }));
+    // Reads the owner's claude.ai login, and writes it back when Claude Code refreshed it.
+    const ownerClaude = secrets.Secret.fromSecretNameV2(this, 'OwnerClaude', OWNER_CLAUDE_SECRET);
+    ownerClaude.grantRead(runnerTask.taskRole);
+    ownerClaude.grantWrite(runnerTask.taskRole);
+    voice.addEnvironment('RUNNER_CLUSTER', cluster.clusterArn);
+    voice.addEnvironment('RUNNER_TASK', runnerTask.taskDefinitionArn);
+    voice.addEnvironment('RUNNER_SUBNETS', vpc.publicSubnets.map((sn) => sn.subnetId).join(','));
+    voice.addEnvironment('RUNNER_SECURITY_GROUP', runnerSg.securityGroupId);
+    voice.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ecs:RunTask'],
+      resources: [`arn:aws:ecs:${this.region}:${this.account}:task-definition/${runnerTask.family}:*`],
+      conditions: { ArnEquals: { 'ecs:cluster': cluster.clusterArn } },
+    }));
+    voice.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['ecs:StopTask'],
+      resources: [`arn:aws:ecs:${this.region}:${this.account}:task/${cluster.clusterName}/*`],
+    }));
+    voice.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['iam:PassRole'],
+      resources: [runnerTask.taskRole.roleArn, runnerTask.obtainExecutionRole().roleArn],
+      conditions: { StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' } },
+    }));
+
     const api = new apigw.HttpApi(this, 'Http', { apiName: 'bridge-api' });
 
     // Session signing key: RSA in KMS, so the private half can't be read or leaked.
@@ -91,9 +154,11 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(5),
       memorySize: 256,
-      environment: { TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn },
+      environment: { TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn, OWNER_SECRET },
       logGroup: new logs.LogGroup(this, 'AuthorizerLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
+    // Only the owner token's hash; until the secret exists nobody is the owner.
+    secrets.Secret.fromSecretNameV2(this, 'OwnerToken', OWNER_SECRET).grantRead(authorizerFn);
     authorizerFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['kms:GetPublicKey'], resources: [signingKey.keyArn] }));
     const sessions = new HttpLambdaAuthorizer('Session', authorizerFn, {
       responseTypes: [HttpLambdaResponseType.SIMPLE],
@@ -197,5 +262,7 @@ export class ApiStack extends Stack {
     new CfnOutput(this, 'AppStoreNotificationsUrl', { value: `${api.apiEndpoint}/api/appstore/notifications` });
 
     new CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });
+    // For cloud/setup/setup-owner.ps1, which writes the owner's projects.
+    new CfnOutput(this, 'TableName', { value: table.tableName });
   }
 }

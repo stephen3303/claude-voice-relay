@@ -117,6 +117,32 @@ AWS CDK (TypeScript) in `cloud/infra`, deployed from GitHub Actions with OIDC (n
 Lambdas, DynamoDB, S3), `BridgeAgents` (ECR, ECS cluster, task definition). Lambdas live in `cloud/api`;
 the agent image in `cloud/agent`.
 
+## The owner's agents: the PC relay, moved into Bridge Cloud
+
+Stephen's own use runs here instead of on his PC, so the PC hosts nothing. It's the relay's `AGENT_MODE=cloud`,
+moved: each task is a claude.ai cloud session that shows in the Claude app.
+
+- **Owner token** (`cloud/api/owner.mjs`): the sideloaded app has no Sign in with Apple, so it keeps sending a
+  relay token (by default the relay's own `VOICE_TOKEN`). The authorizer compares it with the SHA-256 in Secrets
+  Manager (`bridge/owner`) and lets it in as the user `owner`, who has every Pro feature. The app only changes its
+  relay address to `<ApiUrl>/api`; the voice protocol is the same, and Tailscale is no longer needed.
+- **Agents** (`cloud/api/agents.mjs`): only `owner` gets them, because they run on Stephen's claude.ai
+  subscription and the Agent SDK terms keep subscription sign-in out of products for others. Everyone else still
+  gets the "not switched on" answer until build step 4 (API billing). Projects (`PROJECT#` items) come from his
+  project folders' GitHub remotes; each agent's state, pending turns and run id are an `AGENT#` item. Task, reply,
+  status and stop work as on the relay; usage, context and photos to agents don't (they need the PC).
+- **Runner** (`cloud/runner`, Fargate, 0.5 vCPU / 1 GB, public subnets, no NAT): the Voice Lambda starts one task per
+  busy spell of an agent. It signs Claude Code in with a claude.ai login made for Bridge Cloud (`bridge/owner-claude`),
+  shallow-clones the repo (or makes an empty repo with the same remote, for a private one), runs the pending turns with
+  the relay's own `cloud-agents.mjs`, writes each answer to the inbox (and ntfy), fires the project routine, marks the
+  agent idle and exits. When Claude Code refreshes the login, the runner writes the new one back.
+- **Setup**: `cloud/setup/setup-owner.ps1` on the PC stores the token's hash, signs a new claude.ai login in and stores
+  it, and writes the projects.
+- **Cost** at about 10 tasks a day: roughly $5 to $8 a month, nearly all Fargate time while a session works and
+  Secrets Manager; nothing runs between tasks.
+- **Known limits**: two runners starting at once with an expired login can race on its refresh and sign the
+  other out (rerun the setup script). Sideloaded builds get no push, so answers arrive while the app listens, and through ntfy.
+
 ## Build order
 
 1. Deploy role + GitHub OIDC; Bedrock access check. Domain, ACM certificate, website moved to S3/CloudFront.

@@ -37,7 +37,9 @@ export const LOOK_PROMPT = [
 /**
  * deps.store: { getHeld(user), setHeld(user, held|null), addMessage(user, text), messagesAfter(user, id) }
  * deps.look(jpegBytes, said) -> spoken answer (Claude on Bedrock)
- * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not)
+ * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not); with no project, the
+ *   words are for the user's agents (agents.mjs: a reply, status or stop)
+ * deps.agentAwaiting(user) -> true when an agent asked a question (optional)
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
@@ -70,7 +72,10 @@ export function makeHandler(deps) {
     if (!body) return `I didn't catch that. ${ASK}`;
     if (SEND.test(body)) {
       if (held?.project) return `What do you want to tell ${held.project}?`;
-      if (!held) return expired ? `That message waited over ten minutes, so I didn't send it. ${ASK}` : `There's nothing to send yet. ${ASK}`;
+      if (expired) return `That message waited over ten minutes, so I didn't send it. ${ASK}`;
+      // With nothing held, "yes" or "go ahead" (not "send it") answers an agent's yes-or-no question, as in confirm.mjs.
+      if (!held && !/^(?:\S+\s+)?sen[dt]\b/i.test(body) && await deps.agentAwaiting?.(user)) return deps.startTask(user, { project: null, task: 'yes' });
+      if (!held) return `There's nothing to send yet. ${ASK}`;
       await deps.store.setHeld(user, null);
       return deps.startTask(user, held.parsed ?? { project: null, task: held.text });
     }
