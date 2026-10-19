@@ -92,6 +92,28 @@ export const CLOUD_TIMEOUT_MS = 60 * 60_000;
 // onSpawn gets the child, so "stop" or the relay exiting can kill it.
 // In print mode a prompt starting with "/" would run as a slash command on this PC, not reach the session.
 export const asTask = (prompt) => (/^\s*\//.test(prompt) ? `The user said: ${prompt.trim()}` : prompt);
+// A new session's first message starts with this, so the project thread the routine starts (below) can tell
+// Bridge's sessions from the user's other ones. The title can't carry it: claude.ai makes it from the task.
+export const BRIDGE_MARK = 'Bridge voice task:';
+
+// When a task is done, the relay starts a claude.ai project routine (BRIDGE_ROUTINE_URL, its API trigger)
+// whose run is a new thread in the user's project; that thread finds the finished session and records it
+// there. A project routine refuses text with the fire, so the request is empty and the thread looks the
+// session up itself. Only Anthropic's routine endpoint is accepted, so the token can't be sent elsewhere.
+const ROUTINE_URL = /^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/trig_[A-Za-z0-9]{1,64}\/fire$/;
+export const routineUrlOk = (url) => ROUTINE_URL.test(String(url));
+export async function fireRoutine({ fetch = globalThis.fetch, url, token, timeoutMs = 30_000 }) {
+  if (!routineUrlOk(url)) throw new Error('BRIDGE_ROUTINE_URL is not a routine API trigger URL.');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: '{}',
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`the routine answered ${res.status}`);
+  const r = await res.json().catch(() => ({}));
+  return String(r.claude_code_session_id || '');
+}
 export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeoutMs = CLOUD_TIMEOUT_MS,
   onSpawn = () => {}, onSession = () => {} }) {
   return new Promise((resolve, reject) => {
@@ -124,7 +146,9 @@ export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeou
 // a new task starts a cloud session; a reply goes to a.cloudId. checkRepo(a) resolves to why the repo
 // can't have a cloud agent, or '' when it can. unsafe(folder) is true for the relay's own folder, the
 // folder holding its keys, or one above them: the CLI runs there on the host and may bundle it.
-export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, save = () => {}, log = () => {} }) {
+// onDone(a) runs when a turn ends with an answer that isn't a question, so the routine records finished work.
+export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, save = () => {}, log = () => {},
+  onDone = () => {} }) {
   return async function cloudTurn(a, prompt) {
     // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
     // failed after the session may have started) would start one with only that one line, next to an orphan
@@ -148,7 +172,8 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       a.cloudId = id; a.cloudUrl = url; save();
       log(a.name, 'cloud session', id, url);
     };
-    try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt, onSession, onSpawn: (p) => { a.proc = p; } }); }
+    const task = fresh ? `${BRIDGE_MARK} ${asTask(prompt)}` : prompt;
+    try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt: task, onSession, onSpawn: (p) => { a.proc = p; } }); }
     catch (e) {
       // The session was created before the failure: a reply can still go to it.
       if (e.sessionId) onSession(e.sessionId, e.url);
@@ -163,5 +188,6 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       return say(`${a.name}: sent. Its answer will be in the Claude app.`, { spoken: `Sent to ${a.name}. Its answer will be in the Claude app.` });
     }
     speakResult(a, r);
+    if (!a.awaiting) onDone(a);
   };
 }

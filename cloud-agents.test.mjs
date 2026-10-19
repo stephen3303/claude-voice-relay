@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { cloudArgs, cloudEnv, parseCloud, runCloud, makeCloudTurn, resolveClaude, CLOUD_PROMPT } from './cloud-agents.mjs';
+import { cloudArgs, cloudEnv, parseCloud, runCloud, makeCloudTurn, resolveClaude, CLOUD_PROMPT, BRIDGE_MARK, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
 
 function fakeSpawn({ stdout = '', stderr = '', code = 0, hang = false } = {}) {
   const calls = [];
@@ -86,15 +86,17 @@ test('runCloud rejects when claude is not installed', async () => {
 });
 
 function turnHarness({ reply = { result: 'SPOKEN: Done.', is_error: false, session_id: 'cse_1', url: 'u1' }, why = '', exists = true, unsafe = false, during } = {}) {
-  const runs = [], said = [], spoken = [], checked = [], saves = [];
+  const runs = [], said = [], spoken = [], checked = [], saves = [], done = [];
   const cloudTurn = makeCloudTurn({
     run: async (o) => { runs.push(o); if (during) during(o); if (reply instanceof Error) throw reply; return reply; },
     save: () => saves.push(1),
     checkRepo: async (a) => { checked.push(a.name); return why; },
     unsafe: () => unsafe,
-    exists: () => exists, say: (t, o) => said.push(o?.spoken ?? t), speakResult: (a, r) => spoken.push(r.result),
+    exists: () => exists, say: (t, o) => said.push(o?.spoken ?? t),
+    speakResult: (a, r) => { spoken.push(r.result); a.awaiting = r.result.endsWith('?'); },
+    onDone: (a) => done.push(a.name),
   });
-  return { cloudTurn, runs, said, spoken, checked, saves };
+  return { cloudTurn, runs, said, spoken, checked, saves, done };
 }
 const newAgent = () => ({ name: 'trading bot', repoPath: '/p/trading-bot', cloudNew: true });
 
@@ -103,7 +105,7 @@ test('cloudTurn starts a new task as a session after the repo check, then contin
   const a = newAgent();
   await h.cloudTurn(a, 'add a stop-loss');
   const { cwd, sessionId, prompt } = h.runs[0];
-  assert.deepEqual({ cwd, sessionId, prompt }, { cwd: '/p/trading-bot', sessionId: undefined, prompt: 'add a stop-loss' });
+  assert.deepEqual({ cwd, sessionId, prompt }, { cwd: '/p/trading-bot', sessionId: undefined, prompt: `${BRIDGE_MARK} add a stop-loss` });
   assert.deepEqual(h.checked, ['trading bot']);
   assert.deepEqual(h.spoken, ['SPOKEN: Done.']);
   assert.equal(a.cloudId, 'cse_1');
@@ -222,4 +224,44 @@ test('runCloud passes a leading slash as words, not as a slash command, and repo
   assert.equal(calls[0].input, 'The user said: /logout please');
   assert.deepEqual(sessions, ['cse_8']);
   assert.ok(child);
+});
+
+test('a finished answer starts the project routine; a question or a queued follow-up does not', async () => {
+  const h = turnHarness();
+  await h.cloudTurn(newAgent(), 'add a stop-loss');
+  assert.deepEqual(h.done, ['trading bot']);
+  const ask = turnHarness({ reply: { result: 'SPOKEN: Should I push it?', is_error: false, session_id: 'cse_1' } });
+  await ask.cloudTurn(newAgent(), 'add a stop-loss');
+  assert.deepEqual(ask.done, []);
+  const q = turnHarness({ reply: { result: '', is_error: false, session_id: 'cse_1', queued: true } });
+  await q.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1' }, 'and the tests');
+  assert.deepEqual(q.done, []);
+});
+
+test('only the first message of a session is marked, and a slash command is still not run', async () => {
+  const h = turnHarness();
+  const a = newAgent();
+  await h.cloudTurn(a, '/clear the logs');
+  assert.equal(h.runs[0].prompt, `${BRIDGE_MARK} The user said: /clear the logs`);
+  await h.cloudTurn(a, 'yes');
+  assert.equal(h.runs[1].prompt, 'yes');
+});
+
+test('fireRoutine posts an empty request to the routine endpoint only', async () => {
+  const url = 'https://api.anthropic.com/v1/claude_code/routines/trig_01SCUn49wNxnKueg5BGAcohr/fire';
+  const calls = [];
+  const fetch = async (u, o) => { calls.push([u, o]); return { ok: true, json: async () => ({ claude_code_session_id: 'session_9' }) }; };
+  assert.equal(await fireRoutine({ fetch, url, token: 'sk-x' }), 'session_9');
+  assert.equal(calls[0][0], url);
+  assert.equal(calls[0][1].body, '{}');
+  assert.equal(calls[0][1].headers.authorization, 'Bearer sk-x');
+  assert.equal(calls[0][1].headers['anthropic-version'], '2023-06-01');
+  for (const bad of ['http://api.anthropic.com/v1/claude_code/routines/trig_1/fire', 'https://evil.example/v1/claude_code/routines/trig_1/fire',
+    'https://api.anthropic.com/v1/claude_code/routines/trig_1/fire?x=1', 'https://api.anthropic.com/v1/claude_code/routines/../fire', '']) {
+    assert.equal(routineUrlOk(bad), false, bad);
+    await assert.rejects(fireRoutine({ fetch, url: bad, token: 'sk-x' }), /not a routine API trigger URL/);
+  }
+  assert.equal(calls.length, 1);
+  const no = async () => ({ ok: false, status: 403, json: async () => ({}) });
+  await assert.rejects(fireRoutine({ fetch: no, url, token: 'sk-x' }), /answered 403/);
 });

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
-import { runCloud, makeCloudTurn, resolveClaude } from './cloud-agents.mjs';
+import { runCloud, makeCloudTurn, resolveClaude, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +39,10 @@ const cfg = {
   agentGhToken: process.env.AGENT_GH_TOKEN || '',
   // AGENT_MODE=cloud runs tasks as claude.ai cloud sessions (cloud-agents.mjs) instead of Docker on this PC.
   cloud: process.env.AGENT_MODE === 'cloud',
+  // Cloud mode only: a claude.ai project routine's API trigger, started after each finished task so the
+  // task shows up as a thread in that project (cloud-agents.mjs, fireRoutine).
+  routineUrl: process.env.BRIDGE_ROUTINE_URL || '',
+  routineToken: process.env.BRIDGE_ROUTINE_TOKEN || '',
 };
 
 const log = (...a) => {
@@ -54,6 +58,8 @@ const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 const voiceOff = !cfg.voiceToken ? 'VOICE_TOKEN is missing from .env'
   : cfg.voiceToken.length < 24 ? 'VOICE_TOKEN is shorter than 24 characters' : '';
 if (cfg.cloud) log('Agents run as claude.ai cloud sessions (AGENT_MODE=cloud).');
+const routineOn = cfg.cloud && !!cfg.routineUrl && !!cfg.routineToken && routineUrlOk(cfg.routineUrl);
+if (cfg.cloud && cfg.routineUrl && !routineOn) log('WARNING: BRIDGE_ROUTINE_URL or BRIDGE_ROUTINE_TOKEN is wrong or missing; finished tasks are not sent to the project.');
 else if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
@@ -315,6 +321,13 @@ const cloudTurn = makeCloudTurn({
   },
   unsafe: (folder) => unsafeMount(folder, PROTECTED),
   exists: fs.existsSync, say, speakResult, save, log,
+  // The spoken answer is already out, so a failed fire is only logged.
+  onDone(a) {
+    if (!routineOn) return;
+    fireRoutine({ url: cfg.routineUrl, token: cfg.routineToken })
+      .then((id) => log(a.name, 'project routine started', id))
+      .catch((e) => log(a.name, 'project routine failed:', e.message));
+  },
 });
 // A cloud turn's CLI would outlive the relay (and keep its session waiting) when start.ps1 restarts it.
 process.on('exit', () => { for (const a of agents.values()) a.proc?.kill(); });
