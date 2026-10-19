@@ -58,9 +58,9 @@ const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 const voiceOff = !cfg.voiceToken ? 'VOICE_TOKEN is missing from .env'
   : cfg.voiceToken.length < 24 ? 'VOICE_TOKEN is shorter than 24 characters' : '';
 if (cfg.cloud) log('Agents run as claude.ai cloud sessions (AGENT_MODE=cloud).');
+else if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
 const routineOn = cfg.cloud && !!cfg.routineUrl && !!cfg.routineToken && routineUrlOk(cfg.routineUrl);
 if (cfg.cloud && cfg.routineUrl && !routineOn) log('WARNING: BRIDGE_ROUTINE_URL or BRIDGE_ROUTINE_TOKEN is wrong or missing; finished tasks are not sent to the project.');
-else if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
 const VOICE_PROMPT = [

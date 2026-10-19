@@ -233,6 +233,14 @@ test('a finished answer starts the project routine; a question or a queued follo
   const ask = turnHarness({ reply: { result: 'SPOKEN: Should I push it?', is_error: false, session_id: 'cse_1' } });
   await ask.cloudTurn(newAgent(), 'add a stop-loss');
   assert.deepEqual(ask.done, []);
+  await ask.cloudTurn(Object.assign(newAgent(), { cloudNew: false, cloudId: 'cse_1' }), 'yes');
+  assert.deepEqual(ask.done, []); // still a question
+  const yes = turnHarness();
+  await yes.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1' }, 'yes');
+  assert.deepEqual(yes.done, ['bot']); // the answer after a question records the task
+  const err = turnHarness({ reply: { result: 'SPOKEN: The tests failed.', is_error: true, session_id: 'cse_1' } });
+  await err.cloudTurn(newAgent(), 'add a stop-loss');
+  assert.deepEqual(err.done, []);
   const q = turnHarness({ reply: { result: '', is_error: false, session_id: 'cse_1', queued: true } });
   await q.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1' }, 'and the tests');
   assert.deepEqual(q.done, []);
