@@ -291,7 +291,7 @@ function runClaude(a, prompt, gitEnv) {
     p.on('error', reject);
     p.on('close', (code) => {
       const r = reader.result();
-      if (r && typeof r === 'object' && ('result' in r || 'subtype' in r)) {
+      if (r) {
         if (Number.isFinite(r.total_cost_usd)) log(a.name, `turn cost about $${r.total_cost_usd.toFixed(2)}, ${r.num_turns ?? '?'} turns${r.subtype && r.subtype !== 'success' ? `, ${r.subtype}` : ''}`);
         return resolve(r);
       }

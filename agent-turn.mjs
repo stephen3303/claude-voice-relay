@@ -57,16 +57,16 @@ export function describeTool(name, input = {}) {
   return TOOL_WORDS[name] || (name.startsWith('mcp__') ? 'using a connected tool' : 'working');
 }
 
-// Reads stream-json from stdout chunk by chunk. onActivity(phrase) gets each tool call in words; the
-// result event (or, for a CLI that printed plain json, the last JSON line) is returned by result().
+// Reads stream-json from stdout chunk by chunk. onActivity(phrase) gets each tool call in words; result()
+// returns the result event (plain `--output-format json` prints one too), or null when the turn was cut
+// off before it, so a killed or crashed turn is an error, never a silent success.
 export function makeStreamReader(onActivity = () => {}) {
-  let buf = '', last = null, final = null;
+  let buf = '', final = null;
   const line = (l) => {
     l = l.trim();
     if (!l) return;
     let ev;
     try { ev = JSON.parse(l); } catch { return; }
-    last = ev;
     if (ev?.type === 'result') final = ev;
     if (ev?.type === 'assistant' && Array.isArray(ev.message?.content)) {
       for (const b of ev.message.content) {
@@ -83,7 +83,7 @@ export function makeStreamReader(onActivity = () => {}) {
       buf = lines.pop();
       lines.forEach(line);
     },
-    result() { line(buf); buf = ''; return final || last; },
+    result() { line(buf); buf = ''; return final; },
   };
 }
 
