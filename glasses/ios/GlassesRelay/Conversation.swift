@@ -375,6 +375,8 @@ final class Conversation: NSObject, ObservableObject {
         guard !said.isEmpty || !Self.wakeWord else {
             Task {
                 await say("Yes?")
+                // Answered even when the answer window is set to Never: that's what "Yes?" asked for.
+                invitedUntil = max(invitedUntil, Date().addingTimeInterval(10))
                 startListening()
             }
             return
@@ -503,10 +505,16 @@ final class Conversation: NSObject, ObservableObject {
     private func say(_ text: String) async {
         phase = .speaking
         // A question invites an answer without "Bridge", from when it's finished being said. Anything else leaves an
-        // earlier invitation alone: an agent's message read out after "Ready to send it?" mustn't eat your "yes".
+        // earlier invitation open, and doesn't let it run out while it's being read: an agent's message read out after
+        // "Ready to send it?" mustn't eat your "yes".
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let invites = line.hasSuffix("?") || line == "Go ahead."
-        defer { if invites { invitedUntil = Date().addingTimeInterval(Self.answerWindow) } }
+        let started = Date()
+        let remaining = invitedUntil.timeIntervalSince(started)
+        defer {
+            if invites { invitedUntil = Date().addingTimeInterval(Self.answerWindow) }
+            else if remaining > 0 { invitedUntil = Date().addingTimeInterval(remaining) }
+        }
         await useHiFiOutput()
         // The natural voice when it's turned on in Settings: from the relay when it has a key, or from Bridge Cloud with
         // Bridge Pro; otherwise (or on any failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
