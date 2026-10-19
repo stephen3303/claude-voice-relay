@@ -98,14 +98,7 @@ struct SettingsView: View {
                     Toggle("High-quality speech", isOn: $hiFi)
                         .onChange(of: hiFi) { _, on in Conversation.hiFiSpeech = on }
                 } header: { Text("Voice") } footer: {
-                    Text((readBack
-                          ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
-                          : "Bridge sends what you say after a 2-second pause, without repeating it.")
-                         + listeningNote
-                         + " The phone voice speaks unless the natural voice is on and available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
-                         + (mode.wrappedValue == .pc ? " Natural voice sends each reply's text to OpenAI to be spoken, and needs an OpenAI key on the relay."
-                            : mode.wrappedValue == .cloud ? " Natural voice is spoken by Amazon Polly and needs Bridge Pro." : "")
-                         + " High-quality speech plays replies over the glasses' music link, which sounds much better, but each reply starts and listening resumes about a second later.")
+                    Text(voiceFooter)
                 }
                 #if APP_STORE
                 if account.signedIn && mode.wrappedValue == .cloud { callsSection }
@@ -133,12 +126,27 @@ struct SettingsView: View {
         return s == 0 ? zero : s < 60 ? "\(s) seconds" : s == 60 ? "1 minute" : "\(s / 60) minutes"
     }
 
-    private var listeningNote: String {
-        guard wakeWord else { return hangUpAfter == 0 ? " Bridge stays on until you say \"goodbye\", which uses more battery and keeps the glasses on call-quality audio." : "" }
-        let note = " While listening, Bridge ignores anything that doesn't start with \"Bridge\""
-        let answers = answerWindow == 0 ? "." : ", except an answer within \(Int(answerWindow)) seconds of a question it asked."
-        let stays = hangUpAfter == 0 ? " Bridge stays on until you say \"Bridge, goodbye\", which uses more battery and keeps the glasses on call-quality audio." : ""
-        return note + answers + stays
+    /// Built a sentence at a time: as one long `+` chain of ternaries it's too slow for the Swift type checker.
+    private var voiceFooter: String {
+        var text = readBack
+            ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
+            : "Bridge sends what you say after a 2-second pause, without repeating it."
+        if wakeWord {
+            text += " While listening, Bridge ignores anything that doesn't start with \"Bridge\""
+            text += answerWindow == 0 ? "." : ", except an answer within \(Int(answerWindow)) seconds of a question it asked."
+        }
+        if hangUpAfter == 0 {
+            let goodbye = wakeWord ? "Bridge, goodbye" : "goodbye"
+            text += " Bridge stays on until you say \"\(goodbye)\", which uses more battery and keeps the glasses on call-quality audio."
+        }
+        text += " The phone voice speaks unless the natural voice is on and available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
+        if mode.wrappedValue == .pc {
+            text += " Natural voice sends each reply's text to OpenAI to be spoken, and needs an OpenAI key on the relay."
+        } else if mode.wrappedValue == .cloud {
+            text += " Natural voice is spoken by Amazon Polly and needs Bridge Pro."
+        }
+        text += " High-quality speech plays replies over the glasses' music link, which sounds much better, but each reply starts and listening resumes about a second later."
+        return text
     }
 
     #if APP_STORE
