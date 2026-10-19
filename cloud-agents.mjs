@@ -106,7 +106,9 @@ export async function fireRoutine({ fetch = globalThis.fetch, url, token, timeou
   if (!routineUrlOk(url)) throw new Error('BRIDGE_ROUTINE_URL is not a routine API trigger URL.');
   const res = await fetch(url, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    // The docs call the beta header optional; it's sent anyway, as in the manual fire that was tested.
+    headers: { authorization: `Bearer ${token}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'experimental-cc-routine-2026-04-01',
+      'content-type': 'application/json' },
     body: '{}',
     signal: AbortSignal.timeout(timeoutMs),
   });
