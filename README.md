@@ -85,6 +85,15 @@ The phone reaches the relay over HTTPS with `tailscale serve --bg 47879`. In the
 
 Tested from my phone: the relay has been verified end to end from an iPhone.
 
+### Phone notifications with ntfy (optional)
+The Bridge app only hears the relay while it's open. To get everything the relay says (answers,
+questions, "Claude needs you") as a phone notification too, install the ntfy app, subscribe to a
+topic with a long random name, and set `NTFY_URL=https://ntfy.sh/<that topic>` in `.env`, then
+restart the relay. On ntfy.sh, anyone who knows the topic can read it, so treat it like a password;
+the relay never logs it. For a self-hosted server that needs sign-in, also set `NTFY_TOKEN`. Only
+`https://server/topic` URLs are accepted, a failed post is only logged, and messages are cut to 4000
+characters.
+
 ## GitHub access for agents
 Agents never hold a GitHub token, yours or any other. They commit on a branch and ask for it to be
 pushed; after the turn the relay mints a token from its own GitHub App that only covers that agent's

@@ -13,6 +13,7 @@ import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
 import { runCloud, makeCloudTurn, resolveClaude, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
+import { makeNtfy } from './ntfy.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,9 @@ const cfg = {
   // task shows up as a thread in that project (cloud-agents.mjs, fireRoutine).
   routineUrl: process.env.BRIDGE_ROUTINE_URL || '',
   routineToken: process.env.BRIDGE_ROUTINE_TOKEN || '',
+  // Optional: an ntfy topic (https://ntfy.sh/<hard-to-guess topic>) that gets everything the relay says (ntfy.mjs).
+  ntfyUrl: process.env.NTFY_URL || '',
+  ntfyToken: process.env.NTFY_TOKEN || '',
 };
 
 const log = (...a) => {
@@ -65,6 +69,8 @@ else if (cfg.cloud && !cfg.routineUrl && cfg.routineToken) log('WARNING: BRIDGE_
 else if (cfg.cloud && cfg.routineUrl && !cfg.routineToken) log('WARNING: BRIDGE_ROUTINE_URL is set but BRIDGE_ROUTINE_TOKEN is missing; tasks are not sent to the project.');
 else if (cfg.cloud && cfg.routineUrl && !routineOn) log("WARNING: BRIDGE_ROUTINE_URL isn't a routine API trigger URL (https://api.anthropic.com/v1/claude_code/routines/trig_.../fire); tasks are not sent to the project.");
 else if (routineOn) log('Finished tasks are recorded as threads in the claude.ai project (BRIDGE_ROUTINE_URL).');
+const ntfy = makeNtfy({ url: cfg.ntfyUrl, token: cfg.ntfyToken, log });
+if (ntfy) log('Messages are also sent to the phone through ntfy (NTFY_URL).');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
 const VOICE_PROMPT = [
@@ -112,6 +118,7 @@ function say(text, { spoken } = {}) {
   }
   catch (e) { log('outbox save failed:', e.message); }
   for (const wake of [...inboxWaiters]) wake();
+  ntfy?.(text);
 }
 
 // ---------- GitHub access for agents ----------
@@ -534,8 +541,8 @@ function quickLook(file, said) {
   const prompt = `${LOOK_PROMPT}\n\nThey said: "${said || 'What am I looking at?'}"`;
   return new Promise((resolve, reject) => {
     // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
-    // It may need the setup token to sign in, but never the routine's token.
-    const { BRIDGE_ROUTINE_TOKEN: _, ...env } = process.env;
+    // It may need the setup token to sign in, but never the routine's token or the ntfy topic.
+    const { BRIDGE_ROUTINE_TOKEN: _r, NTFY_URL: _u, NTFY_TOKEN: _t, ...env } = process.env;
     const p = spawn(process.env.CLAUDE_BIN || 'claude', ['-p', '--output-format', 'json', '--allowedTools', 'Read'],
       { cwd: dir, windowsHide: true, env });
     let out = '', err = '';
