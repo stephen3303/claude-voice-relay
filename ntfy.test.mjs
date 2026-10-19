@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeNtfy, ntfyUrlOk } from './ntfy.mjs';
+import { makeNtfy, ntfyUrlOk, cut } from './ntfy.mjs';
 
 const URL_ = 'https://ntfy.sh/bridge_TEST-topic-0123456789';
 
@@ -41,10 +41,14 @@ test('ntfy posts the text with a title, and the token when set', async () => {
   assert.equal(calls[1].headers.authorization, 'Bearer tk_TEST');
 });
 
-test('a long message is cut to 4000 characters', async () => {
+test('a long message is cut to 4000 bytes, on a character boundary', async () => {
   const { fetch, calls } = fakeFetch();
   await makeNtfy({ fetch, url: URL_ })('x'.repeat(5000));
   assert.equal(calls[0].body.length, 4000);
+  assert.equal(Buffer.byteLength(cut('é'.repeat(3000))), 4000);
+  const emoji = cut('a' + '😀'.repeat(1500));
+  assert.ok(Buffer.byteLength(emoji) <= 4000 && emoji.endsWith('😀'));
+  assert.equal(cut('short'), 'short');
 });
 
 test('a failed post is logged, not thrown, and the log has no URL or token', async () => {

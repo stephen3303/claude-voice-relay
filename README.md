@@ -92,7 +92,7 @@ topic with a long random name, and set `NTFY_URL=https://ntfy.sh/<that topic>` i
 restart the relay. On ntfy.sh, anyone who knows the topic can read it, so treat it like a password;
 the relay never logs it, and refuses a topic shorter than 20 characters unless `NTFY_TOKEN` is set
 (for a server that needs sign-in). Only `https://server/topic` URLs are accepted, redirects aren't
-followed, a failed post is only logged, and messages are cut to 4000 characters.
+followed, a failed post is only logged, and messages are cut to 4000 bytes.
 
 ## GitHub access for agents
 Agents never hold a GitHub token, yours or any other. They commit on a branch and ask for it to be

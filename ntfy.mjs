@@ -12,6 +12,17 @@ export const ntfyUrlOk = (url, { token = '' } = {}) => {
   return !!m && (!!token || m[1].length >= MIN_OPEN_TOPIC);
 };
 
+// ntfy's message limit is 4096 bytes; past it the text arrives as a file. Cut on a character boundary.
+export function cut(text, maxBytes = 4000) {
+  let out = '', bytes = 0;
+  for (const ch of String(text)) {
+    bytes += Buffer.byteLength(ch);
+    if (bytes > maxBytes) break;
+    out += ch;
+  }
+  return out;
+}
+
 // Returns send(text), or null when ntfy isn't set up. A failed post is logged and never thrown, since the
 // message is already in the app's inbox.
 export function makeNtfy({ fetch = globalThis.fetch, url, token = '', title = 'Bridge', log = () => {}, timeoutMs = 10_000 }) {
@@ -25,7 +36,7 @@ export function makeNtfy({ fetch = globalThis.fetch, url, token = '', title = 'B
     if (token) headers.authorization = `Bearer ${token}`;
     try {
       // No redirects: one would re-send the message (and the token, on the same origin) somewhere else.
-      const res = await fetch(url, { method: 'POST', headers, body: String(text).slice(0, 4000), redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(url, { method: 'POST', headers, body: cut(text), redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
       if (!res.ok) log(`ntfy answered ${res.status}`);
     } catch (e) {
       // Not e.message: fetch errors can quote the URL, and with it the topic.
