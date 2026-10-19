@@ -259,7 +259,7 @@ test('only the first message of a session is marked, and a slash command is stil
 });
 
 test('fireRoutine posts an empty request to the routine endpoint only', async () => {
-  const url = 'https://api.anthropic.com/v1/claude_code/routines/trig_01SCUn49wNxnKueg5BGAcohr/fire';
+  const url = 'https://api.anthropic.com/v1/claude_code/routines/trig_TEST123/fire';
   const calls = [];
   const fetch = async (u, o) => { calls.push([u, o]); return { ok: true, json: async () => ({ claude_code_session_id: 'session_9' }) }; };
   assert.equal(await fireRoutine({ fetch, url, token: 'sk-x' }), 'session_9');
