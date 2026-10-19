@@ -29,9 +29,11 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
    - `com.talktobridge.bridge.pro.monthly`: 1 month, $4.99, 1-week free introductory offer
    - `com.talktobridge.bridge.pro.yearly`: 1 year, $49.99, 1-week free introductory offer
    Each needs a display name, a description and a review screenshot (a screenshot of the Bridge Pro sheet is fine).
-6. **API key for CI:** Users and Access > Integrations > App Store Connect API > generate a key with
-   the App Manager role. Add these repository secrets (Settings > Secrets and variables > Actions):
-   `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (`base64 -w0 AuthKey_XXXX.p8`) and `APPLE_TEAM_ID`.
+6. **API key for CI:** Users and Access > Integrations > App Store Connect API > Team Keys > generate a key
+   with the **Admin** role (the upload's cloud signing creates the distribution certificate, which an
+   App Manager key can't do). Then run `glasses/setup-appstore-secrets.ps1`, which stores `ASC_KEY_ID`,
+   `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` and `APPLE_TEAM_ID` as repository secrets. Leave the Meta
+   prompts empty until step 7; the build then uses Meta Developer Mode, which is fine for TestFlight.
 7. **Meta, for production:** in the Wearables Developer Center, set the app's Apple Team ID to the paid team,
    take its **App ID** and **Client Token** into the `META_APP_ID` and `META_CLIENT_TOKEN` secrets,
    and publish a release channel for App Store users. Ask Meta how DAT apps meet Apple's MFi
