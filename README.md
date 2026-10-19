@@ -13,6 +13,7 @@ Hands-free Claude Code agents: start them with Siri, hear them in your AirPods, 
 - `task: in <project>, <what to do>` — new agent (the iPhone Shortcut adds the `task:` prefix)
 - `yes` / `no` / anything else — answers the agent that's waiting (prefix with the agent name to target one)
 - `status`, `stop <agent>` (status says what a working agent is doing, such as "running the tests")
+- `usage` / `context`, optionally with an agent name — what that agent's session has cost (at API prices, not your plan's limits) and how full its context is. PC agents only.
 
 An agent's full last reply (everything above its spoken summary) is in `logs/claude-agent-<name>.last.md`.
 

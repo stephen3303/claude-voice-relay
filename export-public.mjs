@@ -21,7 +21,7 @@ export const MARKER = '.bridge-relay-export';
 
 // Tracked files that go public, by exact path or folder prefix (ending in /). glasses/ios is listed file by file.
 export const INCLUDE = [
-  'relay.mjs', 'confirm.mjs', 'confirm.test.mjs', 'cloud-agents.mjs', 'cloud-agents.test.mjs', 'ntfy.mjs', 'ntfy.test.mjs', 'agent-turn.mjs', 'agent-turn.test.mjs', 'github-app.mjs', 'github-app.test.mjs', 'publish.mjs',
+  'relay.mjs', 'confirm.mjs', 'confirm.test.mjs', 'cloud-agents.mjs', 'cloud-agents.test.mjs', 'ntfy.mjs', 'ntfy.test.mjs', 'agent-turn.mjs', 'agent-turn.test.mjs', 'session-info.mjs', 'session-info.test.mjs', 'github-app.mjs', 'github-app.test.mjs', 'publish.mjs',
   'publish.test.mjs', 'setup-github-app.mjs', 'install-hook.mjs', 'start.ps1', 'aliases.json', 'package.json',
   '.env.example', '.gitignore', 'README.md', 'agent/', 'hooks/', 'glasses/SIDELOAD.md',
   '.github/workflows/glasses-release.yml', '.github/workflows/impactor-check.yml',

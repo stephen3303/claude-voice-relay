@@ -15,6 +15,7 @@ import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } f
 import { runCloud, makeCloudTurn, resolveClaude, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
 import { makeNtfy } from './ntfy.mjs';
 import { agentArgs, quickLookArgs, QUICK_BASE, unknownFlag, makeStreamReader, spokenReply } from './agent-turn.mjs';
+import { infoCommand, infoArgs, spokenUsage, spokenContext } from './session-info.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -443,10 +444,45 @@ async function stopAgent(text) {
   say(`Stopped ${a.name}.`);
 }
 
+// "usage" / "context", for one agent or every agent with a conversation. The CLI runs in the agent's own
+// container on a fork of its session that isn't saved, so it's safe while the agent is working.
+async function sessionInfo({ kind, agent }) {
+  if (cfg.cloud) return say(`Usage and context are only for agents on your PC. Check the Claude app for ${agent ? agent.name : 'cloud sessions'}.`);
+  const list = agent ? [agent] : [...agents.values()].filter((a) => a.sessionId);
+  if (!list.length) return say(agent ? `${agent.name} has no conversation yet.` : 'No agent has a conversation yet.');
+  const lines = await Promise.all(list.map(async (a) => {
+    if (!a.sessionId) return `${a.name} has no conversation yet.`;
+    try {
+      // Only a running container is asked: starting one here could race a turn's ensureContainer, and a
+      // stopped agent has used nothing since its last turn.
+      const state = await hostValue('docker', ['inspect', '--format', '{{.State.Status}}', a.container]);
+      if (state !== 'running') return `${a.name} isn't running right now. Ask again after its next turn.`;
+      const out = await new Promise((resolve, reject) => {
+        const p = spawn('docker', ['exec', '-i', '-w', '/work', a.container, 'claude', ...infoArgs(a.sessionId)], { windowsHide: true });
+        let buf = '';
+        const timer = setTimeout(() => p.kill(), 90_000);
+        p.stdout.on('data', (d) => (buf += d));
+        p.on('error', reject);
+        p.on('close', () => { clearTimeout(timer); try { resolve(String(JSON.parse(buf.trim().split('\n').pop()).result || '')); } catch { reject(new Error('no answer from Claude Code')); } });
+        p.stdin.on('error', () => {}); // docker exec exiting first (container just removed) closes the pipe
+        p.stdin.end(`/${kind}`);
+      });
+      return kind === 'usage' ? spokenUsage(a.name, out) : spokenContext(a.name, out);
+    } catch (e) {
+      log(a.name, `${kind} failed:`, e.message);
+      return `I couldn't get ${a.name}'s ${kind}.`;
+    }
+  }));
+  say(lines.join(' '));
+}
+
 // Shared by the Bridge app and the iPhone Shortcut.
 async function dispatch(text) {
   if (TASK_PREFIX.test(text)) return startTask(text.replace(TASK_PREFIX, ''));
   if (/^\/?status\b/i.test(text)) return status();
+  // A prefix match, as for replies, so a misheard "trading bots" still finds the agent instead of becoming a paid turn.
+  const info = infoCommand(text, findAgentPrefix);
+  if (info) return sessionInfo(info);
   if (/^\/?(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^\/?(stop|kill)\s*/i, ''));
   // "full" used to show the whole reply in Telegram; keep it from reaching an agent as a prompt.
   if (/^\/?full\b/i.test(text)) return say('The full reply is in the logs folder on your PC.');
