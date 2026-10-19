@@ -153,7 +153,7 @@ struct TranscriptLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(who).font(.caption).foregroundStyle(.secondary)
-            Text(text)
+            Text(text).textSelection(.enabled)   // press and hold to select and copy
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -163,6 +163,7 @@ struct TranscriptLine: View {
 struct HistoryView: View {
     @EnvironmentObject var conversation: Conversation
     @State private var confirmClear = false
+    @State private var draft = ""
 
     var body: some View {
         List {
@@ -174,6 +175,7 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("History")
+        .safeAreaInset(edge: .bottom) { composer }
         .toolbar {
             if !conversation.transcript.isEmpty {
                 Button("Clear", role: .destructive) { confirmClear = true }
@@ -182,5 +184,28 @@ struct HistoryView: View {
         .confirmationDialog("Clear the conversation history?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear history", role: .destructive) { conversation.transcript = [] }
         }
+    }
+
+    /// Type to the relay instead of speaking: the same read-back as voice ("Ready to send it?", then type yes).
+    private var composer: some View {
+        HStack(spacing: 8) {
+            TextField("Message the relay", text: $draft, axis: .vertical)
+                .lineLimit(1...4)
+                .textFieldStyle(.roundedBorder)
+                .submitLabel(.send)
+                .onSubmit(send)
+            Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title) }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || conversation.sendingText)
+                .accessibilityLabel("Send")
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func send() {
+        let text = draft
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !conversation.sendingText else { return }
+        draft = ""
+        conversation.sendText(text)
     }
 }
