@@ -12,10 +12,16 @@ Hands-free Claude Code agents: start them with Siri, hear them in your AirPods, 
 ## Voice commands
 - `task: in <project>, <what to do>` — new agent (the iPhone Shortcut adds the `task:` prefix)
 - `yes` / `no` / anything else — answers the agent that's waiting (prefix with the agent name to target one)
-- `status`, `stop <agent>`
+- `status`, `stop <agent>` (status says what a working agent is doing, such as "running the tests")
 - `usage` / `context`, optionally with an agent name — what that agent's session has cost (at API prices, not your plan's limits) and how full its context is. PC agents only.
 
 An agent's full last reply (everything above its spoken summary) is in `logs/claude-agent-<name>.last.md`.
+
+Agents answer with a structured reply (`--json-schema`): the spoken line and whether it's a question
+waiting on you, so a stray question mark doesn't leave an agent "waiting for your answer". Each turn's
+estimated cost is in `logs/relay.log`. Set `AGENT_MAX_USD` in `.env` to stop a turn past that estimate
+(on a subscription it's an estimate, so it mostly limits how long a turn runs); you hear that it stopped,
+and "continue" lets it carry on.
 
 Spoken project names match folder names under PROJECTS_ROOT; add nicknames to `aliases.json`,
 e.g. `{ "trading bot": "Roundtable_Trading" }`.
@@ -67,7 +73,7 @@ whatever your agents say. Say "in <project>, <task>" to start a task, "send" or 
 the app then speaks through `POST /voice/tts` and falls back to the iPhone voice if that fails.
 
 **Photos:** say "look at this, ..." / "what am I looking at" for a quick answer (`POST /voice/photo`
-runs `claude -p` on the photo), or "send this to <project>, ..." to hand it to that agent. The photo is
+runs `claude -p` on the photo with Haiku at low effort for speed; `QUICK_LOOK_MODEL` in `.env` changes the model), or "send this to <project>, ..." to hand it to that agent. The photo is
 copied into the agent's container `/tmp` (never the repo, so it can't be committed) and deleted
 after the answer. Needs Camera enabled for Bridge in the Wearables Developer Center and
 "Allow camera" tapped once in the app.

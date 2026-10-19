@@ -14,6 +14,7 @@ import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
 import { runCloud, makeCloudTurn, resolveClaude, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
 import { makeNtfy } from './ntfy.mjs';
+import { agentArgs, quickLookArgs, QUICK_BASE, unknownFlag, makeStreamReader, spokenReply } from './agent-turn.mjs';
 import { infoCommand, infoArgs, spokenUsage, spokenContext } from './session-info.mjs';
 
 const run = promisify(execFile);
@@ -81,6 +82,7 @@ const VOICE_PROMPT = [
   'no code, file paths, markdown, or symbols that read badly aloud.',
   'If you need a decision, stop and make the SPOKEN line a single yes-or-no question, then continue after the user answers.',
   'Everything above the SPOKEN line may be as detailed as you like; the user reads it later.',
+  'Put the same line in the spoken field of your structured reply, and set needs_answer whenever it asks the user something you need answered.',
 ].join(' ');
 // Agents hold no GitHub credentials: the relay pushes for them after the turn (publish.mjs).
 const PUBLISH = [
@@ -278,38 +280,35 @@ async function ensureContainer(a) {
 
 function runClaude(a, prompt, gitEnv) {
   return new Promise((resolve, reject) => {
-    const args = ['exec', '-i', '-w', '/work', ...GIT_ENV.flatMap((k) => ['-e', k]), a.container,
-      'claude', '-p', '--output-format', 'json', '--dangerously-skip-permissions', '--append-system-prompt',
-      `${VOICE_PROMPT} ${ghApp || cfg.agentGhToken ? PUBLISH : NO_GITHUB}`];
-    if (a.sessionId) args.push('--resume', a.sessionId);
+    const args = ['exec', '-i', '-w', '/work', ...GIT_ENV.flatMap((k) => ['-e', k]), a.container, 'claude',
+      ...agentArgs({ systemPrompt: `${VOICE_PROMPT} ${ghApp || cfg.agentGhToken ? PUBLISH : NO_GITHUB}`, sessionId: a.sessionId, env: process.env })];
     const p = spawn('docker', args, { windowsHide: true, env: { ...process.env, ...gitEnv } });
-    let out = '', err = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (err += d));
+    // Each tool call as it happens, so "status" can say what the agent is doing.
+    const reader = makeStreamReader((phrase) => { a.activity = phrase; });
+    let err = '';
+    p.stdout.setEncoding('utf8');
+    p.stdout.on('data', (d) => reader.push(d));
+    p.stderr.on('data', (d) => (err = (err + d).slice(-4000)));
     p.on('error', reject);
     p.on('close', (code) => {
-      try { resolve(JSON.parse(out.trim().split('\n').pop())); }
-      catch { reject(new Error(`claude exited ${code}: ${(err || out).slice(-400)}`)); }
+      const r = reader.result();
+      if (r) {
+        if (Number.isFinite(r.total_cost_usd)) log(a.name, `turn cost about $${r.total_cost_usd.toFixed(2)}, ${r.num_turns ?? '?'} turns${r.subtype && r.subtype !== 'success' ? `, ${r.subtype}` : ''}`);
+        return resolve(r);
+      }
+      reject(new Error(`claude exited ${code}: ${err.slice(-400)}`));
     });
     p.stdin.end(prompt);
   });
 }
 
-function spoken(result) {
-  const text = String(result || '');
-  const i = text.lastIndexOf('SPOKEN:');
-  const s = i >= 0 ? text.slice(i + 7)
-    : text.replace(/```[\s\S]*?```/g, '').replace(/[#*`_>|]/g, '').slice(0, 300);
-  return s.replace(/\s+/g, ' ').trim() || 'Finished, with no summary.';
-}
-
 function speakResult(a, r) {
   fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
-  const line = spoken(r.result);
-  a.awaiting = line.endsWith('?');
+  const { line, awaiting, error } = spokenReply(r);
+  a.awaiting = awaiting;
   a.question = a.awaiting ? line : ''; // "status" repeats it, in case the app missed it
-  say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
-    { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line });
+  say(`${a.name}: ${error ? 'hit an error. ' : ''}${line}`,
+    { spoken: error ? `${a.name} hit an error. ${line}` : line });
 }
 
 // AGENT_MODE=cloud: the turn runs in a claude.ai cloud session (cloud-agents.mjs) on the folder's GitHub
@@ -349,7 +348,7 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(sig, () => proce
 // `photo` (optional) is a host file copied into the container for this turn only, then deleted.
 // It goes in /tmp, never /work, so an agent can't commit it to the repo.
 async function turn(a, prompt, photo) {
-  a.busy = true; a.awaiting = false; a.lastAt = Date.now(); save();
+  a.busy = true; a.awaiting = false; a.activity = ''; a.lastAt = Date.now(); save();
   const photoIn = photo && `/tmp/${path.basename(photo)}`;
   try {
     if (cfg.cloud) return await cloudTurn(a, prompt);
@@ -430,7 +429,7 @@ async function status() {
   if (!agents.size) return say('No agents.');
   say([...agents.values()].map((a) => {
     const mins = Math.round((Date.now() - (a.lastAt || Date.now())) / 60000);
-    return `${a.name} ${a.busy ? `is working, ${mins} minutes in.` : a.awaiting ? `is waiting for your answer: ${a.question || 'a yes or no question'}` : 'is idle.'}`;
+    return `${a.name} ${a.busy ? `is working, ${mins} minutes in${a.activity ? `, ${a.activity}` : ''}.` : a.awaiting ? `is waiting for your answer: ${a.question || 'a yes or no question'}` : 'is idle.'}`;
   }).join(' '));
 }
 
@@ -571,27 +570,32 @@ function quickLook(file, said) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-look-'));
   fs.renameSync(file, path.join(dir, 'photo.jpg'));
   const prompt = `${LOOK_PROMPT}\n\nThey said: "${said || 'What am I looking at?'}"`;
-  return new Promise((resolve, reject) => {
-    // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
-    // It may need the setup token to sign in, but never the routine's token or the ntfy topic.
-    const { BRIDGE_ROUTINE_TOKEN: _r, NTFY_URL: _u, NTFY_TOKEN: _t, ...env } = process.env;
-    const p = spawn(process.env.CLAUDE_BIN || 'claude', ['-p', '--output-format', 'json', '--allowedTools', 'Read'],
-      { cwd: dir, windowsHide: true, env });
+  // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
+  // It may need the setup token to sign in, but never the routine's token or the ntfy topic.
+  const { BRIDGE_ROUTINE_TOKEN: _r, NTFY_URL: _u, NTFY_TOKEN: _t, ...env } = process.env;
+  const once = (args) => new Promise((resolve, reject) => {
+    const p = spawn(process.env.CLAUDE_BIN || 'claude', args, { cwd: dir, windowsHide: true, env });
     let out = '', err = '';
     const timer = setTimeout(() => p.kill(), 120000);
-    const done = (fn) => { clearTimeout(timer); fs.rmSync(dir, { recursive: true, force: true }); fn(); };
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
-    p.on('error', (e) => done(() => reject(e)));
-    p.on('close', (code) => done(() => {
-      try {
-        const r = JSON.parse(out.trim().split('\n').pop());
-        if (r.is_error) return reject(new Error(r.result || 'Claude returned an error'));
-        resolve(spoken(r.result));
-      } catch { reject(new Error(`claude exited ${code}: ${(err || out).slice(-200)}`)); }
-    }));
+    p.on('error', (e) => { clearTimeout(timer); reject(e); });
+    p.on('close', (code) => { clearTimeout(timer); resolve({ code, out, err }); });
+    p.stdin.on('error', () => {});
     p.stdin.end(prompt);
   });
+  const answer = ({ code, out, err }) => {
+    let r;
+    try { r = JSON.parse(out.trim().split('\n').pop()); }
+    catch { throw new Error(`claude exited ${code}: ${(err || out).slice(-200)}`); }
+    if (r.is_error) throw new Error(r.result || 'Claude returned an error');
+    return spokenReply(r).line;
+  };
+  // Haiku at low effort answers fastest; a Claude Code too old for those flags gets the plain ones.
+  return once(quickLookArgs(process.env))
+    .then((first) => (unknownFlag(first.err) ? once(QUICK_BASE) : first))
+    .then(answer)
+    .finally(() => fs.rmSync(dir, { recursive: true, force: true }));
 }
 
 // GET /voice/inbox?after=<id>: messages newer than <id>, waiting up to 25s for one to arrive.
