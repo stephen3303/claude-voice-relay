@@ -149,6 +149,7 @@ export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeou
 // onDone(a) runs when a turn ends with an answer that isn't a question or an error, so the routine records
 // finished work. A task that asked something fires once its answer's turn finishes; a later follow-up on a
 // finished task fires again, and that thread records only what's new (the routine keeps what it covered).
+// Only a session whose first message carried BRIDGE_MARK (a.cloudMarked) fires: the routine can't find others.
 export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, save = () => {}, log = () => {},
   onDone = () => {} }) {
   return async function cloudTurn(a, prompt) {
@@ -175,6 +176,7 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       log(a.name, 'cloud session', id, url);
     };
     const task = fresh ? `${BRIDGE_MARK} ${asTask(prompt)}` : prompt;
+    if (fresh) a.cloudMarked = true;
     try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt: task, onSession, onSpawn: (p) => { a.proc = p; } }); }
     catch (e) {
       // The session was created before the failure: a reply can still go to it.
@@ -190,6 +192,6 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       return say(`${a.name}: sent. Its answer will be in the Claude app.`, { spoken: `Sent to ${a.name}. Its answer will be in the Claude app.` });
     }
     speakResult(a, r);
-    if (!a.awaiting && !r.is_error) onDone(a);
+    if (!a.awaiting && !r.is_error && a.cloudMarked) onDone(a);
   };
 }

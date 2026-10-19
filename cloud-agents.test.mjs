@@ -236,8 +236,11 @@ test('a finished answer starts the project routine; a question or a queued follo
   await ask.cloudTurn(Object.assign(newAgent(), { cloudNew: false, cloudId: 'cse_1' }), 'yes');
   assert.deepEqual(ask.done, []); // still a question
   const yes = turnHarness();
-  await yes.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1' }, 'yes');
+  await yes.cloudTurn({ name: 'bot', repoPath: '/p', cloudId: 'cse_1', cloudMarked: true }, 'yes');
   assert.deepEqual(yes.done, ['bot']); // the answer after a question records the task
+  // A session from before the marker (saved in state.json) can't be found by the routine, so it never fires.
+  await yes.cloudTurn({ name: 'old', repoPath: '/p', cloudId: 'cse_2' }, 'and the tests');
+  assert.deepEqual(yes.done, ['bot']);
   const err = turnHarness({ reply: { result: 'SPOKEN: The tests failed.', is_error: true, session_id: 'cse_1' } });
   await err.cloudTurn(newAgent(), 'add a stop-loss');
   assert.deepEqual(err.done, []);

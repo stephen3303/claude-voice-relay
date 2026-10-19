@@ -175,8 +175,8 @@ const publisher = makePublisher({
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
 function save() {
-  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, cloudId, cloudUrl, awaiting, question, lastAt }) =>
-    ({ name, repoPath, container, sessionId, cloudId, cloudUrl, awaiting, question, lastAt }));
+  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudMarked, awaiting, question, lastAt }) =>
+    ({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudMarked, awaiting, question, lastAt }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
 }
 function load() {
@@ -391,7 +391,7 @@ async function startTask(body) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
     a.repoPath = parsed.repo;
   }
-  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; // a new task gets fresh context
+  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; a.cloudMarked = false; // a new task gets fresh context
   a.cloudNew = true; // and, in cloud mode, a new cloud session
   say(`Starting ${name}.`);
   turn(a, parsed.task);
