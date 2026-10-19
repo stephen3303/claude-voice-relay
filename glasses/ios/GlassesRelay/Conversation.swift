@@ -45,9 +45,10 @@ final class Conversation: NSObject, ObservableObject {
     private var lastActivity = Date()
     /// Set after "Sent.": an agent is working, so stay on the line for its answer.
     private var awaitingAgent = false
-    /// Bridge just asked something ("Go ahead.", "Ready to send it?"), so the next thing said is an answer and
-    /// doesn't need to start with "Bridge".
-    private var invited = false
+    /// Bridge just asked something ("Go ahead.", "Ready to send it?"), so what's said next, until then, is an answer
+    /// and doesn't need to start with "Bridge". Long enough to answer, short enough that later talk around you isn't sent.
+    private var invitedUntil = Date.distantPast
+    private let answerWindow: TimeInterval = 30
 
     /// Settings > "Read back what I said". On: the relay reads your words back ("Ready to send it?") and waits for a yes.
     /// Off: your words go straight to the agents, so wait for a longer pause before sending.
@@ -339,10 +340,10 @@ final class Conversation: NSObject, ObservableObject {
         let raw = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         stopListening()   // never listen while speaking, or the recognizer hears the reply
         guard !raw.isEmpty else { startListening(); return }
-        let wasInvited = invited
-        invited = false
+        let invited = Date() < invitedUntil
+        invitedUntil = .distantPast
         var said = raw
-        if Self.wakeWord, !wasInvited {
+        if Self.wakeWord, !invited {
             // Not for Bridge: drop it without a word, and don't count it as activity, so talk around you neither
             // reaches the agents nor keeps the line open.
             guard let rest = Self.afterWakeWord(raw) else {
@@ -350,12 +351,12 @@ final class Conversation: NSObject, ObservableObject {
                 startListening(); return
             }
             said = rest
-        } else if let rest = Self.afterWakeWord(raw) {
-            said = rest
+        } else if Self.wakeWord, let rest = Self.afterWakeWord(raw, answering: true) {
+            said = rest   // "Bridge, yes" as an answer; but "Bridge the gap..." is the answer itself
         }
         lastActivity = Date()
         // Just "Bridge": ask, and take the next thing said without the wake word.
-        guard !said.isEmpty else {
+        guard !said.isEmpty || !Self.wakeWord else {
             Task {
                 await say("Yes?")
                 startListening()
@@ -418,8 +419,11 @@ final class Conversation: NSObject, ObservableObject {
     /// "Bridge, what's the status?" → "what's the status?"; nil when no sentence starts with "Bridge" (or "Hey Bridge").
     /// Talk just before it in the same breath is dropped ("...see you then. Bridge, what's new?" → "what's new?"),
     /// but "the bridge was closed" is not a call. Tolerates the recognizer's punctuation and capitals; just "Bridge" gives "".
-    nonisolated static func afterWakeWord(_ text: String) -> String? {
-        let pattern = try! NSRegularExpression(pattern: #"(?:^|[.!?]\s+)\W*(?:(?:hey|ok|okay)\W+)?bridge\b\W*"#, options: [.caseInsensitive])
+    /// `answering`: only a leading "Bridge," set off by punctuation, so an answer like "Bridge the gap" is kept whole.
+    nonisolated static func afterWakeWord(_ text: String, answering: Bool = false) -> String? {
+        let pattern = try! NSRegularExpression(pattern: answering ? #"^\W*(?:(?:hey|ok|okay)\W+)?bridge(?:[,.!?:;]+\s*|\s*$)"#
+                                                                  : #"(?:^|[.!?]\s+)\W*(?:(?:hey|ok|okay)\W+)?bridge\b\W*"#,
+                                               options: [.caseInsensitive])
         guard let m = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).first,
               let r = Range(m.range, in: text) else { return nil }
         return String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -482,9 +486,11 @@ final class Conversation: NSObject, ObservableObject {
 
     private func say(_ text: String) async {
         phase = .speaking
-        // Whatever Bridge says last decides whether the next thing heard needs "Bridge" in front of it.
+        // A question invites an answer without "Bridge", from when it's finished being said. Anything else leaves an
+        // earlier invitation alone: an agent's message read out after "Ready to send it?" mustn't eat your "yes".
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        invited = line.hasSuffix("?") || line == "Go ahead."
+        let invites = line.hasSuffix("?") || line == "Go ahead."
+        defer { if invites { invitedUntil = Date().addingTimeInterval(answerWindow) } }
         await useHiFiOutput()
         // The natural voice when it's turned on in Settings: from the relay when it has a key, or from Bridge Cloud with
         // Bridge Pro; otherwise (or on any failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
