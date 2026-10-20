@@ -70,8 +70,14 @@ export function makeAgents(deps) {
   }
 
   async function newTask(user, { project, task, photo }) {
-    const p = resolveProject(project, await deps.store.projects(user));
-    if (!p) return `I don't know a project called ${project}. Nothing was sent.`;
+    const projects = await deps.store.projects(user);
+    const p = resolveProject(project, projects);
+    if (!p) {
+      // Said aloud, so the names are what to say next time (and an empty list means the setup didn't save any).
+      if (!projects.length) return "You don't have any projects yet. Run the owner setup script on your PC. Nothing was sent.";
+      const names = projects.map((x) => x.name).sort();
+      return `I don't know a project called ${project}. Your projects are ${names.slice(0, 10).join(', ')}${names.length > 10 ? ', and more' : ''}. Nothing was sent.`;
+    }
     // The photo would have to reach the cloud session as a file, which `claude --cloud` can't send.
     if (photo) return 'Photos only go to agents on your PC, and agents run in the cloud now. Nothing was sent.';
     if (!task) return `What do you want to tell ${p.name}?`;
@@ -145,5 +151,19 @@ export function makeAgents(deps) {
     return (await deps.store.agents(user)).some((a) => a.awaiting && !a.busy);
   }
 
-  return { startTask, awaiting, notOn };
+  // "in trading bot add a stop-loss check": dictation often drops the comma after the project name, so the
+  // first one to five words are tried as an exact project name or alias, longest first (as parseTask in relay.mjs).
+  async function splitTask(user, body) {
+    if (user !== OWNER) return null;
+    const projects = await deps.store.projects(user);
+    const words = String(body).replace(/^(?:in|on|for)\s+/i, '').split(/\s+/).filter(Boolean);
+    for (let k = Math.min(5, words.length - 1); k >= 1; k--) {
+      const n = norm(words.slice(0, k).join(' '));
+      const p = projects.find((x) => norm(x.name) === n || (x.aliases ?? []).some((a) => norm(a) === n));
+      if (p) return { project: p.name, task: words.slice(k).join(' ').replace(/^[,:;.\s]+/, '') };
+    }
+    return null;
+  }
+
+  return { startTask, awaiting, splitTask, notOn };
 }

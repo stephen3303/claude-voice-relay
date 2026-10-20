@@ -354,3 +354,21 @@ test('with nothing held, "yes" answers an agent that asked, but "send it" does n
   assert.match((await say('yes')).body, /nothing to send/);
   assert.equal(started.length, 1);
 });
+
+test('a task with no comma after the project is split by the account\'s projects', async () => {
+  let held = null;
+  const started = [];
+  const handler = makeHandler({
+    store: { getHeld: async () => held, setHeld: async (u, h) => { held = h; } },
+    startTask: async (u, t) => { started.push(t); return 'Starting trading bot.'; },
+    splitTask: async (u, body) => (body.startsWith('in trading bot ') ? { project: 'trading bot', task: body.slice(15) } : null),
+    pro: { plan: async () => null },
+  });
+  const say = (route, body) => handler({ requestContext: { http: { method: 'POST' }, authorizer: { lambda: { sub: 'owner' } } },
+    rawPath: `/api/voice/${route}`, body });
+  assert.equal((await say('confirm', 'task: in trading bot add tests')).body, "Here's your message to Claude for trading bot, add tests. Ready to send it?");
+  assert.equal((await say('confirm', 'send it')).body, 'Starting trading bot.');
+  assert.deepEqual(started, [{ project: 'trading bot', task: 'add tests' }]);
+  await say('send', 'task: in trading bot fix it');
+  assert.deepEqual(started[1], { project: 'trading bot', task: 'fix it' });
+});

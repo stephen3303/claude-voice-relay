@@ -40,6 +40,7 @@ export const LOOK_PROMPT = [
  * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not); with no project, the
  *   words are for the user's agents (agents.mjs: a reply, status or stop)
  * deps.agentAwaiting(user) -> true when an agent asked a question (optional)
+ * deps.splitTask(user, body) -> { project, task } for a task said without a comma after the project, or null (optional)
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
@@ -90,7 +91,8 @@ export function makeHandler(deps) {
     if (isTask || held?.project) {
       // After "change it", the next words are the task for the project that was held, whatever they
       // start with: "for the README, fix typos" must not re-target it. "Cancel" lets you pick another.
-      const parsed = held?.project ? { project: held.project, task: body } : m ? { project: m[1].trim(), task: m[2].trim() } : null;
+      const parsed = held?.project ? { project: held.project, task: body } : m ? { project: m[1].trim(), task: m[2].trim() }
+        : (await deps.splitTask?.(user, body)) ?? null;
       if (!parsed) {
         await deps.store.setHeld(user, null);
         return `I can't tell which project "${body}" is for. Start with in and the project name. ${ASK}`;
@@ -107,7 +109,9 @@ export function makeHandler(deps) {
     const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
     if (!body) return "I didn't catch that. Say it again.";
     const m = body.match(PROJECT);
-    return deps.startTask(user, m ? { project: m[1].trim(), task: m[2].trim() } : { project: null, task: body });
+    if (m) return deps.startTask(user, { project: m[1].trim(), task: m[2].trim() });
+    const split = TASK_PREFIX.test(raw) ? await deps.splitTask?.(user, body) : null;
+    return deps.startTask(user, split ?? { project: null, task: body });
   }
 
   async function inbox(user, query) {

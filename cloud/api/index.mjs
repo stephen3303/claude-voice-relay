@@ -298,7 +298,7 @@ async function startTask(user, req) {
 // The owner has every Pro feature, with paid Pro's allowances: there's no App Store subscription to check.
 const proForOwner = { ...pro, plan: async (user) => (user === OWNER ? 'Production' : pro.plan(user)) };
 
-export const handler = makeHandler({ store, look, startTask, devices, deliver, speak, pro: proForOwner, agentAwaiting: agentTasks.awaiting });
+export const handler = makeHandler({ store, look, startTask, devices, deliver, speak, pro: proForOwner, agentAwaiting: agentTasks.awaiting, splitTask: agentTasks.splitTask });
 
 // App Store Server Notifications v2 (POST /api/appstore/notifications, no authorizer: Apple signs the body).
 export async function appStore(event) {

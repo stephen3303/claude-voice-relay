@@ -70,7 +70,7 @@ test('a new task starts a runner with a fresh cloud session', async () => {
 
 test('an unknown project or a photo sends nothing', async () => {
   const { tasks, say, runs } = setup();
-  assert.match(await say('do it', 'nowhere'), /don't know a project called nowhere/);
+  assert.match(await say('do it', 'nowhere'), /don't know a project called nowhere. Your projects are claude voice relay, trading bot\./);
   assert.match(await tasks.startTask(OWNER, { project: 'trading bot', task: 'look', photo: Buffer.from('x') }), /Nothing was sent/);
   assert.equal(runs.length, 0);
 });
@@ -125,4 +125,17 @@ test('a runner that fails to start leaves the agent idle and says why', async ()
   const { say, agents } = setup({ runFails: true });
   assert.match(await say('one', 'trading bot'), /couldn't start trading bot's runner. no capacity/);
   assert.equal(agents.get('tradingbot').busy, false);
+});
+
+test('a task said without a comma still finds its project', async () => {
+  const { tasks } = setup();
+  assert.deepEqual(await tasks.splitTask(OWNER, 'in trading bot add a stop-loss check'), { project: 'trading bot', task: 'add a stop-loss check' });
+  assert.deepEqual(await tasks.splitTask(OWNER, 'bridge fix the README'), { project: 'claude voice relay', task: 'fix the README' });
+  assert.equal(await tasks.splitTask(OWNER, 'in nowhere do things'), null);
+  assert.equal(await tasks.splitTask('apple.1', 'in trading bot add tests'), null);
+});
+
+test('with no projects saved it says to run the setup', async () => {
+  const t = makeAgents({ store: { projects: async () => [] }, runTask: async () => 'arn', stopTask: async () => {} });
+  assert.match(await t.startTask(OWNER, { project: 'x', task: 'y' }), /don't have any projects yet/);
 });
