@@ -4,7 +4,8 @@
 # Needs: the AWS CLI signed in as an admin (aws sts get-caller-identity), Docker Desktop running (CDK builds the
 # agent runner's image), Node 22 and Claude Code. The next Cloud deploy from main puts main's BridgeApi back,
 # which removes the runner again until this branch is merged.
-param([string]$RelayDir = (Join-Path $env:USERPROFILE 'Projects\claude-voice-relay'))
+# -SkipLogin keeps the claude.ai login already stored (a rerun after a code change).
+param([string]$RelayDir = (Join-Path $env:USERPROFILE 'Projects\claude-voice-relay'), [switch]$SkipLogin)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
@@ -24,4 +25,4 @@ try {
   if ($LASTEXITCODE) { throw 'cdk deploy failed' }
 } finally { Pop-Location }
 
-& (Join-Path $PSScriptRoot 'setup-owner.ps1') -RelayDir $RelayDir
+& (Join-Path $PSScriptRoot 'setup-owner.ps1') -RelayDir $RelayDir -SkipLogin:$SkipLogin

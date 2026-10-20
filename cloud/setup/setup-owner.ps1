@@ -75,7 +75,7 @@ $relayEnv = Read-Env @('VOICE_TOKEN', 'BRIDGE_ROUTINE_URL', 'BRIDGE_ROUTINE_TOKE
 # ---------- owner token ----------
 $token = $relayEnv['VOICE_TOKEN']
 $newToken = $false
-if (-not $token -or $token -notmatch '^[A-Za-z0-9_-]{24,512}$') {
+if (-not $token -or $token -notmatch '^[\x21-\x7e]{24,512}$') {
   $bytes = New-Object byte[] 32
   [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
   $token = -join ($bytes | ForEach-Object { $_.ToString('x2') })

@@ -8,24 +8,27 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 export const OWNER = 'owner';
-// As the relay's VOICE_TOKEN: at least 24 characters. No dots, so a Bridge session (a JWT) never matches.
-const TOKEN = /^[A-Za-z0-9_-]{24,512}$/;
+// As the relay's VOICE_TOKEN: at least 24 characters, any printable ones (the relay never limited them).
+const TOKEN = /^[\x21-\x7e]{24,512}$/;
+const RETRY_MS = 5 * 60_000;   // a missing secret is looked for again after this
 
 export const tokenHash = (token) => createHash('sha256').update(String(token)).digest('hex');
 
 /**
  * deps.secret() -> { tokenHash } (bridge/owner), or null when the owner account isn't set up
- * Returns check(bearer) -> true for the owner's token. The secret is read once per container (only for a
- * bearer shaped like an owner token), and again while it's missing, so setting it up needs no deploy.
+ * Returns check(bearer) -> true for the owner's token. The secret is read once per container, and while it's
+ * missing at most every few minutes, so setting it up needs no deploy.
+ * deps.now() -> ms (optional)
  */
 export function makeOwner(deps) {
-  let hash = null;   // null: not read yet, or no owner set up (read again next time)
+  const now = deps.now ?? Date.now;
+  let hash = null;      // null: not read yet, or no owner set up
+  let lookedAt = -Infinity;
   return async function check(bearer) {
     const token = String(bearer || '');
-    // Sessions never cost a Secrets Manager read.
     if (!TOKEN.test(token)) return false;
-    if (!hash) {
-      try { hash = (await deps.secret())?.tokenHash ?? null; }
+    if (!hash && now() - lookedAt >= RETRY_MS) {
+      try { hash = (await deps.secret())?.tokenHash ?? null; lookedAt = now(); }
       catch (e) { console.warn('Owner token unreadable:', e.name); return false; }
     }
     if (!hash || !/^[0-9a-f]{64}$/.test(hash)) return false;

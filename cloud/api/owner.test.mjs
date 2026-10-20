@@ -14,20 +14,29 @@ test('the owner token matches its stored hash, and nothing else does', async () 
   assert.equal(reads, 1, 'read once per container');
 });
 
-test('a session token or a short token never reads the secret', async () => {
+test('a short token never reads the secret', async () => {
   let reads = 0;
   const check = makeOwner({ secret: async () => { reads++; return { tokenHash: tokenHash(TOKEN) }; } });
-  assert.equal(await check('eyJhbGciOi.eyJzdWIi.c2ln'), false);
   assert.equal(await check('abc123'), false);
   assert.equal(await check(''), false);
   assert.equal(reads, 0);
 });
 
-test('with no owner set up nobody is the owner, and a later setup works without a restart', async () => {
-  let stored = null;
-  const check = makeOwner({ secret: async () => stored });
+test('any printable VOICE_TOKEN works, as on the relay (base64 with + / =)', async () => {
+  const voice = 'k3J+9/aQz8PmV2xWb7Lr0tYc=';
+  const check = makeOwner({ secret: async () => ({ tokenHash: tokenHash(voice) }) });
+  assert.equal(await check(voice), true);
+  assert.equal(await check('eyJhbGciOi.eyJzdWIiOiJ4In0.c2lnbmF0dXJl'), false);
+});
+
+test('with no owner set up nobody is the owner, and a later setup works within minutes', async () => {
+  let stored = null, reads = 0, clock = 0;
+  const check = makeOwner({ secret: async () => { reads++; return stored; }, now: () => clock });
   assert.equal(await check(TOKEN), false);
+  assert.equal(await check(TOKEN), false);
+  assert.equal(reads, 1, 'a missing secret is not read on every request');
   stored = { tokenHash: tokenHash(TOKEN) };
+  clock += 5 * 60_000;
   assert.equal(await check(TOKEN), true);
 });
 
