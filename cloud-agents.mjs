@@ -102,19 +102,24 @@ export const BRIDGE_MARK = 'Bridge voice task:';
 // session up itself. Only Anthropic's routine endpoint is accepted, so the token can't be sent elsewhere.
 const ROUTINE_URL = /^https:\/\/api\.anthropic\.com\/v1\/claude_code\/routines\/trig_[A-Za-z0-9_-]{1,64}\/fire$/;
 export const routineUrlOk = (url) => ROUTINE_URL.test(String(url));
-export async function fireRoutine({ fetch = globalThis.fetch, url, token, timeoutMs = 30_000 }) {
+export async function fireRoutine(o) {
+  return (await fireRoutineSession(o)).sessionId;
+}
+// The same fire, with run-specific text (a routine that isn't a project's accepts it; the session gets it in a
+// <routine-fire-payload> block the routine's prompt has to opt in to), resolving to the new session.
+export async function fireRoutineSession({ fetch = globalThis.fetch, url, token, text, timeoutMs = 30_000 }) {
   if (!routineUrlOk(url)) throw new Error('BRIDGE_ROUTINE_URL is not a routine API trigger URL.');
   const res = await fetch(url, {
     method: 'POST',
     // The docs call the beta header optional; it's sent anyway, as in the manual fire that was tested.
     headers: { authorization: `Bearer ${token}`, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'experimental-cc-routine-2026-04-01',
       'content-type': 'application/json' },
-    body: '{}',
+    body: text ? JSON.stringify({ text: String(text) }) : '{}',
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`the routine answered ${res.status}`);
   const r = await res.json().catch(() => ({}));
-  return String(r.claude_code_session_id || '');
+  return { sessionId: String(r.claude_code_session_id || ''), url: String(r.claude_code_session_url || '') };
 }
 export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeoutMs = CLOUD_TIMEOUT_MS,
   onSpawn = () => {}, onSession = () => {} }) {
@@ -152,8 +157,13 @@ export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeou
 // due a record (a.cloudToRecord). onDone(a) then runs once per session, when a turn first ends with an answer
 // that isn't a question or an error: each run is a full project thread, so follow-ups don't start more; the
 // thread links the session, where they continue. A session without the mark never fires: the routine can't find it.
+//
+// Claude Code's print mode can only message an existing cloud session (2.1.260 and later refuse to start one).
+// With startSession(a, task) -> { sessionId, url } (Bridge Cloud's runner fires a routine with the task), a new
+// task starts its session that way, and the turn then sends WAIT_PROMPT to it, so the CLI waits for its answer.
+export const WAIT_PROMPT = 'Automatic message from Bridge, nothing new to do: keep working on the task until it is done, then end your final message with the SPOKEN line.';
 export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, save = () => {}, log = () => {},
-  mark = false, onDone = () => {} }) {
+  mark = false, onDone = () => {}, startSession = null }) {
   return async function cloudTurn(a, prompt) {
     // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
     // failed after the session may have started) would start one with only that one line, next to an orphan
@@ -177,8 +187,15 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       a.cloudId = id; a.cloudUrl = url; save();
       log(a.name, 'cloud session', id, url);
     };
-    const task = fresh && mark ? `${BRIDGE_MARK} ${asTask(prompt)}` : prompt;
+    let task = fresh && mark ? `${BRIDGE_MARK} ${asTask(prompt)}` : prompt;
     if (fresh) a.cloudToRecord = mark;
+    if (fresh && startSession) {
+      const s = await startSession(a, task);
+      if (!s?.sessionId || !SESSION_ID.test(s.sessionId)) throw new Error("the routine didn't start a session.");
+      onSession(s.sessionId, s.url || '');
+      if (a.stopped) return;
+      task = WAIT_PROMPT;
+    }
     try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt: task, onSession, onSpawn: (p) => { a.proc = p; } }); }
     catch (e) {
       // The session was created before the failure: a reply can still go to it.

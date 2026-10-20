@@ -136,8 +136,12 @@ moved: each task is a claude.ai cloud session that shows in the Claude app.
   shallow-clones the repo (or makes an empty repo with the same remote, for a private one), runs the pending turns with
   the relay's own `cloud-agents.mjs`, writes each answer to the inbox (and ntfy), fires the project routine, marks the
   agent idle and exits. When Claude Code refreshes the login, the runner writes the new one back.
+  Claude Code's print mode can't start a new cloud session (2.1.260 and later refuse), so a new task fires the
+  owner's "Bridge task" routine (`bridge/owner-routine`, `{ url, token }`) with the repo and the task as its text;
+  its prompt is `cloud/setup/task-routine-prompt.txt`. The runner then waits on that session with
+  `claude -p --cloud <id>`, and replies go to it the same way.
 - **Setup**: `cloud/setup/setup-owner.ps1` on the PC stores the token's hash, signs a new claude.ai login in and stores
-  it, and writes the projects. `cloud/setup/deploy-branch.ps1` deploys BridgeApi from an unmerged branch on the PC and
+  it, asks once for the task routine's Fire URL and token, and writes the projects. `cloud/setup/deploy-branch.ps1` deploys BridgeApi from an unmerged branch on the PC and
   then runs it, to try a change before it's merged.
 - **Cost** at about 10 tasks a day: roughly $5 to $8 a month, nearly all Fargate time while a session works and
   Secrets Manager; nothing runs between tasks.

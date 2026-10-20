@@ -9,6 +9,20 @@ import path from 'node:path';
 import { makeCloudTurn } from '../../cloud-agents.mjs';
 import { spokenReply } from '../../agent-turn.mjs';
 
+export const NO_ROUTINE = "New tasks need the Bridge task routine, and it isn't set up yet. Run the owner setup script on your PC.";
+
+// What the task routine's session gets: the repo to work in, then the task (the routine's prompt says so).
+export const routineText = (a, task) => `Repository: ${a.repo}\nBranch: ${a.branch || 'the default branch'}\n\n${task}`;
+
+// An error said aloud and shown in the history: whole sentences, so it isn't cut off mid-word.
+export function spokenError(message, max = 400) {
+  const m = String(message ?? '').replace(/\s+/g, ' ').trim();
+  if (m.length <= max) return m;
+  const cut = m.slice(0, max);
+  const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+  return end > 40 ? cut.slice(0, end + 1) : `${cut.slice(0, cut.lastIndexOf(' '))}…`;
+}
+
 /**
  * deps.store: {
  *   take(user, key, run) -> { agent, text } for the next pending turn, or null (none, or no longer this run)
@@ -18,6 +32,8 @@ import { spokenReply } from '../../agent-turn.mjs';
  * }
  * deps.prepare(agent, dir) -> makes dir a git folder whose current branch tracks the agent's GitHub repo
  * deps.run(opts) -> runCloud's result (cloud-agents.mjs), with spawn and the CLI already bound
+ * deps.startSession(text) -> { sessionId, url }: fires the owner's task routine with text (optional; without it a new
+ *   task can't start, since Claude Code's print mode can only message an existing cloud session)
  * deps.deliver(user, spoken, from), deps.notify(text) (ntfy, optional), deps.fireRoutine() (optional)
  * deps.workRoot: where repo folders go; deps.exists(dir); deps.log(...)
  */
@@ -61,6 +77,10 @@ export function makeRunner(deps) {
       say, speakResult, save, log,
       mark: !!deps.fireRoutine,
       onDone: () => deps.fireRoutine?.().then((id) => log('project routine started', id)).catch((e) => log('project routine failed:', e.message)),
+      startSession: async (agent, task) => {
+        if (!deps.startSession) throw new Error(NO_ROUTINE);
+        return deps.startSession(routineText(agent, task));
+      },
     });
 
     let prepared = false;
@@ -81,7 +101,7 @@ export function makeRunner(deps) {
         await cloudTurn(a, next.text);
       } catch (e) {
         log(a.name, 'turn failed:', e.message);
-        say(`${a.name} failed. ${String(e.message).slice(0, 200)}`);
+        say(`${a.name} failed. ${spokenError(e.message)}`);
       }
       save();
       await writes;

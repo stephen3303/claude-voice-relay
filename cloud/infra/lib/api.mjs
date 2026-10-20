@@ -26,6 +26,7 @@ const APNS_SECRET = 'bridge/apns';                   // { teamId, keyId, key }: 
 // The owner account (cloud/api/owner.mjs), both made by cloud/setup/setup-owner.ps1, never by CDK:
 const OWNER_SECRET = 'bridge/owner';                 // { tokenHash }: the owner token's SHA-256
 const OWNER_CLAUDE_SECRET = 'bridge/owner-claude';   // the owner's claude.ai login (+ routine, ntfy), runner only
+const OWNER_ROUTINE_SECRET = 'bridge/owner-routine'; // { url, token }: the routine new tasks start as, runner only
 
 export class ApiStack extends Stack {
   constructor(scope, id, props) {
@@ -93,7 +94,7 @@ export class ApiStack extends Stack {
           '!cloud/runner/*.mjs', 'cloud/runner/*.test.mjs', '!cloud/runner/package.json', '!cloud/runner/package-lock.json',
           '!cloud/runner/Dockerfile'],
       }),
-      environment: { TABLE: table.tableName, CLAUDE_SECRET: OWNER_CLAUDE_SECRET },
+      environment: { TABLE: table.tableName, CLAUDE_SECRET: OWNER_CLAUDE_SECRET, ROUTINE_SECRET: OWNER_ROUTINE_SECRET },
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'runner',
         logGroup: new logs.LogGroup(this, 'RunnerLogs', { retention: logs.RetentionDays.ONE_MONTH }) }),
     });
@@ -106,6 +107,7 @@ export class ApiStack extends Stack {
     const ownerClaude = secrets.Secret.fromSecretNameV2(this, 'OwnerClaude', OWNER_CLAUDE_SECRET);
     ownerClaude.grantRead(runnerTask.taskRole);
     ownerClaude.grantWrite(runnerTask.taskRole);
+    secrets.Secret.fromSecretNameV2(this, 'OwnerRoutine', OWNER_ROUTINE_SECRET).grantRead(runnerTask.taskRole);
     voice.addEnvironment('RUNNER_CLUSTER', cluster.clusterArn);
     voice.addEnvironment('RUNNER_TASK', runnerTask.taskDefinitionArn);
     voice.addEnvironment('RUNNER_SUBNETS', vpc.publicSubnets.map((sn) => sn.subnetId).join(','));

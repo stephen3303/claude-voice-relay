@@ -13,13 +13,13 @@ import { promisify } from 'node:util';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { SecretsManagerClient, GetSecretValueCommand, PutSecretValueCommand } from '@aws-sdk/client-secrets-manager';
-import { runCloud, resolveClaude, fireRoutine, routineUrlOk } from '../../cloud-agents.mjs';
+import { runCloud, resolveClaude, fireRoutine, fireRoutineSession, routineUrlOk } from '../../cloud-agents.mjs';
 import { makeNtfy } from '../../ntfy.mjs';
 import { addMessage } from '../api/inbox.mjs';
 import { makeRunner } from './turns.mjs';
 import { prepareRepo } from './repo.mjs';
 
-const { TABLE, USER_ID: user, AGENT_KEY: key, RUN_ID: run, CLAUDE_SECRET } = process.env;
+const { TABLE, USER_ID: user, AGENT_KEY: key, RUN_ID: run, CLAUDE_SECRET, ROUTINE_SECRET } = process.env;
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const sm = new SecretsManagerClient({});
@@ -74,6 +74,16 @@ async function signIn() {
     JSON.stringify({ hasCompletedOnboarding: true, ...(secret.oauthAccount ? { oauthAccount: secret.oauthAccount } : {}) }), { mode: 0o600 });
   saved = fs.readFileSync(credFile, 'utf8');
 }
+// The task routine (bridge/owner-routine, { url, token }): new tasks start as its sessions. null when it isn't set up.
+async function taskRoutine() {
+  try {
+    const r = JSON.parse((await sm.send(new GetSecretValueCommand({ SecretId: ROUTINE_SECRET }))).SecretString);
+    return r?.token && routineUrlOk(r.url) ? r : null;
+  } catch (e) {
+    if (e.name === 'ResourceNotFoundException') return null;
+    throw e;
+  }
+}
 // Claude Code refreshes the login when its access token expires, and the old refresh token stops working.
 // The new one goes back at once, so a runner lost mid-task doesn't leave the next one with a dead login.
 async function keepLogin() {
@@ -93,6 +103,7 @@ try {
   await signIn();
   const ntfy = makeNtfy({ url: secret.ntfyUrl || '', token: secret.ntfyToken || '', log });
   const routineOn = !!secret.routineToken && routineUrlOk(secret.routineUrl);
+  const task = await taskRoutine();
   const runAgent = makeRunner({
     store,
     prepare: (a, dir) => prepareRepo({ git: (args, opts) => git('git', args, opts), repo: a.repo, branch: a.branch, dir }),
@@ -100,6 +111,7 @@ try {
     deliver: (u, text) => addMessage(db, TABLE, u, text),
     notify: ntfy,
     fireRoutine: routineOn ? () => fireRoutine({ url: secret.routineUrl, token: secret.routineToken }) : null,
+    startSession: task ? (text) => fireRoutineSession({ url: task.url, token: task.token, text }) : null,
     workRoot: path.join(home, 'work'),
     exists: fs.existsSync,
     log,

@@ -6,13 +6,15 @@
 #   bridge/owner         the SHA-256 of your owner token: by default the relay's VOICE_TOKEN, so the app keeps its token
 #   bridge/owner-claude  a claude.ai login made just for Bridge Cloud (a browser window opens), plus the relay's
 #                        project routine and ntfy settings from its .env
+#   bridge/owner-routine the claude.ai routine new tasks start as ({ url, token }), asked for once (-TaskRoutine to replace it)
 #   PROJECT# items       one per git folder in your projects folder, so "in <project>, ..." works as it did
 # Then point the app at Bridge Cloud: Settings, relay address, set it to the address this script prints.
 param(
   [string]$ProjectsRoot = (Join-Path $env:USERPROFILE 'Projects'),
   [string]$RelayDir = '',
   [switch]$SkipLogin,
-  [switch]$SkipProjects
+  [switch]$SkipProjects,
+  [switch]$TaskRoutine
 )
 $ErrorActionPreference = 'Stop'
 $region = 'us-east-1'
@@ -114,6 +116,27 @@ if (-not $SkipLogin) {
     $env:CLAUDE_CONFIG_DIR = $before
     Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
   }
+}
+
+# ---------- the task routine ----------
+# Claude Code can't start a new cloud session from a script, so each new task fires this routine with the task as
+# its text. Its URL and token are typed here, never pasted into chat.
+if ($TaskRoutine -or (Quiet-Exit { aws secretsmanager describe-secret --region $region --secret-id 'bridge/owner-routine' })) {
+  Set-Clipboard -Value (Get-Content (Join-Path $PSScriptRoot 'task-routine-prompt.txt') -Raw)
+  Write-Host ''
+  Write-Host 'Set up the Bridge task routine (the routine prompt is on your clipboard now):'
+  Write-Host '  1. Open https://claude.ai/code/routines and click New task. If a menu opens, pick Set up manually.'
+  Write-Host '  2. Name it Bridge task, and paste the prompt from your clipboard.'
+  Write-Host '  3. Add the API trigger. Under Advanced settings, select every repository you will talk to.'
+  Write-Host '  4. Click Create, and copy the token it shows (it is shown once). Then copy the Fire URL from the API trigger.'
+  $url = (Read-Host 'Fire URL').Trim()
+  if ($url -notmatch '^https://api\.anthropic\.com/v1/claude_code/routines/trig_[A-Za-z0-9_-]{1,64}/fire$') { throw 'That is not a routine Fire URL.' }
+  Write-Host 'Token (right-click to paste; nothing shows as you paste):'
+  $secure = Read-Host -AsSecureString
+  $routineToken = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)).Trim()
+  if (-not $routineToken) { throw 'No token was pasted.' }
+  Save-Secret 'bridge/owner-routine' (@{ url = $url; token = $routineToken } | ConvertTo-Json -Compress)
+  Write-Host 'Saved bridge/owner-routine.'
 }
 
 # ---------- projects ----------
