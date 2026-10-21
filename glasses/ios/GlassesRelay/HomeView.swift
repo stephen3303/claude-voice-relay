@@ -14,6 +14,7 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    header
                     status
                     controls
                     recent
@@ -21,8 +22,11 @@ struct HomeView: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
+            // The title stays for VoiceOver and History's back button; the header row below shows it instead of the bar.
             .navigationTitle("Bridge")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) { EmptyView() }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showHelp = true } label: { Label("Help", systemImage: "questionmark.circle") }
                 }
@@ -37,18 +41,30 @@ struct HomeView: View {
 
     // MARK: status
 
+    /// "Bridge" with three icons beside it, side by side: listening, glasses, and the PC (or cloud) connection.
+    private var header: some View {
+        HStack(spacing: 14) {
+            Text("Bridge").font(.largeTitle.bold())
+                .lineLimit(1).minimumScaleFactor(0.6)   // room for the icons at large text sizes
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            StatusIcon(symbol: phaseSymbol, label: "Listening", value: conversation.phase.rawValue,
+                       tint: conversation.phase == .idle ? .secondary : Color.accentColor,
+                       animate: conversation.phase == .listening)
+            StatusIcon(symbol: "eyeglasses", label: "Glasses", value: glassesValue,
+                       tint: glasses.deviceCount > 0 ? .green : .orange)
+            StatusIcon(symbol: relayURL == Relay.cloudAddress ? "cloud.fill" : "desktopcomputer", label: "Connection", value: connectionValue,
+                       tint: relayURL.isEmpty ? .orange : .green)
+        }
+    }
+
     private var status: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(conversation.phase.rawValue, systemImage: phaseSymbol)
-                .font(.title2.bold())
-                .foregroundStyle(conversation.phase == .idle ? Color.primary : Color.accentColor)
-                .symbolEffect(.variableColor.iterative, isActive: conversation.phase == .listening)
-            Divider()
-            StatusRow(title: "Glasses", value: glassesValue, ok: glasses.deviceCount > 0)
-            StatusRow(title: "Connection", value: connectionValue, ok: !relayURL.isEmpty)
+        VStack(alignment: .leading, spacing: 6) {
             #if APP_STORE
             StatusRow(title: "Bridge Pro", value: store.isPro ? "Active" : "Not subscribed", ok: store.isPro)
             #endif
+            if glasses.deviceCount == 0 { Text("Glasses: \(glassesValue)").font(.footnote).foregroundStyle(.secondary) }
+            if relayURL.isEmpty { Text("Connection: \(connectionValue)").font(.footnote).foregroundStyle(.secondary) }
             if !conversation.status.isEmpty {
                 Text(conversation.status).font(.footnote).foregroundStyle(.secondary)
             }
@@ -56,9 +72,7 @@ struct HomeView: View {
                 Text(e).font(.footnote).foregroundStyle(.red)
             }
         }
-        .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var phaseSymbol: String {
@@ -134,6 +148,21 @@ struct HomeView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
         }
+    }
+}
+
+private struct StatusIcon: View {
+    let symbol: String, label: String, value: String, tint: Color
+    var animate = false
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.title3)
+            .foregroundStyle(tint)
+            .symbolEffect(.variableColor.iterative, isActive: animate)
+            .frame(width: 32, height: 32)
+            .accessibilityElement()
+            .accessibilityLabel(label)
+            .accessibilityValue(value)
     }
 }
 
