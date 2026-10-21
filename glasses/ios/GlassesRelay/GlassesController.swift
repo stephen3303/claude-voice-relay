@@ -56,7 +56,10 @@ final class GlassesController: ObservableObject {
 
     func register() async {
         guard Self.toolkitReady else { return }
-        do { try await Wearables.shared.startRegistration() } catch { lastError = "\(error)"; ErrorReporting.report(error, "registration") }
+        do { try await Wearables.shared.startRegistration() }
+        // Tapping Connect when Meta AI already has Bridge: that's the state we wanted, not a failure.
+        catch RegistrationError.alreadyRegistered { registration = "Registered"; lastError = nil }
+        catch { lastError = "\(error)"; ErrorReporting.report(error, "registration") }
     }
 
     // MARK: voice channel

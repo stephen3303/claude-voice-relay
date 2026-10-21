@@ -95,8 +95,8 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
   }
 
   // A token for one repository, or null when the App isn't installed there, the default branch isn't
-  // protected, or GitHub is unreachable.
-  async function tokenFor(owner, repo) {
+  // protected, or GitHub is unreachable. checkOnly answers true instead of minting the write token.
+  async function tokenFor(owner, repo, { checkOnly = false } = {}) {
     let probe;
     try {
       const inst = await call('GET', `/repos/${e(owner)}/${e(repo)}/installation`);
@@ -123,6 +123,7 @@ export function makeGitHubApp({ appId, privateKey, fetch = globalThis.fetch, now
         log(`${info.full_name} has no CODEOWNERS giving every file a person as owner (see README: GitHub access for agents); no token.`);
         return null;
       }
+      if (checkOnly) return true;
       const t = await call('POST', `/app/installations/${inst.id}/access_tokens`,
         { body: { repository_ids: [info.id], permissions: TOKEN_PERMISSIONS } });
       return t.token;
@@ -213,7 +214,9 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
   const issued = new Set(); // App tokens handed out and not yet released
 
   // { token, owner, repo } for pushing the agent's work to its own GitHub repo, or null.
-  async function credentials(a) {
+  // checkOnly (cloud agents, which push through the Claude GitHub app) asks only whether the pinned repo
+  // passes the App's checks: { owner, repo } or null, minting nothing. AGENT_GH_TOKEN never passes it.
+  async function credentials(a, { checkOnly = false } = {}) {
     const remote = parseRemote(await getRemote(a.repoPath));
     if (!remote) { log(`${a.name} has no GitHub origin remote, so no GitHub token.`); return null; }
     if (!ghApp && !fallbackToken) return null;
@@ -226,9 +229,10 @@ export function makeAgentGitHub({ ghApp, fallbackToken = '', hostGit, getRemote,
       log(`${a.name}: origin changed from ${pinned} to ${slug}; no GitHub token. Delete its line in ${path.basename(pinsFile)} if that was you.`);
       return null;
     }
-    if (!ghApp) return { token: fallbackToken, ...remote };
-    const token = await ghApp.tokenFor(remote.owner, remote.repo);
+    if (!ghApp) return checkOnly ? null : { token: fallbackToken, ...remote };
+    const token = await ghApp.tokenFor(remote.owner, remote.repo, { checkOnly });
     if (!token) return null;
+    if (checkOnly) return { ...remote };
     issued.add(token);
     return { token, ...remote };
   }

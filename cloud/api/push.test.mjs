@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { makeApns, makeNotifier, APNS_HOSTS, LISTENING_MS } from './push.mjs';
 
-const BUNDLE = 'com.smitherman.glassesrelay';
+const BUNDLE = 'com.talktobridge.bridge';
 const apnsKey = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const PEM = apnsKey.privateKey.export({ type: 'pkcs8', format: 'pem' });
 const TOKEN = 'ab'.repeat(32), VOIP = 'cd'.repeat(32);
@@ -58,6 +58,13 @@ test('a token from the other environment is retried there; dead tokens come back
 
   const bad = setupApns(() => ({ status: 400, reason: 'BadDeviceToken' }));
   assert.equal((await bad.apns(TOKEN, 'production', 'alert', {})).result, 'gone');
+
+  const otherApp = setupApns(() => ({ status: 400, reason: 'DeviceTokenNotForTopic' }));
+  assert.equal((await otherApp.apns(TOKEN, 'production', 'alert', {})).result, 'gone');
+  assert.equal(otherApp.sent.length, 1);
+
+  const noPush = setupApns(() => ({ status: 400, reason: 'TopicDisallowed' }));
+  assert.equal((await noPush.apns(TOKEN, 'production', 'alert', {})).result, 'error');
 
   const down = setupApns(() => ({ status: 500, reason: 'InternalServerError' }));
   assert.equal((await down.apns(TOKEN, 'production', 'alert', {})).result, 'error');

@@ -1,4 +1,5 @@
 {
+  "claude voice relay": "agents/claude-voice-relay",
   "voice relay": "agents/claude-voice-relay",
   "invoice relay": "agents/claude-voice-relay",
   "claude voice": "agents/claude-voice-relay",

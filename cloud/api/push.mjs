@@ -60,8 +60,10 @@ export function makeApns(deps) {
       if (r.status === 410) return { result: 'gone', env: tryEnv, reason: r.reason };
       if (!(r.status === 400 && r.reason === 'BadDeviceToken')) break;
     }
-    // BadDeviceToken in both environments: the token is no good anywhere.
-    if (r.status === 400 && r.reason === 'BadDeviceToken') return { result: 'gone', env, reason: r.reason };
+    // BadDeviceToken in both environments: the token is no good anywhere. DeviceTokenNotForTopic: the
+    // token belongs to another bundle ID (a build from before a rename), so it never will be. (TopicDisallowed
+    // is our key or App ID setup, not the device's, so it stays a retryable error.)
+    if (r.status === 400 && ['BadDeviceToken', 'DeviceTokenNotForTopic'].includes(r.reason)) return { result: 'gone', env, reason: r.reason };
     if (r.status === 403 && r.reason === 'ExpiredProviderToken') jwt = null;
     return { result: 'error', env, reason: `${r.status} ${r.reason ?? ''}`.trim() };
   };

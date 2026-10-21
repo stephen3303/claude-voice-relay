@@ -1,3 +1,5 @@
+// App Store build only: agent calls and notifications come from Bridge Cloud (not in the public relay repo).
+#if APP_STORE
 import AVFoundation
 import CallKit
 import PushKit
@@ -363,3 +365,4 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         Push.shared.status = "Notifications unavailable: \(error.localizedDescription)"
     }
 }
+#endif

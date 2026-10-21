@@ -2,7 +2,7 @@
 # Info.plist keys follow the toolkit's getting-started guide for meta-wearables-dat-ios 1.0.1.
 name: GlassesRelay
 options:
-  bundleIdPrefix: com.smitherman
+  bundleIdPrefix: com.talktobridge
   deploymentTarget:
     iOS: "17.2"
 packages:
@@ -36,7 +36,7 @@ targets:
           UIImageName: LaunchLogo
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
-            CFBundleURLName: com.smitherman.glassesrelay
+            CFBundleURLName: com.talktobridge.bridge
             CFBundleURLSchemes: [glassesrelay]
         MWDAT:
           AppLinkURLScheme: "glassesrelay://"
@@ -58,7 +58,7 @@ targets:
         NSSpeechRecognitionUsageDescription: Turns what you say into text for your Claude agents.
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.smitherman.glassesrelay
+        PRODUCT_BUNDLE_IDENTIFIER: com.talktobridge.bridge
         SWIFT_VERSION: "5"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic

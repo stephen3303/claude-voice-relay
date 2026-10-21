@@ -10,7 +10,6 @@ export const APPLE_ROOT_CA_G3 = '63:34:3A:BF:B8:9A:6A:03:EB:B5:7E:9B:3F:5F:A7:BE
 // 1.2.840.113635.100.6.11.1 and 1.2.840.113635.100.6.2.1), so no other certificate under Apple's root passes.
 export const LEAF_OID = Buffer.from('060a2a864886f76364060b01', 'hex');
 export const INTERMEDIATE_OID = Buffer.from('060a2a864886f76364060201', 'hex');
-const PRO_PRODUCT = /^com\.smitherman\.glassesrelay\.pro\./;
 const ENVIRONMENTS = new Set(['Production', 'Sandbox']);   // App Review and TestFlight buy in the sandbox
 
 const parse = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
@@ -57,7 +56,7 @@ export function makePro(deps) {
 
   function entitlement(t) {
     if (t.bundleId !== deps.bundleId) throw new Error('another app');
-    if (!PRO_PRODUCT.test(t.productId ?? '')) throw new Error('not Bridge Pro');
+    if (!(t.productId ?? '').startsWith(`${deps.bundleId}.pro.`)) throw new Error('not Bridge Pro');
     if (!ENVIRONMENTS.has(t.environment)) throw new Error('unexpected environment');
     if (!t.originalTransactionId || !t.transactionId) throw new Error('no transaction ID');
     return {
