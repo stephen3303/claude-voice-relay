@@ -14,6 +14,7 @@ import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
 import { runCloud, makeCloudTurn, resolveClaude, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
 import { makeNtfy } from './ntfy.mjs';
+import { route, inboxAfter } from './voice-routes.mjs';
 import { agentArgs, quickLookArgs, QUICK_BASE, unknownFlag, makeStreamReader, spokenReply } from './agent-turn.mjs';
 import { infoCommand, infoArgs, spokenUsage, spokenContext } from './session-info.mjs';
 
@@ -510,9 +511,6 @@ http.createServer((req, res) => {
   });
 }).listen(cfg.hookPort, '127.0.0.1', () => log(`hook endpoint on 127.0.0.1:${cfg.hookPort}`));
 
-// The routes that take speech; /voice/inbox, /voice/tts and /voice/photo are handled before them.
-const SPEECH_ROUTES = new Set(['/voice', '/voice/confirm', '/voice/send']);
-
 // ---------- photos from the glasses ----------
 // POST /voice/photo: a JPEG body, plus what was said with it in X-Question (URI-encoded).
 // "Send this to <project>, ..." hands it to that agent; anything else gets a quick spoken answer.
@@ -528,14 +526,17 @@ const LOOK_PROMPT = [
 
 function photo(req, res) {
   const chunks = [];
-  let size = 0;
+  let size = 0, tooBig = false;
   req.on('data', (c) => {
+    if (tooBig) return; // a chunk already queued after the 413 must not answer twice (that throws)
     size += c.length;
-    if (size > PHOTO_MAX) { res.writeHead(413, { 'content-type': 'text/plain' }).end('That photo is too large.'); req.destroy(); }
-    else chunks.push(c);
+    if (size <= PHOTO_MAX) { chunks.push(c); return; }
+    tooBig = true;
+    res.writeHead(413, { 'content-type': 'text/plain', connection: 'close' })
+      .end('That photo is too large.', () => req.destroy());
   });
   req.on('end', async () => {
-    if (res.writableEnded) return;
+    if (tooBig || res.writableEnded) return;
     let said = '';
     try { said = decodeURIComponent(String(req.headers['x-question'] || '')).trim(); } catch { /* keep empty */ }
     const file = path.join(os.tmpdir(), `voice-photo-${Date.now()}.jpg`);
@@ -609,7 +610,8 @@ function quickLook(file, said) {
 // No `after` means "from now"; wait=0 answers at once (the app's connection test).
 function inbox(req, res) {
   const q = new URL(req.url, 'http://relay').searchParams;
-  const after = q.has('after') ? Number(q.get('after')) || 0 : outboxId;
+  const after = inboxAfter(q, outboxId);
+  if (after === null) { res.writeHead(400, { 'content-type': 'text/plain' }).end('Bad after.'); return; }
   const fresh = () => outbox.filter((m) => m.id > after);
   let timer;
   const answer = () => {
@@ -629,9 +631,18 @@ function inbox(req, res) {
 // so the app falls back to the phone's own voice.
 function tts(req, res) {
   if (!cfg.openaiKey) { res.writeHead(503, { 'content-type': 'text/plain' }).end('TTS not configured.'); return; }
-  let body = '';
-  req.on('data', (c) => { body += c; if (body.length > 20000) req.destroy(); });
+  let body = '', tooBig = false;
+  req.setEncoding('utf8'); // a character split across chunks stays whole
+  req.on('data', (c) => {
+    if (tooBig) return;
+    body += c;
+    if (body.length <= 20000) return;
+    // Answer, so the app falls back to the phone's voice instead of seeing a dropped connection.
+    tooBig = true;
+    res.writeHead(413, { 'content-type': 'text/plain', connection: 'close' }).end('Too long.', () => req.destroy());
+  });
   req.on('end', async () => {
+    if (tooBig) return;
     let text = body;
     try { const j = JSON.parse(body); if (j && typeof j.text === 'string') text = j.text; } catch { /* plain-text body */ }
     text = String(text).trim().slice(0, 4000);
@@ -664,14 +675,16 @@ else {
     const ok = crypto.timingSafeEqual(sha(req.headers.authorization || ''), want);
     // Never log any of the header: a near-miss would put part of the real token in the log.
     if (!ok) { log(`voice 401 from ${req.socket.remoteAddress}: ${req.method} ${req.url}`); res.writeHead(401).end(); return; }
-    if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
-    if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
-    if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
-    if (req.method !== 'POST' || !SPEECH_ROUTES.has(req.url)) {
-      log(`voice 404: ${req.method} ${req.url}`);
-      res.writeHead(404).end();
+    const r = route(req.method, req.url);
+    if (r.status) {
+      log(`voice ${r.status}: ${req.method} ${req.url}`);
+      res.writeHead(r.status, r.allow ? { allow: r.allow } : {}).end();
       return;
     }
+    if (r.name === 'inbox') { inbox(req, res); return; }
+    if (r.name === 'tts') { tts(req, res); return; }
+    if (r.name === 'photo') { photo(req, res); return; }
+    if (r.name !== 'speech') { log(`voice 500: no handler for ${r.name}`); res.writeHead(500).end(); return; }
     let body = '', tooBig = false;
     req.setEncoding('utf8'); // a character split across chunks stays whole
     req.on('data', (c) => {
@@ -688,7 +701,7 @@ else {
       if (tooBig) return;
       const text = utterance(body, req.headers['content-type']);
       // /voice/send skips the read-back: the app's "Read back what I said" setting is off.
-      if (req.url === '/voice/confirm' || (cfg.voiceConfirm && req.url !== '/voice/send')) {
+      if (r.pathname === '/voice/confirm' || (cfg.voiceConfirm && r.pathname !== '/voice/send')) {
         log('voice confirm:', text);
         res.writeHead(200, { 'content-type': 'text/plain' }).end(confirmStep(text));
         return;
