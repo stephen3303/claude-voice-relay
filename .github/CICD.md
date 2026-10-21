@@ -10,7 +10,7 @@
 | Ask Claude | `claude.yml` | a comment containing `@claude` from you or a collaborator | a Claude credential |
 | Deploy cloud | `cloud-deploy.yml` | merge to main touching `cloud/**` or `site/**` | `AWS_DEPLOY_ROLE_ARN` variable (set) and the `aws-deploy` environment (`cloud/setup/update-deploy-role.ps1`) |
 | Website | `pages.yml` | merge to main touching `site/**` | nothing |
-| App Store | `glasses-appstore.yml`, `glasses-subscriptions.yml` | by hand | the `ASC_*`, `APPLE_TEAM_ID`, `META_*` secrets |
+| App Store | `glasses-appstore.yml`, `glasses-subscriptions.yml` | by hand | the `ASC_*`, `APPLE_TEAM_ID`, `META_*` secrets, in the main-only `appstore` environment (`glasses/setup-appstore-secrets.ps1`) |
 | Crash reports | `glasses-release.yml`, `glasses-appstore.yml` (not the per-push `glasses-ios.yml` check, whose builds have no symbols) | release builds | optional: `SENTRY_DSN` and `SENTRY_AUTH_TOKEN` secrets, `SENTRY_ORG` and `SENTRY_PROJECT` variables (`glasses/setup-sentry-secrets.ps1`), and the Sentry setting "Prevent Storing of IP Addresses" on, which `site/privacy.html` relies on; without them the app reports nothing |
 
 Main is production: there is no staging stack, so `ci.yml` and the Claude review are the gate before a merge.

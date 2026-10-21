@@ -1,7 +1,7 @@
 # Signs the App Store flavour of Bridge and uploads it to App Store Connect (TestFlight first,
 # then submit for review from App Store Connect). Run by hand: Actions > Glasses App Store upload.
 #
-# Repository secrets it needs (Settings > Secrets and variables > Actions):
+# Secrets it needs, in the "appstore" environment that only main can use (glasses/setup-appstore-secrets.ps1):
 #   ASC_KEY_ID, ASC_ISSUER_ID   App Store Connect API key (Users and Access > Integrations), role Admin (cloud signing makes the
 #                               distribution certificate, which an App Manager key can't)
 #   ASC_KEY_P8_BASE64           that key's .p8 file, base64-encoded
@@ -21,6 +21,7 @@ permissions:
 jobs:
   upload:
     runs-on: macos-26
+    environment: appstore   # main only: the Admin API key is out of reach of other branches' workflows
     timeout-minutes: 40
     defaults:
       run:
@@ -55,6 +56,9 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
           set -o pipefail
+          if [ -z "$META_APP_ID" ]; then
+            echo "::warning::No META_APP_ID secret: this build uses Meta Developer Mode (\"0\"). Fine for TestFlight; set the real Meta values before App Store review."
+          fi
           xcodebuild -project GlassesRelay.xcodeproj -scheme GlassesRelay -configuration Release \
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Bridge.xcarchive" \
             -skipPackagePluginValidation -skipMacroValidation \

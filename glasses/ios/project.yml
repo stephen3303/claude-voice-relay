@@ -27,7 +27,7 @@ targets:
     info:
       path: GlassesRelay/Info.plist
       properties:
-        CFBundleDisplayName: $(APP_DISPLAY_NAME)   # must match the app name in the Wearables Developer Center
+        CFBundleDisplayName: $(APP_DISPLAY_NAME)   # must match the Meta app's name (Wearables Developer Center); a CI build may override it
         INAlternativeAppNames:              # Siri still answers to "Bridge" when the home-screen name is longer
           - INAlternativeAppName: Bridge
         CFBundleShortVersionString: $(MARKETING_VERSION)

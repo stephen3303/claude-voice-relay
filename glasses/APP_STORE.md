@@ -32,7 +32,8 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
 6. **API key for CI:** Users and Access > Integrations > App Store Connect API > Team Keys > generate a key
    with the **Admin** role (the upload's cloud signing creates the distribution certificate, which an
    App Manager key can't do). Then run `glasses/setup-appstore-secrets.ps1`, which stores `ASC_KEY_ID`,
-   `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` and `APPLE_TEAM_ID` as repository secrets. Leave the Meta
+   `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` and `APPLE_TEAM_ID` in the `appstore` environment, which only
+   main can use (so the upload runs from main only). Leave the Meta
    prompts empty until step 7; the build then uses Meta Developer Mode, which is fine for TestFlight.
 7. **Meta, for production:** in the Wearables Developer Center, name the app **Talk to Bridge** (the App Store build's
    home-screen name; "Bridge" is taken on the App Store), set the app's Apple Team ID to the paid team,
