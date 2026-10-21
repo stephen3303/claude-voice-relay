@@ -37,6 +37,8 @@ final class Conversation: NSObject, ObservableObject {
     private var silenceTimer: Timer?
     private var watchdog: Timer?
     private var inboxTask: Task<Void, Never>?
+    /// History's quiet inbox poll in flight, if any; a starting conversation cancels it.
+    private var quietFetch: Task<[String]?, Error>?
     private var heard = ""
     private var speechDone: CheckedContinuation<Void, Never>?
     private var awaitedUtterance: AVSpeechUtterance?
@@ -161,7 +163,11 @@ final class Conversation: NSObject, ObservableObject {
             lastActivity = Date()
             awaitingAgent = false
             startWatchdog()
-            inboxTask = Task { await pollInbox() }
+            // History's quiet follower may have a poll in flight on the same cursor: stop it and let it finish
+            // first, or both could fetch the same messages and they'd be read out twice.
+            let quiet = quietFetch
+            quiet?.cancel()
+            inboxTask = Task { _ = try? await quiet?.value; await pollInbox() }
             // An agent called: its message (read from the inbox) is the greeting.
             if trigger != .call { await say("Go ahead.") }
             await announcePending()
@@ -534,10 +540,15 @@ final class Conversation: NSObject, ObservableObject {
         while !Task.isCancelled {
             if conversing { try? await Task.sleep(for: .seconds(2)); continue }
             do {
-                guard let fresh = try await nextAgentMessages(), !fresh.isEmpty else { continue }
+                let fetch = Task { try await nextAgentMessages() }
+                quietFetch = fetch
+                let fresh = try await withTaskCancellationHandler { try await fetch.value } onCancel: { fetch.cancel() }
+                quietFetch = nil
+                guard let fresh, !fresh.isEmpty else { continue }
                 if conversing { announcements += fresh; continue }   // one started meanwhile: it reads them out
                 for text in fresh { transcript.append(("Agent", text)) }
             } catch {
+                quietFetch = nil
                 if Task.isCancelled { return }
                 try? await Task.sleep(for: .seconds(3))
             }
