@@ -434,6 +434,25 @@ final class Conversation: NSObject, ObservableObject {
         }
     }
 
+    @Published var sendingText = false
+
+    /// A typed message (History): through the same relay step as speech, with the reply written to the history, not spoken.
+    func sendText(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !sendingText else { return }
+        transcript.append(("You", text))
+        sendingText = true
+        Task {
+            defer { sendingText = false }
+            do {
+                transcript.append(("Relay", try await Relay.shared.say(Self.forRelay(text), readBack: Self.readBack)))
+            } catch {
+                transcript.append(("Relay", error.localizedDescription))
+                ErrorReporting.report(error, "text")
+            }
+        }
+    }
+
     /// The main screen's Look button: one photo and its spoken answer, outside a conversation.
     func look(question: String = "What am I looking at?") {
         guard phase == .idle else { return }

@@ -158,7 +158,7 @@ struct TranscriptLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(who).font(.caption).foregroundStyle(.secondary)
-            Text(text)
+            Text(text).textSelection(.enabled)   // press and hold to select and copy
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -171,21 +171,34 @@ struct TranscriptLine: View {
     }
 }
 
-/// Every saved line, newest first, with Clear.
+/// Every saved line, oldest to newest with the newest at the bottom by the message field, with Clear.
 struct HistoryView: View {
     @EnvironmentObject var conversation: Conversation
     @State private var confirmClear = false
+    @State private var draft = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
-        List {
-            if conversation.transcript.isEmpty {
-                Text("Nothing yet. Your conversations appear here.").foregroundStyle(.secondary)
+        // Oldest at the top, newest at the bottom beside the message field, which stays put above the keyboard.
+        ScrollViewReader { proxy in
+            List {
+                if conversation.transcript.isEmpty {
+                    Text("Nothing yet. Your conversations appear here.").foregroundStyle(.secondary)
+                }
+                ForEach(Array(conversation.transcript.enumerated()), id: \.offset) { _, line in
+                    TranscriptLine(who: line.who, text: line.text)
+                }
             }
-            ForEach(Array(Array(conversation.transcript.enumerated()).reversed()), id: \.offset) { _, line in
-                TranscriptLine(who: line.who, text: line.text)
-            }
+            .listStyle(.plain)
+            .scrollDismissesKeyboard(.interactively)
+            .onAppear { scrollToNewest(proxy, animated: false) }
+            .onChange(of: conversation.transcript.count) { _, _ in scrollToNewest(proxy) }
+            .onChange(of: conversation.transcript.last?.text) { _, _ in scrollToNewest(proxy) }   // the list stops growing at 200 lines
+            .onChange(of: focused) { _, isFocused in if isFocused { scrollToNewest(proxy) } }   // keyboard up: keep the newest in view
         }
         .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .toolbar {
             if !conversation.transcript.isEmpty {
                 Button("Clear", role: .destructive) { confirmClear = true }
@@ -194,5 +207,38 @@ struct HistoryView: View {
         .confirmationDialog("Clear the conversation history?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear history", role: .destructive) { conversation.transcript = [] }
         }
+    }
+
+    /// Type to the relay instead of speaking: the same read-back as voice ("Ready to send it?", then type yes).
+    private var composer: some View {
+        HStack(spacing: 8) {
+            TextField("Message the relay", text: $draft, axis: .vertical)
+                .lineLimit(1...4)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .submitLabel(.send)
+                .onSubmit(send)
+            Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title) }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || conversation.sendingText)
+                .accessibilityLabel("Send")
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func scrollToNewest(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        let last = conversation.transcript.count - 1
+        guard last >= 0 else { return }
+        // After layout, so the new row exists (and the keyboard has moved the list's bottom edge).
+        DispatchQueue.main.async {
+            if animated { withAnimation { proxy.scrollTo(last, anchor: .bottom) } } else { proxy.scrollTo(last, anchor: .bottom) }
+        }
+    }
+
+    private func send() {
+        let text = draft
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !conversation.sendingText else { return }
+        draft = ""
+        conversation.sendText(text)
     }
 }
