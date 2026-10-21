@@ -1,6 +1,8 @@
 import SwiftUI
+#if APP_STORE
 import StoreKit
 import AuthenticationServices
+#endif
 import Security
 import AVFoundation
 
@@ -10,21 +12,29 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
     @ObservedObject private var store = Store.shared
+    #if APP_STORE
     @ObservedObject private var account = Account.shared
     @ObservedObject private var push = Push.shared
+    #endif
     @AppStorage("relayURL") private var relayURL = ""
     @State private var url = Relay.shared.isDemo || Relay.shared.isCloud ? "" : Relay.shared.baseURL
     @State private var token = Relay.shared.token
     @State private var testResult = ""
     @State private var photoResult = ""
     @State private var readBack = Conversation.readBack
+    @State private var wakeWord = Conversation.wakeWord
+    @State private var answerWindow = Conversation.answerWindow
+    @State private var hangUpAfter = Conversation.hangUpAfter
     // A deleted voice falls back to the best installed one; show that rather than a blank picker.
     @State private var voiceID = Conversation.voices.contains { $0.identifier == Conversation.voiceID } ? Conversation.voiceID : ""
     @State private var hiFi = Conversation.hiFiSpeech
+    @State private var natural = Conversation.naturalVoice
     @State private var previewer = AVSpeechSynthesizer()
+    #if APP_STORE
     @State private var showPaywall = false
     @State private var showManage = false
     @State private var confirmDelete = false
+    #endif
 
     private enum Mode: String { case cloud, pc, demo }
     private var mode: Binding<Mode> {
@@ -41,7 +51,9 @@ struct SettingsView: View {
             case .pc: relayURL = Relay.pcAddress(url) ?? ""
             }
             testResult = ""
+            #if APP_STORE
             push.refresh()   // the cloud learns whether it can reach this phone
+            #endif
         }
     }
 
@@ -56,6 +68,18 @@ struct SettingsView: View {
                 Section {
                     Toggle("Read back what I said", isOn: $readBack)
                         .onChange(of: readBack) { _, on in Conversation.readBack = on }
+                    Toggle("Only answer to \"Bridge\"", isOn: $wakeWord)
+                        .onChange(of: wakeWord) { _, on in Conversation.wakeWord = on }
+                    if wakeWord {
+                        Picker("Answer without \"Bridge\"", selection: $answerWindow) {
+                            ForEach(Conversation.answerWindows, id: \.self) { Text(Self.duration($0, zero: "Never")).tag($0) }
+                        }
+                        .onChange(of: answerWindow) { _, seconds in Conversation.answerWindow = seconds }
+                    }
+                    Picker("Hang up after quiet", selection: $hangUpAfter) {
+                        ForEach(Conversation.hangUpChoices, id: \.self) { Text(Self.duration($0, zero: "Never")).tag($0) }
+                    }
+                    .onChange(of: hangUpAfter) { _, seconds in Conversation.hangUpAfter = seconds }
                     Picker("Phone voice", selection: $voiceID) {
                         Text("Best installed").tag("")
                         ForEach(Conversation.voices, id: \.identifier) { Text(Conversation.label($0)).tag($0.identifier) }
@@ -64,14 +88,17 @@ struct SettingsView: View {
                         Conversation.voiceID = id
                         preview()
                     }
+                    if mode.wrappedValue != .demo {
+                        Toggle("Natural voice", isOn: $natural)
+                            // Saved only when it differs from the current value, so the refresh below isn't saved as a choice.
+                            .onChange(of: natural) { _, on in if on != Conversation.naturalVoice { Conversation.naturalVoice = on } }
+                            // An upgraded Pro install's default depends on Pro, which StoreKit reports after launch.
+                            .onChange(of: store.isPro) { _, _ in natural = Conversation.naturalVoice }
+                    }
                     Toggle("High-quality speech", isOn: $hiFi)
                         .onChange(of: hiFi) { _, on in Conversation.hiFiSpeech = on }
                 } header: { Text("Voice") } footer: {
-                    Text((readBack
-                          ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
-                          : "Bridge sends what you say after a 2-second pause, without repeating it.")
-                         + " The phone voice speaks when the natural voice isn't available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
-                         + " High-quality speech plays replies over the glasses' music link, which sounds much better, but each reply starts and listening resumes about a second later.")
+                    Text(voiceFooter)
                 }
                 #if APP_STORE
                 if account.signedIn && mode.wrappedValue == .cloud { callsSection }
@@ -86,11 +113,43 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            #if APP_STORE
             .sheet(isPresented: $showPaywall) { Paywall { showPaywall = false } }
             .manageSubscriptionsSheet(isPresented: $showManage)
+            #endif
         }
     }
 
+    /// "25 seconds", "5 minutes"; `zero` for 0.
+    private static func duration(_ seconds: TimeInterval, zero: String) -> String {
+        let s = Int(seconds)
+        return s == 0 ? zero : s < 60 ? "\(s) seconds" : s == 60 ? "1 minute" : "\(s / 60) minutes"
+    }
+
+    /// Built a sentence at a time: as one long `+` chain of ternaries it's too slow for the Swift type checker.
+    private var voiceFooter: String {
+        var text = readBack
+            ? "Bridge reads your message back and asks \"Ready to send it?\" Nothing is sent until you say yes."
+            : "Bridge sends what you say after a 2-second pause, without repeating it."
+        if wakeWord {
+            text += " While listening, Bridge ignores anything that doesn't start with \"Bridge\""
+            text += answerWindow == 0 ? "." : ", except an answer within \(Int(answerWindow)) seconds of a question it asked."
+        }
+        if hangUpAfter == 0 {
+            let goodbye = wakeWord ? "Bridge, goodbye" : "goodbye"
+            text += " Bridge stays on until you say \"\(goodbye)\", which uses more battery and keeps the glasses on call-quality audio."
+        }
+        text += " The phone voice speaks unless the natural voice is on and available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
+        if mode.wrappedValue == .pc {
+            text += " Natural voice sends each reply's text to OpenAI to be spoken, and needs an OpenAI key on the relay."
+        } else if mode.wrappedValue == .cloud {
+            text += " Natural voice is spoken by Amazon Polly and needs Bridge Pro."
+        }
+        text += " High-quality speech plays replies over the glasses' music link, which sounds much better, but each reply starts and listening resumes about a second later."
+        return text
+    }
+
+    #if APP_STORE
     // MARK: account (App Store build)
 
     private var accountSection: some View {
@@ -130,6 +189,8 @@ struct SettingsView: View {
             Text("With glasses or headphones connected, an agent that wants you rings like a phone call. Otherwise you get a notification.")
         }
     }
+
+    #endif
 
     // MARK: connection
 
@@ -225,6 +286,7 @@ struct SettingsView: View {
         }
     }
 
+    #if APP_STORE
     // MARK: Bridge Pro (App Store build)
 
     private var proSection: some View {
@@ -237,8 +299,10 @@ struct SettingsView: View {
             }
         } header: { Text("Bridge Pro") } footer: { Text(Store.summary) }
     }
+    #endif
 }
 
+#if APP_STORE
 /// The subscription sheet: StoreKit's own view, with restore and the policy links App Review asks for.
 struct Paywall: View {
     var done: () -> Void
@@ -261,3 +325,4 @@ struct Paywall: View {
         }
     }
 }
+#endif

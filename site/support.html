@@ -36,40 +36,54 @@
 
   <article class="prose">
     <h2>Setting up</h2>
-    <p>These steps are for self-hosting, with the relay on your own Windows PC. Today the relay is the only way to run your agents. The Bridge connector for Claude is coming with Bridge Cloud, which won't need a PC. To self-host:</p>
     <ol>
-      <li>On your PC, install Docker and Tailscale, and sign in to Claude Code with your own Claude subscription.</li>
-      <li>Install and start the relay. The steps are in the <a href="https://github.com/stephen3303/claude-voice-relay#readme">README on GitHub</a>.</li>
-      <li>On your iPhone, turn on Tailscale and join the same network as your PC.</li>
-      <li>In Bridge, under PC relay, enter your relay's address and token, then tap <strong>Save and test</strong>.</li>
-      <li>For the camera features, tap <strong>Connect to Meta AI</strong>, then <strong>Allow camera</strong>.</li>
+      <li>Install Bridge from the App Store and open it.</li>
+      <li>Tap <strong>Sign in with Apple</strong> to create your Bridge account. Your agents run in Bridge Cloud, so there's nothing else to install.</li>
+      <li>Allow the microphone and speech recognition when Bridge asks.</li>
+      <li>To let agents ring you, allow notifications, and in Settings under Calls, turn on <strong>Agents can call me</strong>. Tap <strong>Test call</strong> to try it.</li>
+      <li>For the camera features, tap <strong>Connect to Meta AI</strong>, approve Bridge in the Meta AI app, then tap <strong>Allow camera</strong>.</li>
     </ol>
+    <p>To use Bridge from Claude, add it as a custom connector in Claude's settings and sign in with the same Apple ID you use in the app.</p>
 
     <h2>Troubleshooting</h2>
-    <h3>Bridge can't reach my PC</h3>
+    <h3>Bridge can't reach Bridge Cloud</h3>
     <ul>
-      <li>Check that Tailscale is on, on both your iPhone and your PC.</li>
-      <li>Check that the relay is running on your PC.</li>
-      <li>In Bridge, tap <strong>Save and test</strong> and read the result shown below it.</li>
+      <li>Check that your iPhone is online.</li>
+      <li>In Bridge's Settings, under Connection, check that Bridge Cloud is selected and tap <strong>Test</strong>.</li>
+      <li>If you're signed out, sign in with Apple again.</li>
+    </ul>
+
+    <h3>Bridge can't hear me</h3>
+    <ul>
+      <li>Make sure your glasses or headset are connected to your iPhone over Bluetooth. Bridge uses their microphone when it can, and the iPhone's otherwise.</li>
+      <li>If your Ray-Ban Meta glasses are also connected to a computer over Bluetooth, disconnect them from it.</li>
     </ul>
 
     <h3>Photos don't work</h3>
     <ul>
-      <li>Open Bridge and tap <strong>Allow camera</strong>.</li>
       <li>Photos are part of Bridge Pro.</li>
+      <li>In Settings, tap <strong>Allow camera</strong>. The glasses must be on and nearby.</li>
     </ul>
 
     <h3>I don't hear the agent's answer</h3>
     <ul>
       <li>Replies are read aloud while a conversation is open. Start one with Siri ("Talk to Bridge"), the Action Button, or Shortcuts.</li>
+      <li>When no conversation is open, an agent calls you or sends a notification. Check that notifications are allowed and <strong>Agents can call me</strong> is on.</li>
       <li>Say "status" to hear where things are.</li>
     </ul>
 
-    <h3>Managing a subscription</h3>
-    <p>Cancel or change Bridge Pro any time in iPhone Settings: tap your name, then Subscriptions.</p>
+    <h3>The natural voice doesn't play</h3>
+    <ul>
+      <li>The natural voice is part of Bridge Pro. Turn on <strong>Natural voice</strong> in Settings.</li>
+      <li>Past the day's limit, or without a connection, Bridge speaks with your iPhone's voice instead. Download better voices in iPhone Settings, Accessibility, Spoken Content, Voices.</li>
+    </ul>
+
+    <h2>Your subscription and account</h2>
+    <p>Cancel or change Bridge Pro any time in iPhone Settings: tap your name, then Subscriptions. Bridge Pro carries over to a new iPhone that uses the same Apple Account for the App Store.</p>
+    <p>To delete your Bridge account and everything stored for it, open Bridge's Settings and, under Account, tap <strong>Delete account</strong>. This doesn't cancel Bridge Pro; cancel that in iPhone Settings.</p>
 
     <h2>Contact</h2>
-    <p>Report a problem or ask a question by opening an issue on <a href="https://github.com/stephen3303/claude-voice-relay/issues">GitHub</a>. Please don't include your relay token or address.</p>
+    <p>Report a problem or ask a question by emailing <a href="mailto:support@talktobridge.com">support@talktobridge.com</a>.</p>
   </article>
 </main>
 
@@ -81,11 +95,10 @@
         <li><a href="support.html" aria-current="page">Support</a></li>
         <li><a href="privacy.html">Privacy</a></li>
         <li><a href="terms.html">Terms</a></li>
-        <li><a href="https://github.com/stephen3303/claude-voice-relay">GitHub</a></li>
       </ul>
     </nav>
-    <p>© 2026 Stephen Smitherman.</p>
-    <p>Bridge is not affiliated with or endorsed by Anthropic, Meta or EssilorLuxottica. Claude and Claude Code are trademarks of Anthropic. Ray-Ban and Meta are trademarks of their respective owners.</p>
+    <p>© 2026 Bridge.</p>
+    <p>Bridge is not affiliated with or endorsed by Anthropic, Meta or EssilorLuxottica. Claude is a trademark of Anthropic. Ray-Ban and Meta are trademarks of their respective owners.</p>
   </div>
 </footer>
 </body>

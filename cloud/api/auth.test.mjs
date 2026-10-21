@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, createSign } from 'node:crypto';
 import { makeAuth, APPLE_ISSUER, userOf } from './auth.mjs';
 
-const AUD = 'com.smitherman.glassesrelay';
+const AUD = 'com.talktobridge.bridge';
 const ISSUER = 'https://api.example.com';
 const apple = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const bridge = generateKeyPairSync('rsa', { modulusLength: 2048 });

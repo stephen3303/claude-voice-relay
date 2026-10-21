@@ -12,6 +12,10 @@ import { fileURLToPath } from 'node:url';
 import { makeConfirm, utterance, TASK_PREFIX } from './confirm.mjs';
 import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
+import { runCloud, makeCloudTurn, resolveClaude, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
+import { makeNtfy } from './ntfy.mjs';
+import { agentArgs, quickLookArgs, QUICK_BASE, unknownFlag, makeStreamReader, spokenReply } from './agent-turn.mjs';
+import { infoCommand, infoArgs, spokenUsage, spokenContext } from './session-info.mjs';
 
 const run = promisify(execFile);
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +40,15 @@ const cfg = {
   githubAppId: process.env.GITHUB_APP_ID || '',
   githubAppKeyFile: process.env.GITHUB_APP_KEY_FILE || '',
   agentGhToken: process.env.AGENT_GH_TOKEN || '',
+  // AGENT_MODE=cloud runs tasks as claude.ai cloud sessions (cloud-agents.mjs) instead of Docker on this PC.
+  cloud: process.env.AGENT_MODE === 'cloud',
+  // Cloud mode only: a claude.ai project routine's API trigger, started after each finished task so the
+  // task shows up as a thread in that project (cloud-agents.mjs, fireRoutine).
+  routineUrl: process.env.BRIDGE_ROUTINE_URL || '',
+  routineToken: process.env.BRIDGE_ROUTINE_TOKEN || '',
+  // Optional: an ntfy topic (https://ntfy.sh/<hard-to-guess topic>) that gets everything the relay says (ntfy.mjs).
+  ntfyUrl: process.env.NTFY_URL || '',
+  ntfyToken: process.env.NTFY_TOKEN || '',
 };
 
 const log = (...a) => {
@@ -50,7 +63,16 @@ const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 // make start.ps1 restart it every 10 seconds).
 const voiceOff = !cfg.voiceToken ? 'VOICE_TOKEN is missing from .env'
   : cfg.voiceToken.length < 24 ? 'VOICE_TOKEN is shorter than 24 characters' : '';
-if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
+if (cfg.cloud) log('Agents run as claude.ai cloud sessions (AGENT_MODE=cloud).');
+else if (!cfg.oauth) log('WARNING: CLAUDE_CODE_OAUTH_TOKEN missing; agents cannot run until it is set.');
+const routineOn = cfg.cloud && !!cfg.routineUrl && !!cfg.routineToken && routineUrlOk(cfg.routineUrl);
+if (!cfg.cloud && (cfg.routineUrl || cfg.routineToken)) log('WARNING: BRIDGE_ROUTINE_URL is set but AGENT_MODE is not cloud; tasks are not sent to the project.');
+else if (cfg.cloud && !cfg.routineUrl && cfg.routineToken) log('WARNING: BRIDGE_ROUTINE_TOKEN is set but BRIDGE_ROUTINE_URL is missing; tasks are not sent to the project.');
+else if (cfg.cloud && cfg.routineUrl && !cfg.routineToken) log('WARNING: BRIDGE_ROUTINE_URL is set but BRIDGE_ROUTINE_TOKEN is missing; tasks are not sent to the project.');
+else if (cfg.cloud && cfg.routineUrl && !routineOn) log("WARNING: BRIDGE_ROUTINE_URL isn't a routine API trigger URL (https://api.anthropic.com/v1/claude_code/routines/trig_.../fire); tasks are not sent to the project.");
+else if (routineOn) log('Finished tasks are recorded as threads in the claude.ai project (BRIDGE_ROUTINE_URL).');
+const ntfy = makeNtfy({ url: cfg.ntfyUrl, token: cfg.ntfyToken, log });
+if (ntfy) log('Messages are also sent to the phone through ntfy (NTFY_URL).');
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
 const VOICE_PROMPT = [
@@ -60,6 +82,7 @@ const VOICE_PROMPT = [
   'no code, file paths, markdown, or symbols that read badly aloud.',
   'If you need a decision, stop and make the SPOKEN line a single yes-or-no question, then continue after the user answers.',
   'Everything above the SPOKEN line may be as detailed as you like; the user reads it later.',
+  'Put the same line in the spoken field of your structured reply, and set needs_answer whenever it asks the user something you need answered.',
 ].join(' ');
 // Agents hold no GitHub credentials: the relay pushes for them after the turn (publish.mjs).
 const PUBLISH = [
@@ -98,6 +121,7 @@ function say(text, { spoken } = {}) {
   }
   catch (e) { log('outbox save failed:', e.message); }
   for (const wake of [...inboxWaiters]) wake();
+  ntfy?.(text);
 }
 
 // ---------- GitHub access for agents ----------
@@ -165,8 +189,8 @@ const publisher = makePublisher({
 // ---------- agent state ----------
 const agents = new Map(); // spoken name -> agent
 function save() {
-  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, awaiting, question, lastAt }) =>
-    ({ name, repoPath, container, sessionId, awaiting, question, lastAt }));
+  const data = [...agents.values()].map(({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudToRecord, awaiting, question, lastAt }) =>
+    ({ name, repoPath, container, sessionId, cloudId, cloudUrl, cloudToRecord, awaiting, question, lastAt }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
 }
 function load() {
@@ -178,7 +202,9 @@ function load() {
 // ---------- spoken project name -> repo folder ----------
 function projectDirs() {
   return fs.readdirSync(cfg.projectsRoot, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name);
+    .filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name)
+    // The relay's own folder is never a project, so its name falls through to its alias (the agents' clone).
+    .filter((d) => !unsafeMount(path.join(cfg.projectsRoot, d), PROTECTED));
 }
 function aliases() {
   try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'aliases.json'), 'utf8').replace(/^\uFEFF/, '')); }
@@ -226,7 +252,14 @@ const AGENT_IMAGE_VERSION = '3';
 async function ensureContainer(a) {
   if (unsafeMount(a.repoPath, PROTECTED)) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
-    throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
+    // An agent saved before its name had a safe folder (the relay's own name, before aliases.json pointed
+    // it at the agents' clone) moves there; otherwise it can't run.
+    const moved = resolveRepo(a.name, false);
+    if (!moved || unsafeMount(moved, PROTECTED)) throw new Error(`${a.name}'s folder holds the relay or its keys, so no agent can work there. Clone the repo into another folder and point aliases.json at it.`);
+    log(`${a.name}: moved from ${a.repoPath} to ${moved}.`);
+    a.repoPath = moved;
+    a.sessionId = null;   // its session belongs to the old folder
+    save();
   }
   // Docker would mount a missing folder as a new empty one.
   if (!fs.existsSync(a.repoPath)) throw new Error(`${a.name}'s folder doesn't exist yet. Clone the repo there first.`);
@@ -247,37 +280,78 @@ async function ensureContainer(a) {
 
 function runClaude(a, prompt, gitEnv) {
   return new Promise((resolve, reject) => {
-    const args = ['exec', '-i', '-w', '/work', ...GIT_ENV.flatMap((k) => ['-e', k]), a.container,
-      'claude', '-p', '--output-format', 'json', '--dangerously-skip-permissions', '--append-system-prompt',
-      `${VOICE_PROMPT} ${ghApp || cfg.agentGhToken ? PUBLISH : NO_GITHUB}`];
-    if (a.sessionId) args.push('--resume', a.sessionId);
+    const args = ['exec', '-i', '-w', '/work', ...GIT_ENV.flatMap((k) => ['-e', k]), a.container, 'claude',
+      ...agentArgs({ systemPrompt: `${VOICE_PROMPT} ${ghApp || cfg.agentGhToken ? PUBLISH : NO_GITHUB}`, sessionId: a.sessionId, env: process.env })];
     const p = spawn('docker', args, { windowsHide: true, env: { ...process.env, ...gitEnv } });
-    let out = '', err = '';
-    p.stdout.on('data', (d) => (out += d));
-    p.stderr.on('data', (d) => (err += d));
+    // Each tool call as it happens, so "status" can say what the agent is doing.
+    const reader = makeStreamReader((phrase) => { a.activity = phrase; });
+    let err = '';
+    p.stdout.setEncoding('utf8');
+    p.stdout.on('data', (d) => reader.push(d));
+    p.stderr.on('data', (d) => (err = (err + d).slice(-4000)));
     p.on('error', reject);
     p.on('close', (code) => {
-      try { resolve(JSON.parse(out.trim().split('\n').pop())); }
-      catch { reject(new Error(`claude exited ${code}: ${(err || out).slice(-400)}`)); }
+      const r = reader.result();
+      if (r) {
+        if (Number.isFinite(r.total_cost_usd)) log(a.name, `turn cost about $${r.total_cost_usd.toFixed(2)}, ${r.num_turns ?? '?'} turns${r.subtype && r.subtype !== 'success' ? `, ${r.subtype}` : ''}`);
+        return resolve(r);
+      }
+      reject(new Error(`claude exited ${code}: ${err.slice(-400)}`));
     });
     p.stdin.end(prompt);
   });
 }
 
-function spoken(result) {
-  const text = String(result || '');
-  const i = text.lastIndexOf('SPOKEN:');
-  const s = i >= 0 ? text.slice(i + 7)
-    : text.replace(/```[\s\S]*?```/g, '').replace(/[#*`_>|]/g, '').slice(0, 300);
-  return s.replace(/\s+/g, ' ').trim() || 'Finished, with no summary.';
+function speakResult(a, r) {
+  fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
+  const { line, awaiting, error } = spokenReply(r);
+  a.awaiting = awaiting;
+  a.question = a.awaiting ? line : ''; // "status" repeats it, in case the app missed it
+  say(`${a.name}: ${error ? 'hit an error. ' : ''}${line}`,
+    { spoken: error ? `${a.name} hit an error. ${line}` : line });
 }
+
+// AGENT_MODE=cloud: the turn runs in a claude.ai cloud session (cloud-agents.mjs) on the folder's GitHub
+// remote, so it shows in the Claude app. The session pushes and opens its own pull request.
+const cloudTurn = makeCloudTurn({
+  run: (o) => runCloud({ spawn, claudeBin: resolveClaude({ bin: process.env.CLAUDE_BIN || 'claude' }), env: process.env, ...o }),
+  // The session pushes through the Claude GitHub app, not the relay, so the repo must pass the check the
+  // relay's GitHub App runs before it pushes (protected default branch, CODEOWNERS; README: GitHub access
+  // for agents). AGENT_GH_TOKEN skips that check, so cloud mode needs the App.
+  async checkRepo(a) {
+    if (!ghApp) return 'cloud agents need the GitHub App set up first, as in the README. Nothing was started.';
+    // The CLI works on the current branch's remote; the check below is of origin, so they must be the same.
+    const branch = await hostValue('git', ['-C', a.repoPath, 'rev-parse', '--abbrev-ref', 'HEAD']);
+    const remote = branch && await hostValue('git', ['-C', a.repoPath, 'config', '--get', `branch.${branch}.remote`]);
+    if (remote && remote !== 'origin') return `its folder's current branch tracks ${remote}, not origin. Nothing was started.`;
+    await agentGitHub.pinNow(a);
+    if (!await agentGitHub.credentials(a, { checkOnly: true })) {
+      return "its repo isn't set up for agents yet: its main branch needs the protection in the README, and the GitHub App installed. Nothing was started.";
+    }
+    return '';
+  },
+  unsafe: (folder) => unsafeMount(folder, PROTECTED),
+  exists: fs.existsSync, say, speakResult, save, log,
+  mark: routineOn,
+  // The spoken answer is already out, so a failed fire is only logged.
+  onDone(a) {
+    if (!routineOn) return;
+    fireRoutine({ url: cfg.routineUrl, token: cfg.routineToken })
+      .then((id) => log(a.name, 'project routine started', id))
+      .catch((e) => log(a.name, 'project routine failed:', e.message));
+  },
+});
+// A cloud turn's CLI would outlive the relay (and keep its session waiting) when start.ps1 restarts it.
+process.on('exit', () => { for (const a of agents.values()) a.proc?.kill(); });
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(sig, () => process.exit(0));
 
 // `photo` (optional) is a host file copied into the container for this turn only, then deleted.
 // It goes in /tmp, never /work, so an agent can't commit it to the repo.
 async function turn(a, prompt, photo) {
-  a.busy = true; a.awaiting = false; a.lastAt = Date.now(); save();
+  a.busy = true; a.awaiting = false; a.activity = ''; a.lastAt = Date.now(); save();
   const photoIn = photo && `/tmp/${path.basename(photo)}`;
   try {
+    if (cfg.cloud) return await cloudTurn(a, prompt);
     await ensureContainer(a);
     // A request left by a turn that failed or was stopped belongs to that turn, not this one.
     // The folder is made here (in a git repo only) so the agent only has to write the file.
@@ -289,12 +363,7 @@ async function turn(a, prompt, photo) {
     }
     const r = await runClaude(a, photo ? prompt.replace('{photo}', photoIn) : prompt, await agentGitHub.identity());
     a.sessionId = r.session_id || a.sessionId;
-    fs.writeFileSync(path.join(LOG_DIR, `${a.container}.last.md`), r.result || '');
-    const line = spoken(r.result);
-    a.awaiting = line.endsWith('?');
-    a.question = a.awaiting ? line : ''; // "status" repeats it, in case the app missed it
-    say(`${a.name}: ${r.is_error ? 'hit an error. ' : ''}${line}`,
-      { spoken: r.is_error ? `${a.name} hit an error. ${line}` : line });
+    speakResult(a, r);
     const pushed = !a.stopped && await publisher.publish(a);
     if (pushed) say(`${a.name}: ${pushed}`, { spoken: pushed });
   } catch (e) {
@@ -334,7 +403,8 @@ async function startTask(body) {
     await run('docker', ['rm', '-f', a.container]).catch(() => {});
     a.repoPath = parsed.repo;
   }
-  a.sessionId = null; // a new task gets fresh context
+  a.sessionId = null; a.cloudId = null; a.cloudUrl = null; a.cloudToRecord = false; // a new task gets fresh context
+  a.cloudNew = true; // and, in cloud mode, a new cloud session
   say(`Starting ${name}.`);
   turn(a, parsed.task);
 }
@@ -359,7 +429,7 @@ async function status() {
   if (!agents.size) return say('No agents.');
   say([...agents.values()].map((a) => {
     const mins = Math.round((Date.now() - (a.lastAt || Date.now())) / 60000);
-    return `${a.name} ${a.busy ? `is working, ${mins} minutes in.` : a.awaiting ? `is waiting for your answer: ${a.question || 'a yes or no question'}` : 'is idle.'}`;
+    return `${a.name} ${a.busy ? `is working, ${mins} minutes in${a.activity ? `, ${a.activity}` : ''}.` : a.awaiting ? `is waiting for your answer: ${a.question || 'a yes or no question'}` : 'is idle.'}`;
   }).join(' '));
 }
 
@@ -367,15 +437,52 @@ async function stopAgent(text) {
   const a = findAgentPrefix(text);
   if (!a) return say('Say stop, then the agent name.');
   a.stopped = true;
-  await run('docker', ['rm', '-f', a.container]).catch(() => {});
   agents.delete(a.name); save();
+  // A cloud session runs on without the relay: stopping here ends the local CLI waiting for its reply.
+  if (cfg.cloud) { a.proc?.kill(); return say(`Stopped listening to ${a.name}. If it's still working, stop it in the Claude app.`); }
+  await run('docker', ['rm', '-f', a.container]).catch(() => {});
   say(`Stopped ${a.name}.`);
+}
+
+// "usage" / "context", for one agent or every agent with a conversation. The CLI runs in the agent's own
+// container on a fork of its session that isn't saved, so it's safe while the agent is working.
+async function sessionInfo({ kind, agent }) {
+  if (cfg.cloud) return say(`Usage and context are only for agents on your PC. Check the Claude app for ${agent ? agent.name : 'cloud sessions'}.`);
+  const list = agent ? [agent] : [...agents.values()].filter((a) => a.sessionId);
+  if (!list.length) return say(agent ? `${agent.name} has no conversation yet.` : 'No agent has a conversation yet.');
+  const lines = await Promise.all(list.map(async (a) => {
+    if (!a.sessionId) return `${a.name} has no conversation yet.`;
+    try {
+      // Only a running container is asked: starting one here could race a turn's ensureContainer, and a
+      // stopped agent has used nothing since its last turn.
+      const state = await hostValue('docker', ['inspect', '--format', '{{.State.Status}}', a.container]);
+      if (state !== 'running') return `${a.name} isn't running right now. Ask again after its next turn.`;
+      const out = await new Promise((resolve, reject) => {
+        const p = spawn('docker', ['exec', '-i', '-w', '/work', a.container, 'claude', ...infoArgs(a.sessionId)], { windowsHide: true });
+        let buf = '';
+        const timer = setTimeout(() => p.kill(), 90_000);
+        p.stdout.on('data', (d) => (buf += d));
+        p.on('error', reject);
+        p.on('close', () => { clearTimeout(timer); try { resolve(String(JSON.parse(buf.trim().split('\n').pop()).result || '')); } catch { reject(new Error('no answer from Claude Code')); } });
+        p.stdin.on('error', () => {}); // docker exec exiting first (container just removed) closes the pipe
+        p.stdin.end(`/${kind}`);
+      });
+      return kind === 'usage' ? spokenUsage(a.name, out) : spokenContext(a.name, out);
+    } catch (e) {
+      log(a.name, `${kind} failed:`, e.message);
+      return `I couldn't get ${a.name}'s ${kind}.`;
+    }
+  }));
+  say(lines.join(' '));
 }
 
 // Shared by the Bridge app and the iPhone Shortcut.
 async function dispatch(text) {
   if (TASK_PREFIX.test(text)) return startTask(text.replace(TASK_PREFIX, ''));
   if (/^\/?status\b/i.test(text)) return status();
+  // A prefix match, as for replies, so a misheard "trading bots" still finds the agent instead of becoming a paid turn.
+  const info = infoCommand(text, findAgentPrefix);
+  if (info) return sessionInfo(info);
   if (/^\/?(stop|kill)\b/i.test(text)) return stopAgent(text.replace(/^\/?(stop|kill)\s*/i, ''));
   // "full" used to show the whole reply in Telegram; keep it from reaching an agent as a prompt.
   if (/^\/?full\b/i.test(text)) return say('The full reply is in the logs folder on your PC.');
@@ -448,6 +555,8 @@ function photoToAgent(file, target, said) {
     ? { repo: resolveRepo(target, true), task: said.trim() }
     : parseTask(`in ${target}`) || { repo: resolveRepo(target, true), task: '' };
   if (!t.repo) { fs.rmSync(file, { force: true }); return `I couldn't tell which project ${target} is. Nothing was sent.`; }
+  // The photo is a file on this PC, which a cloud session can't open.
+  if (cfg.cloud) { fs.rmSync(file, { force: true }); return 'Photos only go to agents on your PC, and agents run in the cloud now. Nothing was sent.'; }
   const name = spokenName(t.repo);
   let a = agents.get(name);
   if (a?.busy) { fs.rmSync(file, { force: true }); return `${name} is still working. Send the photo again when it finishes.`; }
@@ -465,25 +574,32 @@ function quickLook(file, said) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-look-'));
   fs.renameSync(file, path.join(dir, 'photo.jpg'));
   const prompt = `${LOOK_PROMPT}\n\nThey said: "${said || 'What am I looking at?'}"`;
-  return new Promise((resolve, reject) => {
-    // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
-    const p = spawn(process.env.CLAUDE_BIN || 'claude', ['-p', '--output-format', 'json', '--allowedTools', 'Read'],
-      { cwd: dir, windowsHide: true });
+  // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
+  // It may need the setup token to sign in, but never the routine's token or the ntfy topic.
+  const { BRIDGE_ROUTINE_TOKEN: _r, NTFY_URL: _u, NTFY_TOKEN: _t, ...env } = process.env;
+  const once = (args) => new Promise((resolve, reject) => {
+    const p = spawn(process.env.CLAUDE_BIN || 'claude', args, { cwd: dir, windowsHide: true, env });
     let out = '', err = '';
     const timer = setTimeout(() => p.kill(), 120000);
-    const done = (fn) => { clearTimeout(timer); fs.rmSync(dir, { recursive: true, force: true }); fn(); };
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (err += d));
-    p.on('error', (e) => done(() => reject(e)));
-    p.on('close', (code) => done(() => {
-      try {
-        const r = JSON.parse(out.trim().split('\n').pop());
-        if (r.is_error) return reject(new Error(r.result || 'Claude returned an error'));
-        resolve(spoken(r.result));
-      } catch { reject(new Error(`claude exited ${code}: ${(err || out).slice(-200)}`)); }
-    }));
+    p.on('error', (e) => { clearTimeout(timer); reject(e); });
+    p.on('close', (code) => { clearTimeout(timer); resolve({ code, out, err }); });
+    p.stdin.on('error', () => {});
     p.stdin.end(prompt);
   });
+  const answer = ({ code, out, err }) => {
+    let r;
+    try { r = JSON.parse(out.trim().split('\n').pop()); }
+    catch { throw new Error(`claude exited ${code}: ${(err || out).slice(-200)}`); }
+    if (r.is_error) throw new Error(r.result || 'Claude returned an error');
+    return spokenReply(r).line;
+  };
+  // Haiku at low effort answers fastest; a Claude Code too old for those flags gets the plain ones.
+  return once(quickLookArgs(process.env))
+    .then((first) => (unknownFlag(first.err) ? once(QUICK_BASE) : first))
+    .then(answer)
+    .finally(() => fs.rmSync(dir, { recursive: true, force: true }));
 }
 
 // GET /voice/inbox?after=<id>: messages newer than <id>, waiting up to 25s for one to arrive.

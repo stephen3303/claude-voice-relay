@@ -7,7 +7,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
 ## Layout
 - `relay.mjs` — the PC relay (Node, no deps). Docker agents (one container per repo,
   headless `claude -p`), and the voice endpoint on :47879 behind `tailscale serve`
-  (https://powerspec.taila78b6c.ts.net). Voice routes: `/voice/confirm` (read-back), `/voice/send`
+  (https://powerspec.taila78b6c.ts.net). `AGENT_MODE=cloud` runs tasks as claude.ai cloud sessions instead
+  (`cloud-agents.mjs`, host `claude -p --cloud`), so they show in the Claude app. Voice routes: `/voice/confirm` (read-back), `/voice/send`
   (no read-back), `/voice/inbox` (long-poll), `/voice/photo`, `/voice/tts`.
 - `glasses/ios` — the Bridge iPhone app (SwiftUI, XcodeGen `project.yml`, Meta Wearables DAT 1.0.1).
   Two flavours from one source: personal (sideloaded, everything unlocked, experimental "Hey Meta"
@@ -21,7 +22,8 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   Lambda, DynamoDB, KMS session key, Sign in with Apple, APNs push in `cloud/api/push.mjs` with the key
   in Secrets Manager `bridge/apns`, set by `cloud/setup/setup-apns.ps1`) and `BridgeWeb` (S3 + CloudFront for
   talktobridge.com, DNS at Cloudflare).
-- `site/` — the website (privacy, terms, support), on GitHub Pages now; talktobridge.com later.
+- `site/` — the website (home, privacy, terms, support) for the App Store product only, live at https://talktobridge.com
+  on GitHub Pages (Cloudflare DNS only); CloudFront (`BridgeWeb`) later. The app and listing link to talktobridge.com.
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.
 - `github-app.mjs`, `publish.mjs` — agents never hold a GitHub token: they commit and write a push request, and after
   the turn the relay mints a GitHub App token (`setup-github-app.mjs` creates the App) for that agent's repo only, and
@@ -29,6 +31,13 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   token, a second gets only the bundle and the token and pushes, the relay opens the PR, and the token is revoked. The App key and each folder's pinned
   repo (`github-pins.json`) live in `%USERPROFILE%\.bridge`. The relay refuses to mount its own folder, `.bridge` or
   anything above them, so agents work on this repo from a second clone.
+
+- `export-public.mjs` — writes the public, self-hosted copy (repo `bridge-relay`): the relay, agent image, hooks and
+  the sideload app with every `#if APP_STORE` branch removed, plus the files in `public/` (README tail, LICENSE,
+  its CI), read from the commit, not the working tree. It fails if anything paid or secret is left, or if a file under
+  `glasses/ios` isn't listed in its `INCLUDE` or `EXCLUDE` (add new app files there). This repo is the source of truth; keep
+  App Store-only Swift inside `#if APP_STORE` (CI builds the exported app as the `public` flavour). bridge-relay must start
+  from a fresh `git init`, never a clone of this repo, or its history would go public; the export refuses one.
 
 ## Build, test, run
 - Relay: `start.ps1` runs it and restarts it if it exits, so to reload after editing `relay.mjs`,
@@ -67,9 +76,8 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
   talktobridge.com and www, pointing at the `CloudFrontTarget` output.
 - App Store: Stephen has enrolled. Still needed: the App Store Connect API key, the app record, and
   the Meta app ID and client token, stored with `glasses/setup-appstore-secrets.ps1`. Then run the
-  subscriptions workflow, then the App Store upload. Before that upload, `site/privacy.html` must cover
-  Bridge Cloud, the Bridge account (Sign in with Apple), push, spoken replies via Amazon Polly and the
-  Bridge Pro purchase record the app sends to Bridge Cloud (`/api/pro`); today it
-  covers self-hosting only. Also set App Store Server Notifications (Version 2, production and sandbox URLs)
+  subscriptions workflow, then the App Store upload. The site describes the App Store product only (Bridge
+  Cloud, Pro); `site/privacy.html` covers it, but still names "the developer of Bridge" and
+  support@talktobridge.com, which needs a real legal name and a working mailbox before upload. Also set App Store Server Notifications (Version 2, production and sandbox URLs)
   to the `AppStoreNotificationsUrl` output, so renewals and refunds reach Bridge Pro's cloud check (`cloud/api/storekit.mjs`).
 - Cloud agents (Fargate + GitHub App) aren't built yet; the cloud API answers tasks honestly.

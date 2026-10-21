@@ -121,6 +121,7 @@ final class Relay {
         return "Here's your message to Claude, \(body). Ready to send it?"
     }
 
+    #if APP_STORE
     /// A Bridge Cloud call outside the voice protocol (push registration, ending a conversation),
     /// with the Bridge session, or `session` when the Keychain no longer holds it (signing out).
     @discardableResult
@@ -139,30 +140,38 @@ final class Relay {
         return try await fetch(req)
     }
 
+    #endif
+
     /// The conversation ended: Bridge Cloud can ring the phone again straight away.
     func stoppedListening() async {
+        #if APP_STORE
         guard isCloud else { return }
         try? await cloud("DELETE", "api/voice/listening", timeout: 5)
+        #endif
     }
 
     private func request(_ path: String, timeout: TimeInterval) throws -> URLRequest {
-        let base: String, bearer: String
+        #if APP_STORE
         if isCloud {
             // Same protocol under /api, with the Bridge session instead of the relay's token.
-            base = Account.cloudURL + "/api"
-            bearer = Keychain.read(Account.sessionKey) ?? ""
+            let bearer = Keychain.read(Account.sessionKey) ?? ""
             guard !bearer.isEmpty else { throw Failure.notConfigured }
-        } else {
-            guard let address = Self.pcAddress(baseURL) else { throw Failure.badAddress }   // also tidies older saved values
-            guard !address.isEmpty else { throw Failure.noAddress }
-            base = address
-            switch Keychain.lookup("relayToken") {
-            case .found(let value): bearer = value
-            case .missing: throw Failure.noToken
-            case .locked: throw Failure.locked
-            case .failed(let status): throw Failure.keychain(status)
-            }
+            return try authorized(Account.cloudURL + "/api", bearer, path, timeout: timeout)
         }
+        #endif
+        guard let address = Self.pcAddress(baseURL) else { throw Failure.badAddress }   // also tidies older saved values
+        guard !address.isEmpty else { throw Failure.noAddress }
+        let bearer: String
+        switch Keychain.lookup("relayToken") {
+        case .found(let value): bearer = value
+        case .missing: throw Failure.noToken
+        case .locked: throw Failure.locked
+        case .failed(let status): throw Failure.keychain(status)
+        }
+        return try authorized(address, bearer, path, timeout: timeout)
+    }
+
+    private func authorized(_ base: String, _ bearer: String, _ path: String, timeout: TimeInterval) throws -> URLRequest {
         guard let url = URL(string: "\(base)/\(path)") else { throw Failure.badAddress }
         var req = URLRequest(url: url)
         req.timeoutInterval = timeout

@@ -5,7 +5,7 @@
 import { createSign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-const BUNDLE_ID = 'com.smitherman.glassesrelay';
+const BUNDLE_ID = 'com.talktobridge.bridge';
 const GROUP = 'Bridge Pro';
 const PLANS = [
   { productId: `${BUNDLE_ID}.pro.monthly`, name: 'Bridge Pro Monthly', period: 'ONE_MONTH', price: '4.99', level: 2,

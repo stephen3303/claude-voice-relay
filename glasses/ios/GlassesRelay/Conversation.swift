@@ -45,12 +45,36 @@ final class Conversation: NSObject, ObservableObject {
     private var lastActivity = Date()
     /// Set after "Sent.": an agent is working, so stay on the line for its answer.
     private var awaitingAgent = false
+    /// Bridge just asked something ("Go ahead.", "Ready to send it?"), so what's said next, until then, is an answer
+    /// and doesn't need to start with "Bridge".
+    private var invitedUntil = Date.distantPast
+    /// When the first words of the current turn were heard: an answer started inside the window counts, however long it runs.
+    private var turnStarted: Date?
 
     /// Settings > "Read back what I said". On: the relay reads your words back ("Ready to send it?") and waits for a yes.
     /// Off: your words go straight to the agents, so wait for a longer pause before sending.
     static var readBack: Bool {
         get { UserDefaults.standard.object(forKey: "readBack") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "readBack") }
+    }
+    /// Settings > "Only answer to \"Bridge\"". On: while listening, speech is ignored unless it starts with "Bridge"
+    /// (or answers a question Bridge just asked), so talk around you isn't sent to your agents.
+    static var wakeWord: Bool {
+        get { UserDefaults.standard.object(forKey: "wakeWord") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "wakeWord") }
+    }
+    /// Settings > "Answer without \"Bridge\"": seconds after Bridge asks something during which the answer needn't start
+    /// with "Bridge". Long enough to answer, short enough that later talk around you isn't sent; 0 always needs it.
+    static let answerWindows: [TimeInterval] = [0, 10, 20, 30, 60]
+    static var answerWindow: TimeInterval {
+        get { UserDefaults.standard.object(forKey: "answerWindow") as? TimeInterval ?? 30 }
+        set { UserDefaults.standard.set(newValue, forKey: "answerWindow") }
+    }
+    /// Settings > "Hang up after quiet": seconds of silence before Bridge hangs up; 0 waits for "goodbye".
+    static let hangUpChoices: [TimeInterval] = [25, 60, 5 * 60, 15 * 60, 0]
+    static var hangUpAfter: TimeInterval {
+        get { UserDefaults.standard.object(forKey: "hangUpAfter") as? TimeInterval ?? 25 }
+        set { UserDefaults.standard.set(newValue, forKey: "hangUpAfter") }
     }
     /// The phone voice picked in Settings (an AVSpeechSynthesisVoice identifier); empty means the best installed one.
     static var voiceID: String {
@@ -63,6 +87,31 @@ final class Conversation: NSObject, ObservableObject {
         get { UserDefaults.standard.object(forKey: "hiFiSpeech") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "hiFiSpeech") }
     }
+    /// Natural voice: OpenAI text-to-speech from the PC relay (when it has a key), or Amazon Polly from Bridge Cloud
+    /// (Bridge Pro). Off by default, so replies are spoken by the phone voice and no text goes out to be spoken.
+    /// Except for Bridge Pro users who already heard it on Bridge Cloud before the switch existed: theirs starts on.
+    static var naturalVoice: Bool {
+        get {
+            if let on = UserDefaults.standard.object(forKey: "naturalVoice") as? Bool { return on }
+            return UserDefaults.standard.bool(forKey: "naturalVoiceBefore") && Store.shared.isPro
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "naturalVoice") }
+    }
+    /// Once, at launch: notes whether this install was already on Bridge Cloud when the switch arrived. Whether it
+    /// had Pro then is noted by noteProForNaturalVoice, since StoreKit hasn't answered yet at launch.
+    static func noteNaturalVoiceBefore() {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "naturalVoiceBefore") == nil else { return }
+        d.set(d.object(forKey: "naturalVoice") == nil && d.string(forKey: "relayURL") == Relay.cloudAddress, forKey: "naturalVoiceBefore")
+    }
+    /// Once, on StoreKit's first answer after that: only an install that had Pro then was hearing the natural voice,
+    /// so one that buys Pro later starts with it off like everyone else.
+    static func noteProForNaturalVoice(_ pro: Bool) {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: "naturalVoiceProNoted") else { return }
+        d.set(true, forKey: "naturalVoiceProNoted")
+        if !pro { d.set(false, forKey: "naturalVoiceBefore") }
+    }
     /// True while the session is on A2DP; the next listen switches back to the glasses' mic.
     private var onHiFi = false
     private var micRetries = 0
@@ -74,8 +123,7 @@ final class Conversation: NSObject, ObservableObject {
 
     /// Pause after you stop talking before your turn is sent.
     private var endOfTurn: TimeInterval { Self.readBack ? 1.4 : 2.0 }
-    /// Hang up after this much silence, or the longer one while an agent is working.
-    private let idleHangup: TimeInterval = 25
+    /// While an agent is working, stay on the line at least this long for its answer.
     private let agentHangup: TimeInterval = 15 * 60
     /// Agent messages older than this are not read out when a conversation starts.
     private let maxBacklogAge = 30 * 60
@@ -104,6 +152,7 @@ final class Conversation: NSObject, ObservableObject {
         onHiFi = false
         awaitingHFP = false
         conversing = true
+        invitedUntil = .distantPast   // a window left from the last conversation doesn't carry over
         Task {
             guard await Self.permissionsGranted() else { status = "Mic or speech permission denied"; end(saying: nil); return }
             do { try configureAudioForGlasses() } catch { status = "Audio setup failed: \(error.localizedDescription)"; end(saying: nil); return }
@@ -116,6 +165,9 @@ final class Conversation: NSObject, ObservableObject {
             // An agent called: its message (read from the inbox) is the greeting.
             if trigger != .call { await say("Go ahead.") }
             await announcePending()
+            // Answering an agent's call opens the answer window, whether or not its message ended in a question.
+            // (With the window set to Never, every turn starts with "Bridge", as that setting says.)
+            if trigger == .call { invitedUntil = Date().addingTimeInterval(Self.answerWindow) }
             startListening()
         }
     }
@@ -189,9 +241,12 @@ final class Conversation: NSObject, ObservableObject {
         // A route change (the switch back from A2DP) can restart listening while a retry is queued; never run two.
         stopListening()
         heard = ""
+        turnStarted = nil
         phase = .listening
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
+        // Off by default; the wake word needs it to tell "Bridge, yes" from "Bridge the gap", and a sentence break from none.
+        req.addsPunctuation = true
         if recognizer?.supportsOnDeviceRecognition == true { req.requiresOnDeviceRecognition = true }
         request = req
 
@@ -241,6 +296,7 @@ final class Conversation: NSObject, ObservableObject {
                 // Only the current session: a cancelled one still calls back once.
                 guard let self, self.phase == .listening, self.request === req else { return }
                 if let result {
+                    if self.heard.isEmpty { self.turnStarted = Date() }
                     self.heard = result.bestTranscription.formattedString
                     self.armSilenceTimer()
                     if result.isFinal { self.finishTurn() }
@@ -285,10 +341,14 @@ final class Conversation: NSObject, ObservableObject {
         watchdog?.invalidate()
         watchdog = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.phase == .listening, self.heard.isEmpty else { return }
-                let limit = self.awaitingAgent ? self.agentHangup : self.idleHangup
+                guard let self, self.phase == .listening, self.heard.isEmpty, Self.hangUpAfter > 0 else { return }
+                let limit = self.awaitingAgent ? max(self.agentHangup, Self.hangUpAfter) : Self.hangUpAfter
                 if Date().timeIntervalSince(self.lastActivity) > limit {
+                    #if APP_STORE
+                    self.end(saying: "I'll hang up. Say Hey Siri, talk to Bridge when you need me.")
+                    #else
                     self.end(saying: "I'll hang up. Say Hey Meta, start Bridge when you need me.")
+                    #endif
                 }
             }
         }
@@ -298,11 +358,38 @@ final class Conversation: NSObject, ObservableObject {
 
     private func finishTurn() {
         guard phase == .listening else { return }
-        let text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         stopListening()   // never listen while speaking, or the recognizer hears the reply
-        guard !text.isEmpty else { startListening(); return }
-        transcript.append(("You", text))
+        guard !raw.isEmpty else { startListening(); return }
+        let invited = (turnStarted ?? Date()) < invitedUntil
+        invitedUntil = .distantPast
+        var said = raw
+        if Self.wakeWord, !invited {
+            // Not for Bridge: drop it without a word, and don't count it as activity, so talk around you neither
+            // reaches the agents nor keeps the line open.
+            guard let rest = Self.afterWakeWord(raw) else {
+                status = "Ignored: start with \"Bridge\""
+                relistenAfterAnnouncements(); return
+            }
+            said = rest
+        } else if Self.wakeWord, let rest = Self.afterWakeWord(raw, answering: true) {
+            said = rest   // "Bridge, yes" as an answer; but "Bridge the gap..." is the answer itself
+        } else if Self.wakeWord, let rest = Self.afterWakeWord(raw), Self.forRelay(rest) != rest || Self.wantsPhoto(rest) {
+            said = rest   // "Bridge in trading bot ..." or "Bridge what am I looking at" with no comma: still a command
+        }
         lastActivity = Date()
+        // Just "Bridge": ask, and take the next thing said without the wake word.
+        guard !said.isEmpty || !Self.wakeWord else {
+            Task {
+                await say("Yes?")
+                // Answered even when the answer window is set to Never: that's what "Yes?" asked for.
+                invitedUntil = max(invitedUntil, Date().addingTimeInterval(10))
+                relistenAfterAnnouncements()
+            }
+            return
+        }
+        let text = said
+        transcript.append(("You", text))
 
         // Recognizer output can carry capitals and trailing punctuation ("Goodbye.").
         let lower = text.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
@@ -337,6 +424,16 @@ final class Conversation: NSObject, ObservableObject {
         }
     }
 
+    /// Back to listening, first reading any agent message that arrived meanwhile: it was held because someone was
+    /// talking, and an ignored turn or a "Yes?" doesn't pass through the reply path that would read it.
+    private func relistenAfterAnnouncements() {
+        guard !announcements.isEmpty else { if conversing { startListening() }; return }
+        Task {
+            await announcePending()
+            if conversing { startListening() }   // not if it was hung up meanwhile
+        }
+    }
+
     /// The main screen's Look button: one photo and its spoken answer, outside a conversation.
     func look(question: String = "What am I looking at?") {
         guard phase == .idle else { return }
@@ -352,6 +449,20 @@ final class Conversation: NSObject, ObservableObject {
             await say(reply)
             phase = .idle
         }
+    }
+
+    /// "Bridge, what's the status?" → "what's the status?"; nil when no sentence starts with "Bridge" (or "Hey Bridge").
+    /// Talk just before it in the same breath is dropped ("...see you then. Bridge, what's new?" → "what's new?"),
+    /// but "the bridge was closed" is not a call. Tolerates the recognizer's punctuation and capitals; just "Bridge" gives "".
+    /// `answering`: only a leading "Bridge," set off by punctuation or before a read-back answer ("Bridge yes"), so an
+    /// answer like "Bridge the gap" is kept whole.
+    nonisolated static func afterWakeWord(_ text: String, answering: Bool = false) -> String? {
+        let pattern = try! NSRegularExpression(pattern: answering ? #"^\W*(?:(?:hey|ok|okay)\W+)?bridge(?:[,.!?:;]+\s*|\s*$|\s+(?=(?:yes|no|send|cancel|change|goodbye)\b))"#
+                                                                  : #"(?:^|[.!?]\s+)\W*(?:(?:hey|ok|okay)\W+)?bridge\b(?!['’-])\W*"#,
+                                               options: [.caseInsensitive])
+        guard let m = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).first,
+              let r = Range(m.range, in: text) else { return nil }
+        return String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// "In trading bot, add a check" starts a task, as the Shortcut's "task:" prefix does.
@@ -411,10 +522,21 @@ final class Conversation: NSObject, ObservableObject {
 
     private func say(_ text: String) async {
         phase = .speaking
+        // A question invites an answer without "Bridge", from when it's finished being said. Anything else leaves an
+        // earlier invitation open, and doesn't let it run out while it's being read: an agent's message read out after
+        // "Ready to send it?" mustn't eat your "yes".
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let invites = line.hasSuffix("?") || line == "Go ahead." || line.hasSuffix("Say it again.")
+        let started = Date()
+        let remaining = invitedUntil.timeIntervalSince(started)
+        defer {
+            if invites { invitedUntil = Date().addingTimeInterval(Self.answerWindow) }
+            else if remaining > 0 { invitedUntil = Date().addingTimeInterval(remaining) }
+        }
         await useHiFiOutput()
-        // Natural voice from the relay when it has a key, or from Bridge Cloud with Bridge Pro; otherwise (or on any
-        // failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
-        if !Relay.shared.isCloud || Store.shared.isPro,
+        // The natural voice when it's turned on in Settings: from the relay when it has a key, or from Bridge Cloud with
+        // Bridge Pro; otherwise (or on any failure) the phone's voice. Without Pro the cloud would refuse, so don't wait for it to.
+        if Self.naturalVoice, !Relay.shared.isCloud || Store.shared.isPro,
            let mp3 = try? await Relay.shared.speech(text), let player = try? AVAudioPlayer(data: mp3) {
             player.delegate = self
             self.player = player

@@ -12,9 +12,16 @@ Hands-free Claude Code agents: start them with Siri, hear them in your AirPods, 
 ## Voice commands
 - `task: in <project>, <what to do>` — new agent (the iPhone Shortcut adds the `task:` prefix)
 - `yes` / `no` / anything else — answers the agent that's waiting (prefix with the agent name to target one)
-- `status`, `stop <agent>`
+- `status`, `stop <agent>` (status says what a working agent is doing, such as "running the tests")
+- `usage` / `context`, optionally with an agent name — what that agent's session has cost (at API prices, not your plan's limits) and how full its context is. PC agents only.
 
 An agent's full last reply (everything above its spoken summary) is in `logs/claude-agent-<name>.last.md`.
+
+Agents answer with a structured reply (`--json-schema`): the spoken line and whether it's a question
+waiting on you, so a stray question mark doesn't leave an agent "waiting for your answer". Each turn's
+estimated cost is in `logs/relay.log`. Set `AGENT_MAX_USD` in `.env` to stop a turn past that estimate
+(on a subscription it's an estimate, so it mostly limits how long a turn runs); you hear that it stopped,
+and "continue" lets it carry on.
 
 Spoken project names match folder names under PROJECTS_ROOT; add nicknames to `aliases.json`,
 e.g. `{ "trading bot": "Roundtable_Trading" }`.
@@ -66,7 +73,7 @@ whatever your agents say. Say "in <project>, <task>" to start a task, "send" or 
 the app then speaks through `POST /voice/tts` and falls back to the iPhone voice if that fails.
 
 **Photos:** say "look at this, ..." / "what am I looking at" for a quick answer (`POST /voice/photo`
-runs `claude -p` on the photo), or "send this to <project>, ..." to hand it to that agent. The photo is
+runs `claude -p` on the photo with Haiku at low effort for speed; `QUICK_LOOK_MODEL` in `.env` changes the model), or "send this to <project>, ..." to hand it to that agent. The photo is
 copied into the agent's container `/tmp` (never the repo, so it can't be committed) and deleted
 after the answer. Needs Camera enabled for Bridge in the Wearables Developer Center and
 "Allow camera" tapped once in the app.
@@ -84,6 +91,18 @@ The phone reaches the relay over HTTPS with `tailscale serve --bg 47879`. In the
 5. Give agents their own GitHub access (below).
 
 Tested from my phone: the relay has been verified end to end from an iPhone.
+
+### Phone notifications with ntfy (optional)
+The Bridge app only hears the relay while it's open. To get everything the relay says (answers,
+questions, "Claude needs you") as a phone notification too, install the ntfy app, subscribe to a
+topic with a long random name, and set `NTFY_URL=https://ntfy.sh/<that topic>` in `.env`, then
+restart the relay. On ntfy.sh, anyone who knows the topic can read it, so treat it like a password;
+the relay never logs it, and refuses a topic shorter than 20 characters unless `NTFY_TOKEN` is set
+(for a server that needs sign-in). Only `https://server/topic` URLs are accepted, redirects aren't
+followed, a failed post is only logged, and messages are cut to 4000 bytes.
+The ntfy server receives every message in readable form, agent replies included (they can mention
+repo details), so its operator can read them; for private repos, use your own ntfy server with
+`NTFY_TOKEN`.
 
 ## GitHub access for agents
 Agents never hold a GitHub token, yours or any other. They commit on a branch and ask for it to be
@@ -131,6 +150,45 @@ Without the App you can put a fine-grained token in `AGENT_GH_TOKEN` instead (Gi
 Developer settings → Fine-grained tokens**, only the agents' repos, Contents and Pull requests
 read and write, an expiry). It acts as you, so the rulesets can't tell agents apart; the App is better.
 
+## Agents in the Claude app (cloud sessions)
+With `AGENT_MODE=cloud` in `.env`, each voice task runs as a claude.ai cloud session instead of a
+Docker container, so the conversation shows up in the Claude app (**Code** tab) and at claude.ai/code
+with its full transcript, and you can pick it up there. The relay still speaks the replies.
+- **How a turn works:** the relay runs `claude -p --cloud` from the project folder and waits for the
+  session's answer, up to 60 minutes; meanwhile the agent is busy and what you say to it is queued.
+  After 60 minutes you hear "no answer", and the session carries on in the app. The session's id is
+  saved as soon as it exists, so a relay restart mid-turn doesn't lose it, but that turn's answer is
+  then only in the app.
+- The session works on the project folder's GitHub remote at its current branch (what's pushed, not
+  local changes), and pushes and opens its pull request itself through the **Claude GitHub app**, not
+  the relay's GitHub App. Before starting one, the relay checks that repo the way it does before its
+  own pushes (protected default branch, CODEOWNERS, the relay's App installed), so cloud mode needs
+  the GitHub App below; `AGENT_GH_TOKEN` alone isn't enough.
+- **What that check doesn't cover:** unlike the relay's per-repo token, the Claude GitHub app can push
+  to every repo you've granted it, and a ruleset doesn't stop anyone on its bypass list. So, once:
+  in GitHub **Settings → Applications → Claude → Configure**, give it **Only select repositories**
+  (your agents' repos); and in each repo's "Protect main" ruleset, keep the **Bypass list empty**.
+- It needs Claude Code on the PC signed in with your claude.ai account: run `claude auth login` once
+  (and `claude update`; older versions don't wait for a follow-up's answer, so you hear "sent" and read it in the app).
+  The `CLAUDE_CODE_OAUTH_TOKEN` setup token can't start cloud sessions; the relay keeps it, and the
+  rest of `.env`, away from them, and loads only your user settings, not the project folder's.
+- The relay starts `claude` by its full path from PATH (never from the project folder), without a
+  shell, so it must be the native install (`claude.exe`, from `irm https://claude.ai/install.ps1 | iex`),
+  not npm's `claude.cmd`; or set `CLAUDE_BIN` in `.env` to the full path of `claude.exe`.
+- Photos can't go to cloud agents (they're files on the PC); quick "what am I looking at" photos still work.
+- "Stop" ends the relay's wait; stop the session itself in the Claude app.
+- **As threads in a claude.ai project (optional):** set `BRIDGE_ROUTINE_URL` and `BRIDGE_ROUTINE_TOKEN`
+  to a project routine's API trigger. When a task ends with an answer (not a question), the relay
+  starts that routine with an empty request, and its run, a new thread in the project, finds the session
+  (its first message starts with "Bridge voice task:") and records what you asked, what was done and
+  any pull request, with a link. The request is empty because a project routine refuses text; only
+  `https://api.anthropic.com/v1/claude_code/routines/trig_.../fire` is accepted as the URL. A failed
+  start is only logged, and so is a setup mistake, at startup. It runs once per task, when the first
+  answer that isn't a question comes back; follow-ups continue in the session the thread links to.
+  Sessions started before the routine was set up are never recorded. Each recorded task is a full
+  thread, so it uses more of your Claude usage. The request can't say which session it's for, so two
+  tasks finishing at the same moment can both land in one thread.
+
 ## Use Bridge from Claude (custom connector)
 Bridge Cloud is also a remote MCP server, so Claude (claude.ai, the Claude apps, Claude Code) can
 start tasks for your agents and read what they said. It has two tools: **send_task** (a project and
@@ -139,10 +197,10 @@ the same Apple ID as the Bridge app, so it's the same account and the same inbox
 
 One-time setup in Apple Developer (only the account holder can do this):
 1. **Certificates, Identifiers & Profiles → Identifiers → +** → **Services IDs**. Description
-   `Bridge web`, identifier `com.smitherman.glassesrelay.web` (it must be exactly this; it's
+   `Bridge web`, identifier `com.talktobridge.bridge.web` (it must be exactly this; it's
    `SERVICES_ID` in `cloud/infra/lib/api.mjs`).
 2. Open it, tick **Sign in with Apple**, **Configure**: Primary App ID = the Bridge app
-   (`com.smitherman.glassesrelay`, so you get the same account as in the app). Domain: the host of
+   (`com.talktobridge.bridge`, so you get the same account as in the app). Domain: the host of
    the `AppleReturnUrl` output of the Cloud deploy run (`<id>.execute-api.us-east-1.amazonaws.com`).
    Return URL: the `AppleReturnUrl` itself (`https://<id>.execute-api.us-east-1.amazonaws.com/api/oauth/apple`).
    Save, then Continue, then Save.
