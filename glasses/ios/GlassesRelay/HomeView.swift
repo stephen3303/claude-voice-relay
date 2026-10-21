@@ -219,7 +219,7 @@ struct HistoryView: View {
                 .submitLabel(.send)
                 .onSubmit(send)
             Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title) }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || conversation.sendingText)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.canSendText)
                 .accessibilityLabel("Send")
         }
         .padding(.horizontal).padding(.vertical, 8)
@@ -236,9 +236,6 @@ struct HistoryView: View {
     }
 
     private func send() {
-        let text = draft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !conversation.sendingText else { return }
-        draft = ""
-        conversation.sendText(text)
+        if conversation.sendText(draft) { draft = "" }   // kept while a voice conversation is on
     }
 }

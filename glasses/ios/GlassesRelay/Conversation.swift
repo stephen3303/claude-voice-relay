@@ -436,14 +436,18 @@ final class Conversation: NSObject, ObservableObject {
 
     @Published var sendingText = false
 
+    /// Typing waits for the voice conversation to end: a spoken turn has its own read-back waiting at the relay,
+    /// and a typed "yes" would answer it.
+    var canSendText: Bool { phase == .idle && !conversing && !sendingText }
+
     /// A typed message (History): through the same relay step as speech, with the reply written to the history, not spoken.
-    func sendText(_ text: String) {
+    /// False when it wasn't taken, so the field keeps the text.
+    @discardableResult
+    func sendText(_ text: String) -> Bool {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !sendingText else { return }
-        // A spoken turn has its own read-back waiting at the relay; a typed "yes" would answer it.
-        guard phase == .idle else { status = "Finish the voice conversation first, or hang up."; return }
+        guard !text.isEmpty, canSendText else { return false }
         transcript.append(("You", text))
-        if Self.wantsPhoto(text) { transcript.append(("Relay", "Photos are voice-only. Ask out loud.")); return }
+        if Self.wantsPhoto(text) { transcript.append(("Relay", "Photos are voice-only. Ask out loud.")); return true }
         sendingText = true
         Task {
             defer { sendingText = false }
@@ -456,6 +460,7 @@ final class Conversation: NSObject, ObservableObject {
                 ErrorReporting.report(error, "text")
             }
         }
+        return true
     }
 
     /// The main screen's Look button: one photo and its spoken answer, outside a conversation.
