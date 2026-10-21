@@ -440,12 +440,17 @@ final class Conversation: NSObject, ObservableObject {
     func sendText(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sendingText else { return }
+        // A spoken turn has its own read-back waiting at the relay; a typed "yes" would answer it.
+        guard phase == .idle else { status = "Finish the voice conversation first, or hang up."; return }
         transcript.append(("You", text))
+        if Self.wantsPhoto(text) { transcript.append(("Relay", "Photos are voice-only. Ask out loud.")); return }
         sendingText = true
         Task {
             defer { sendingText = false }
             do {
-                transcript.append(("Relay", try await Relay.shared.say(Self.forRelay(text), readBack: Self.readBack)))
+                let reply = try await Relay.shared.say(Self.forRelay(text), readBack: Self.readBack)
+                if reply.hasPrefix("Sent") { awaitingAgent = true }   // as for speech: the longer hang-up window
+                transcript.append(("Relay", reply))
             } catch {
                 transcript.append(("Relay", error.localizedDescription))
                 ErrorReporting.report(error, "text")
