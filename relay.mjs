@@ -510,6 +510,9 @@ http.createServer((req, res) => {
   });
 }).listen(cfg.hookPort, '127.0.0.1', () => log(`hook endpoint on 127.0.0.1:${cfg.hookPort}`));
 
+// The routes that take speech; /voice/inbox, /voice/tts and /voice/photo are handled before them.
+const SPEECH_ROUTES = new Set(['/voice', '/voice/confirm', '/voice/send']);
+
 // ---------- photos from the glasses ----------
 // POST /voice/photo: a JPEG body, plus what was said with it in X-Question (URI-encoded).
 // "Send this to <project>, ..." hands it to that agent; anything else gets a quick spoken answer.
@@ -664,7 +667,11 @@ else {
     if (req.method === 'GET' && req.url.startsWith('/voice/inbox')) { inbox(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/tts') { tts(req, res); return; }
     if (req.method === 'POST' && req.url === '/voice/photo') { photo(req, res); return; }
-    if (req.method !== 'POST' || !['/voice', '/voice/confirm', '/voice/send'].includes(req.url)) { log(`voice 404: ${req.method} ${req.url}`); res.writeHead(404).end(); return; }
+    if (req.method !== 'POST' || !SPEECH_ROUTES.has(req.url)) {
+      log(`voice 404: ${req.method} ${req.url}`);
+      res.writeHead(404).end();
+      return;
+    }
     let body = '', tooBig = false;
     req.setEncoding('utf8'); // a character split across chunks stays whole
     req.on('data', (c) => {
