@@ -684,6 +684,7 @@ else {
     if (r.name === 'inbox') { inbox(req, res); return; }
     if (r.name === 'tts') { tts(req, res); return; }
     if (r.name === 'photo') { photo(req, res); return; }
+    if (r.name !== 'speech') { log(`voice 500: no handler for ${r.name}`); res.writeHead(500).end(); return; }
     let body = '', tooBig = false;
     req.setEncoding('utf8'); // a character split across chunks stays whole
     req.on('data', (c) => {

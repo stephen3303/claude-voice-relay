@@ -12,6 +12,8 @@ test('each voice route reaches its handler', () => {
 test('a query string or trailing slash still reaches the route', () => {
   assert.deepEqual(route('POST', '/voice/send?v=2'), { name: 'speech', pathname: '/voice/send' });
   assert.equal(route('POST', '/voice/confirm/').pathname, '/voice/confirm');
+  assert.equal(route('POST', '//voice/confirm').pathname, '/voice/confirm');
+  assert.equal(route('GET', '/voice//inbox').name, 'inbox');
 });
 
 test('unknown paths are 404, including near misses', () => {

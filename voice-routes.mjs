@@ -11,7 +11,7 @@ export const VOICE_ROUTES = {
 
 export function route(method, url) {
   let pathname;
-  try { pathname = new URL(url, 'http://relay').pathname.replace(/\/+$/, '') || '/'; } catch { return { status: 404 }; }
+  try { pathname = new URL(url.replace(/\/{2,}/g, '/'), 'http://relay').pathname.replace(/\/+$/, '') || '/'; } catch { return { status: 404 }; }
   const r = Object.hasOwn(VOICE_ROUTES, pathname) ? VOICE_ROUTES[pathname] : null;
   if (!r) return { status: 404, pathname };
   if (r.method !== method) return { status: 405, allow: r.method, pathname };
