@@ -509,20 +509,9 @@ final class Conversation: NSObject, ObservableObject {
     // MARK: agent messages
 
     private func pollInbox() async {
-        let d = UserDefaults.standard
         while !Task.isCancelled {
             do {
-                let knownBoot = d.double(forKey: "inboxBoot")
-                let inbox = try await Relay.shared.inbox(after: knownBoot == 0 ? 0 : d.integer(forKey: "inboxLast"))
-                if Task.isCancelled { return }
-                if inbox.boot != knownBoot {
-                    // The relay restarted, so its ids did too: ask again from the start of its buffer.
-                    d.set(inbox.boot, forKey: "inboxBoot"); d.set(0, forKey: "inboxLast")
-                    if knownBoot != 0 { continue }
-                }
-                d.set(inbox.last, forKey: "inboxLast")
-                let fresh = inbox.messages.filter { $0.age <= maxBacklogAge }.map(\.text)
-                guard !fresh.isEmpty else { continue }
+                guard let fresh = try await nextAgentMessages(), !fresh.isEmpty else { continue }
                 announcements += fresh
                 awaitingAgent = false
                 lastActivity = Date()
@@ -537,6 +526,39 @@ final class Conversation: NSObject, ObservableObject {
                 try? await Task.sleep(for: .seconds(3))
             }
         }
+    }
+
+    /// While History is open and no conversation is on: agent messages go straight into the history, unspoken,
+    /// so the answer to a typed task shows up there. A conversation's own poll takes over while one is on.
+    func followInboxQuietly() async {
+        while !Task.isCancelled {
+            if conversing { try? await Task.sleep(for: .seconds(2)); continue }
+            do {
+                guard let fresh = try await nextAgentMessages(), !fresh.isEmpty else { continue }
+                if conversing { announcements += fresh; continue }   // one started meanwhile: it reads them out
+                for text in fresh { transcript.append(("Agent", text)) }
+            } catch {
+                if Task.isCancelled { return }
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    /// One long-poll of the relay's inbox, moving the saved cursor past what it returns. nil when the relay
+    /// restarted and the cursor was reset, so the caller asks again. Old messages are dropped: after a restart
+    /// the relay hands back its whole saved buffer, and those were already heard.
+    private func nextAgentMessages() async throws -> [String]? {
+        let d = UserDefaults.standard
+        let knownBoot = d.double(forKey: "inboxBoot")
+        let inbox = try await Relay.shared.inbox(after: knownBoot == 0 ? 0 : d.integer(forKey: "inboxLast"))
+        if Task.isCancelled { return nil }
+        if inbox.boot != knownBoot {
+            // The relay restarted, so its ids did too: ask again from the start of its buffer.
+            d.set(inbox.boot, forKey: "inboxBoot"); d.set(0, forKey: "inboxLast")
+            if knownBoot != 0 { return nil }
+        }
+        d.set(inbox.last, forKey: "inboxLast")
+        return inbox.messages.filter { $0.age <= maxBacklogAge }.map(\.text)
     }
 
     private func announcePending() async {

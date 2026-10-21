@@ -199,6 +199,7 @@ struct HistoryView: View {
         .navigationTitle("History")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .task { await conversation.followInboxQuietly() }   // replies to typed tasks; stops when History closes
         .toolbar {
             if !conversation.transcript.isEmpty {
                 Button("Clear", role: .destructive) { confirmClear = true }
@@ -218,6 +219,8 @@ struct HistoryView: View {
                 .focused($focused)
                 .submitLabel(.send)
                 .onSubmit(send)
+                // A multi-line field puts Return in the text instead of submitting: treat it as Send.
+                .onChange(of: draft) { _, text in if text.hasSuffix("\n") { draft.removeLast(); send() } }
             Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title) }
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.canSendText)
                 .accessibilityLabel("Send")
