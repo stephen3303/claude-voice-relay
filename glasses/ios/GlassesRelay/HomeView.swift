@@ -22,8 +22,11 @@ struct HomeView: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
+            // The title stays for VoiceOver and History's back button; the header row below shows it instead of the bar.
+            .navigationTitle("Bridge")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) { EmptyView() }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showHelp = true } label: { Label("Help", systemImage: "questionmark.circle") }
                 }
@@ -42,6 +45,8 @@ struct HomeView: View {
     private var header: some View {
         HStack(spacing: 14) {
             Text("Bridge").font(.largeTitle.bold())
+                .lineLimit(1).minimumScaleFactor(0.6)   // room for the icons at large text sizes
+                .accessibilityAddTraits(.isHeader)
             Spacer()
             StatusIcon(symbol: phaseSymbol, label: "Listening", value: conversation.phase.rawValue,
                        tint: conversation.phase == .idle ? .secondary : Color.accentColor,
