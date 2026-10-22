@@ -17,7 +17,7 @@ $arn = if ($cert) { $cert.CertificateArn } else { (Aws acm request-certificate -
 
 $record = $null
 for ($i = 0; $i -lt 10 -and -not $record; $i++) {
-  $record = (Aws acm describe-certificate --certificate-arn $arn).Certificate.DomainValidationOptions[0].ResourceRecord
+  $record = @((Aws acm describe-certificate --certificate-arn $arn).Certificate.DomainValidationOptions)[0].ResourceRecord
   if (-not $record) { Start-Sleep 3 }
 }
 $status = (Aws acm describe-certificate --certificate-arn $arn).Certificate.Status
