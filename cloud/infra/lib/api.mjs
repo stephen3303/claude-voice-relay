@@ -26,6 +26,9 @@ const APNS_SECRET = 'bridge/apns';                   // { teamId, keyId, key }: 
 // The owner account (cloud/api/owner.mjs), both made by cloud/setup/setup-owner.ps1, never by CDK:
 const OWNER_SECRET = 'bridge/owner';                 // { tokenHash }: the owner token's SHA-256
 const OWNER_CLAUDE_SECRET = 'bridge/owner-claude';   // the owner's claude.ai login (+ routine, ntfy), runner only
+// The API's own address (cloud/setup/setup-api-domain.ps1 maps it, outside CDK): Sign in with Apple for the web
+// refuses *.execute-api.amazonaws.com, so the connector and its Apple return URL use this one.
+const PUBLIC_URL = 'https://api.talktobridge.com';
 const OWNER_ROUTINE_SECRET = 'bridge/owner-routine'; // { url, token }: the routine new tasks start as, runner only
 
 export class ApiStack extends Stack {
@@ -261,8 +264,8 @@ export class ApiStack extends Stack {
       stage.node.addDependency(route);
     }
 
-    new CfnOutput(this, 'ConnectorUrl', { value: `${api.apiEndpoint}/api/mcp` });
-    new CfnOutput(this, 'AppleReturnUrl', { value: `${api.apiEndpoint}/api/oauth/apple` });
+    new CfnOutput(this, 'ConnectorUrl', { value: `${PUBLIC_URL}/api/mcp` });
+    new CfnOutput(this, 'AppleReturnUrl', { value: `${PUBLIC_URL}/api/oauth/apple` });
 
     // App Store Connect > the app > App Information > App Store Server Notifications (Version 2, production and sandbox).
     new CfnOutput(this, 'AppStoreNotificationsUrl', { value: `${api.apiEndpoint}/api/appstore/notifications` });

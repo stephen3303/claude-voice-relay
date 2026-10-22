@@ -76,7 +76,7 @@ const sameSecret = (a, b) => a.length === b.length && timingSafeEqual(a, b);
 /**
  * deps.issuer: the tokens' iss (the same as app sessions')
  * deps.servicesId: the Sign in with Apple Services ID (the web client; Apple tokens' aud)
- * deps.publicUrl: the address Claude uses, e.g. https://abc.execute-api.us-east-1.amazonaws.com (default: the request's host)
+ * deps.publicUrl: the address Claude uses, e.g. https://api.talktobridge.com (default: the request's host)
  * deps.sign(bytes), deps.publicJwk(), deps.appleKeys(): as in auth.mjs
  * deps.store: { saveClient(id, client, expiresS), getClient(id), saveGrant(key, data, expiresS), takeGrant(key),
  *   saveRefresh(user, hash, data, expiresS), useRefresh(user, hash) -> { data, reused } | null, revokeFamily(user, family) }
