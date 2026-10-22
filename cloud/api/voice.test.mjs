@@ -393,3 +393,20 @@ test('"in <project> ..." without "task" or a comma is still a task, and anything
   assert.deepEqual(started[2], { project: 'trading bot', task: 'add tests' });
   assert.equal((await say('confirm', 'in the end it worked')).body, "Here's your message to Claude, in the end it worked. Ready to send it?");
 });
+
+test('POST /api/agent/reply needs no Bridge session and hands the token and body to agentAnswer', async () => {
+  const calls = [];
+  const handler = makeHandler({
+    store: {}, startTask: async () => '', pro: { plan: async () => null },
+    agentAnswer: async (bearer, body) => { calls.push({ bearer, body }); return { status: 200, text: 'Said.' }; },
+  });
+  const r = await handler({ requestContext: { http: { method: 'POST' } }, rawPath: '/api/agent/reply',
+    headers: { authorization: 'Bearer brt.x.y' }, body: '{"spoken":"Done.","question":false}' });
+  assert.equal(r.statusCode, 200);
+  assert.deepEqual(calls, [{ bearer: 'Bearer brt.x.y', body: { spoken: 'Done.', question: false } }]);
+  const bad = await handler({ requestContext: { http: { method: 'POST' } }, rawPath: '/api/agent/reply', headers: {}, body: 'not json' });
+  assert.equal(bad.statusCode, 200);
+  assert.equal(calls[1].body, null);
+  const other = await handler({ requestContext: { http: { method: 'POST' } }, rawPath: '/api/voice/send', body: 'hi' });
+  assert.equal(other.statusCode, 401);
+});

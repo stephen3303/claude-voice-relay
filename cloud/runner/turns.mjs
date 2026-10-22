@@ -6,13 +6,22 @@
 // costs) between turns. A reply that arrives mid-turn is queued by the API (cloud/api/agents.mjs) and taken here.
 // Dependencies are passed in, so tests run with fakes and no AWS, git or Claude Code.
 import path from 'node:path';
+import { randomBytes, createHash } from 'node:crypto';
 import { makeCloudTurn } from '../../cloud-agents.mjs';
 import { spokenReply } from '../../agent-turn.mjs';
 
 export const NO_ROUTINE = "New tasks need the Bridge task routine, and it isn't set up yet. Run the owner setup script on your PC.";
 
-// What the task routine's session gets: the repo to work in, then the task (the routine's prompt says so).
-export const routineText = (a, task) => `Repository: ${a.repo}\nBranch: ${a.branch || 'the default branch'}\n\n${task}`;
+// What the task routine's session gets: the repo to work in, the task, and where to send its spoken answers
+// (cloud/api/agents.mjs, answer). The routine's prompt (cloud/setup/task-routine-prompt.txt) says what to do with each.
+export function routineText(a, task, reply) {
+  const lines = [`Repository: ${a.repo}`, `Branch: ${a.branch || 'the default branch'}`];
+  if (reply) lines.push(`Reply URL: ${reply.url}`, `Reply token: ${reply.token}`);
+  return `${lines.join('\n')}\n\n${task}`;
+}
+// A reply token names its agent, so the API finds the hash to check it against with one read.
+export const newReplyToken = (key) => `brt.${key}.${randomBytes(32).toString('base64url')}`;
+export const replyHash = (token) => createHash('sha256').update(token).digest('hex');
 
 export const NO_LOGIN = "The claude.ai login for cloud agents was signed out. Run the deploy script on your PC once without SkipLogin to sign in again. The task may still have started; check the Claude app.";
 
@@ -38,6 +47,8 @@ export function spokenError(message, max = 400) {
  * deps.run(opts) -> runCloud's result (cloud-agents.mjs), with spawn and the CLI already bound
  * deps.startSession(text) -> { sessionId, url }: fires the owner's task routine with text (optional; without it a new
  *   task can't start, since Claude Code's print mode can only message an existing cloud session)
+ * deps.replyUrl: where the session posts its spoken answers (the API's /api/agent/reply). The CLI only queues a
+ *   message to a cloud session, so the answers can't come back through it.
  * deps.deliver(user, spoken, from), deps.notify(text) (ntfy, optional), deps.fireRoutine() (optional)
  * deps.workRoot: where repo folders go; deps.exists(dir); deps.log(...)
  */
@@ -51,8 +62,10 @@ export function makeRunner(deps) {
     // DynamoDB write, chained so they land in order, and awaited after the turn.
     const save = () => {
       if (!a) return;
+      // awaiting and question aren't written here: an answer the session sends (cloud/api/agents.mjs) sets them,
+      // and may land while this run is still finishing.
       const fields = { cloudId: a.cloudId ?? null, cloudUrl: a.cloudUrl ?? null, cloudNew: !!a.cloudNew,
-        awaiting: !!a.awaiting, question: a.question || '', toRecord: !!a.cloudToRecord, lastAt: Date.now() };
+        toRecord: !!a.cloudToRecord, lastAt: Date.now() };
       writes = writes.then(() => deps.store.update(user, key, fields, run)).catch((e) => log('save failed', e.message));
     };
     // Spoken only while this is still the agent's run: after "stop", its answer isn't wanted.
@@ -83,8 +96,14 @@ export function makeRunner(deps) {
       onDone: () => deps.fireRoutine?.().then((id) => log('project routine started', id)).catch((e) => log('project routine failed:', e.message)),
       startSession: async (agent, task) => {
         if (!deps.startSession) throw new Error(NO_ROUTINE);
-        return deps.startSession(routineText(agent, task));
+        let reply = null;
+        if (deps.replyUrl) {
+          reply = { url: deps.replyUrl, token: newReplyToken(key) };
+          await deps.store.update(user, key, { replyHash: replyHash(reply.token) }, run);
+        }
+        return deps.startSession(routineText(agent, task, reply));
       },
+      quietQueued: !!deps.replyUrl,
     });
 
     let prepared = false;

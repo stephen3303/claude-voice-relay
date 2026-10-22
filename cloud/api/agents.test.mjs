@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeAgents, resolveProject, STALE_MS } from './agents.mjs';
-import { OWNER } from './owner.mjs';
+import { OWNER, tokenHash } from './owner.mjs';
 
 const PROJECTS = [
   { name: 'trading bot', repo: 'stephen3303/trading-bot', branch: 'main' },
@@ -32,15 +32,18 @@ function setup({ runFails = false } = {}) {
     },
     async update(u, key, fields, run) { const a = agents.get(key); if (a?.run === run) Object.assign(a, fields); },
     async remove(u, key) { agents.delete(key); },
+    async answered(u, key, fields, hash) { const a = agents.get(key); if (a?.replyHash === hash) Object.assign(a, fields); },
   };
+  const delivered = [];
   const tasks = makeAgents({
     store,
     runTask: async (u, key, run) => { if (runFails) throw new Error('no capacity'); runs.push({ u, key, run }); return `arn:task/${runs.length}`; },
     stopTask: async (arn) => stopped.push(arn),
     now: () => clock,
+    deliver: async (u, text, from) => delivered.push({ u, text, from }),
   });
   const say = (text, project = null) => tasks.startTask(OWNER, { project, task: text });
-  return { tasks, agents, runs, stopped, say, advance: (ms) => (clock += ms) };
+  return { tasks, agents, runs, stopped, say, delivered, advance: (ms) => (clock += ms) };
 }
 
 test('projects resolve by name, alias or a unique word', () => {
@@ -138,4 +141,25 @@ test('a task said without a comma still finds its project', async () => {
 test('with no projects saved it says to run the setup', async () => {
   const t = makeAgents({ store: { projects: async () => [] }, runTask: async () => 'arn', stopTask: async () => {} });
   assert.match(await t.startTask(OWNER, { project: 'x', task: 'y' }), /don't have any projects yet/);
+});
+
+test('a cloud session speaks its answer with its reply token, and only with it', async () => {
+  const { tasks, agents, say, delivered } = setup();
+  await say('add tests', 'trading bot');
+  const token = `brt.tradingbot.${'A'.repeat(43)}`;
+  agents.get('tradingbot').replyHash = tokenHash(token);
+  assert.equal((await tasks.answer(`Bearer ${token}`, { spoken: 'SPOKEN: Should I push it?', question: true })).status, 200);
+  assert.deepEqual(delivered, [{ u: OWNER, text: 'Should I push it?', from: 'trading bot' }]);
+  assert.equal(agents.get('tradingbot').awaiting, true);
+  assert.equal(agents.get('tradingbot').question, 'Should I push it?');
+  assert.equal(await tasks.awaiting(OWNER), false, 'still busy in this fake');
+  agents.get('tradingbot').busy = false;
+  assert.equal(await tasks.awaiting(OWNER), true);
+  assert.equal((await tasks.answer(`Bearer ${token}`, { spoken: 'Pushed.' })).status, 200);
+  assert.equal(agents.get('tradingbot').awaiting, false);
+  for (const bad of ['', 'Bearer x', `Bearer brt.tradingbot.${'B'.repeat(43)}`, `Bearer brt.nobody.${'A'.repeat(43)}`]) {
+    assert.equal((await tasks.answer(bad, { spoken: 'hi' })).status, 401, bad);
+  }
+  assert.equal((await tasks.answer(`Bearer ${token}`, { spoken: '  ' })).status, 400);
+  assert.equal(delivered.length, 2);
 });

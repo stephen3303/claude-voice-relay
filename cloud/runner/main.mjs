@@ -19,7 +19,7 @@ import { addMessage } from '../api/inbox.mjs';
 import { makeRunner } from './turns.mjs';
 import { prepareRepo } from './repo.mjs';
 
-const { TABLE, USER_ID: user, AGENT_KEY: key, RUN_ID: run, CLAUDE_SECRET, ROUTINE_SECRET } = process.env;
+const { TABLE, USER_ID: user, AGENT_KEY: key, RUN_ID: run, CLAUDE_SECRET, ROUTINE_SECRET, REPLY_URL } = process.env;
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const sm = new SecretsManagerClient({});
@@ -115,6 +115,7 @@ try {
     notify: ntfy,
     fireRoutine: routineOn ? () => fireRoutine({ url: secret.routineUrl, token: secret.routineToken }) : null,
     startSession: task ? (text) => fireRoutineSession({ url: task.url, token: task.token, text }) : null,
+    replyUrl: REPLY_URL || '',
     workRoot: path.join(home, 'work'),
     exists: fs.existsSync,
     log,

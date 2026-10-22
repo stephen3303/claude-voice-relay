@@ -44,6 +44,8 @@ export const LOOK_PROMPT = [
  *   words are for the user's agents (agents.mjs: a reply, status or stop)
  * deps.agentAwaiting(user) -> true when an agent asked a question (optional)
  * deps.splitTask(user, body) -> { project, task } for a task said without a comma after the project, or null (optional)
+ * deps.agentAnswer(bearer, body) -> { status, text }: POST /api/agent/reply, a cloud session's spoken answer. It has
+ *   no API Gateway authorizer (the session holds a reply token, not a Bridge session) and checks its own (optional)
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
@@ -177,6 +179,14 @@ export function makeHandler(deps) {
   }
 
   return async function handler(event) {
+    if (deps.agentAnswer && event.requestContext?.http?.method === 'POST' && event.rawPath === '/api/agent/reply') {
+      let body = null;
+      try { body = JSON.parse(event.body ? Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8').toString('utf8') : ''); } catch {}
+      try {
+        const r = await deps.agentAnswer(event.headers?.authorization ?? '', body);
+        return text(r.status, r.text);
+      } catch (e) { console.error('agent reply', e); return text(500, 'Bridge Cloud hit an error.'); }
+    }
     const user = userOf(event);
     if (!user) return text(401, 'Sign in to Bridge first.');
     const route = `${event.requestContext.http.method} ${event.rawPath.replace(/^\/api/, '')}`;

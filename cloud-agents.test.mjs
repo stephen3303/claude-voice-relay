@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { cloudArgs, cloudEnv, parseCloud, runCloud, makeCloudTurn, resolveClaude, CLOUD_PROMPT, BRIDGE_MARK, fireRoutine, fireRoutineSession, routineUrlOk, WAIT_PROMPT } from './cloud-agents.mjs';
+import { cloudArgs, cloudEnv, parseCloud, runCloud, makeCloudTurn, resolveClaude, CLOUD_PROMPT, BRIDGE_MARK, fireRoutine, fireRoutineSession, routineUrlOk } from './cloud-agents.mjs';
 
 function fakeSpawn({ stdout = '', stderr = '', code = 0, hang = false } = {}) {
   const calls = [];
@@ -307,23 +307,25 @@ test('fireRoutineSession sends the text and returns the new session', async () =
   assert.deepEqual(JSON.parse(calls[0].body), { text: 'Repository: a/b\n\nfix it' });
 });
 
-test('with startSession a new task starts through it and the CLI only waits on that session', async () => {
-  const runs = [], started = [];
+test('with startSession a new task starts through it, and its follow-ups are sent quietly', async () => {
+  const runs = [], started = [], said = [];
   const a = { name: 'bot', repoPath: '/w/bot', cloudNew: true, cloudId: null };
   const turn = makeCloudTurn({
-    run: async (o) => { runs.push(o); return { result: 'SPOKEN: Done.', is_error: false, session_id: o.sessionId, url: '' }; },
-    checkRepo: async () => '', unsafe: () => false, exists: () => true, say: () => {}, speakResult: () => {},
-    mark: true, startSession: async (agent, task) => { started.push(task); return { sessionId: 'session_5', url: 'https://claude.ai/code/session_5' }; },
+    run: async (o) => { runs.push(o); return { result: '', is_error: false, session_id: o.sessionId, url: '', queued: true }; },
+    checkRepo: async () => '', unsafe: () => false, exists: () => true, say: (t) => said.push(t), speakResult: () => assert.fail(),
+    mark: true, quietQueued: true,
+    startSession: async (agent, task) => { started.push(task); return { sessionId: 'session_5', url: 'https://claude.ai/code/session_5' }; },
   });
   await turn(a, 'add tests');
   assert.deepEqual(started, [`${BRIDGE_MARK} add tests`]);
-  assert.equal(runs[0].sessionId, 'session_5');
-  assert.equal(runs[0].prompt, WAIT_PROMPT);
+  assert.deepEqual(runs, []);
   assert.equal(a.cloudId, 'session_5');
   assert.equal(a.cloudUrl, 'https://claude.ai/code/session_5');
   await turn(a, 'yes');
-  assert.deepEqual(started.length, 1);
-  assert.equal(runs[1].prompt, 'yes');
+  assert.equal(started.length, 1);
+  assert.equal(runs[0].sessionId, 'session_5');
+  assert.equal(runs[0].prompt, 'yes');
+  assert.deepEqual(said, []);
   const bad = makeCloudTurn({ run: async () => assert.fail(), checkRepo: async () => '', unsafe: () => false, exists: () => true,
     say: () => {}, speakResult: () => {}, startSession: async () => ({ sessionId: '' }) });
   await assert.rejects(bad({ name: 'x', repoPath: '/w', cloudNew: true }, 'go'), /didn't start a session/);

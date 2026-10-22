@@ -84,7 +84,7 @@ export class ApiStack extends Stack {
       cpu: 512, memoryLimitMiB: 1024,
       runtimePlatform: { cpuArchitecture: ecs.CpuArchitecture.X86_64, operatingSystemFamily: ecs.OperatingSystemFamily.LINUX },
     });
-    runnerTask.addContainer('runner', {
+    const runnerContainer = runnerTask.addContainer('runner', {
       // Built from the repo root with only what cloud/runner/Dockerfile copies (it reuses the relay's modules).
       image: ecs.ContainerImage.fromAsset(REPO_ROOT, {
         file: 'cloud/runner/Dockerfile',
@@ -128,6 +128,8 @@ export class ApiStack extends Stack {
     }));
 
     const api = new apigw.HttpApi(this, 'Http', { apiName: 'bridge-api' });
+    // Where a task's cloud session sends its spoken answers (agents.mjs, answer): the runner puts it in the task's text.
+    runnerContainer.addEnvironment('REPLY_URL', `${api.apiEndpoint}/api/agent/reply`);
 
     // Session signing key: RSA in KMS, so the private half can't be read or leaked.
     const signingKey = new kms.Key(this, 'SessionKey', {
@@ -181,6 +183,8 @@ export class ApiStack extends Stack {
       ['DELETE', '/api/voice/listening', voiceIntegration, sessions],
       ['POST', '/api/push/register', voiceIntegration, sessions],
       ['DELETE', '/api/push/register', voiceIntegration, sessions],
+      // A cloud session's spoken answer: it holds a reply token, not a session, which the Lambda checks (agents.mjs).
+      ['POST', '/api/agent/reply', voiceIntegration, null],
       ['POST', '/api/push/test', voiceIntegration, sessions],
     ];
     const throttled = [];   // routes the stage's route settings name, below

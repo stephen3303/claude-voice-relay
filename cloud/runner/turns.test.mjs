@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeRunner, spokenError, NO_ROUTINE, NO_LOGIN } from './turns.mjs';
-import { WAIT_PROMPT } from '../../cloud-agents.mjs';
+import { makeRunner, spokenError, replyHash, NO_ROUTINE, NO_LOGIN } from './turns.mjs';
 
 // One agent record with main.mjs's conditional writes, in memory.
 function setup({ agent = {}, results = [] } = {}) {
@@ -35,58 +34,59 @@ function setup({ agent = {}, results = [] } = {}) {
     startSession: agent.noRoutine ? null : async (text) => { started.push(text); return { sessionId: 'sess_1', url: 'https://claude.ai/code/sess_1' }; },
     fireRoutine: agent.routine ? async () => { fired.push(1); return 'sess_r'; } : null,
     workRoot: '/work',
+    replyUrl: agent.noReply ? '' : 'https://api.example/api/agent/reply',
     exists: () => true,
   });
   return { rec, runner, said, notified, runs, prepared, fired, started };
 }
 
-test('starts a new task through the task routine, waits on its session, speaks the answer and goes idle', async () => {
-  const { rec, runner, said, notified, runs, prepared, started } = setup();
+test('starts a new task through the task routine with a reply token, says nothing itself and goes idle', async () => {
+  const { rec, runner, said, runs, prepared, started } = setup();
   await runner('owner', 'tradingbot', 'r1');
-  assert.deepEqual(started, ['Repository: stephen3303/trading-bot\nBranch: main\n\nadd tests']);
-  assert.deepEqual(runs, [{ sessionId: 'sess_1', prompt: WAIT_PROMPT }]);
+  assert.equal(started.length, 1);
+  const m = /^Repository: stephen3303\/trading-bot\nBranch: main\nReply URL: https:\/\/api\.example\/api\/agent\/reply\nReply token: (brt\.tradingbot\.[A-Za-z0-9_-]{43})\n\nadd tests$/.exec(started[0]);
+  assert.ok(m, started[0]);
+  assert.equal(rec.replyHash, replyHash(m[1]));
+  assert.deepEqual(runs, []);
   assert.deepEqual(prepared, ['/work/tradingbot']);
-  assert.deepEqual(said, [{ text: 'All done.', from: 'trading bot' }]);
-  assert.deepEqual(notified, ['trading bot: All done.']);
+  assert.deepEqual(said, []);
   assert.equal(rec.busy, false);
   assert.equal(rec.cloudId, 'sess_1');
   assert.equal(rec.cloudNew, false);
-  assert.equal(rec.awaiting, false);
 });
 
-test('a reply queued mid-turn runs next, on the same session', async () => {
-  const { rec, runner, runs } = setup({ results: [
-    { result: 'SPOKEN: Should I push it?', is_error: false, session_id: 'sess_1', url: 'u', hook: (r) => r.pending.push('Yes, go ahead.') },
-    { result: 'SPOKEN: Pushed.', is_error: false, session_id: 'sess_1', url: 'u' },
-  ] });
+test('a reply goes to the same session quietly: the session sends its answer itself', async () => {
+  const { rec, runner, runs, said } = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['Yes, go ahead.'] },
+    results: [{ result: '', is_error: false, session_id: 'sess_1', url: 'u', queued: true }] });
   await runner('owner', 'tradingbot', 'r1');
-  assert.deepEqual(runs.map((r) => r.sessionId), ['sess_1', 'sess_1']);
-  assert.deepEqual(runs.map((r) => r.prompt), [WAIT_PROMPT, 'Yes, go ahead.']);
+  assert.deepEqual(runs, [{ sessionId: 'sess_1', prompt: 'Yes, go ahead.' }]);
+  assert.deepEqual(said, []);
   assert.equal(rec.busy, false);
-  assert.equal(rec.awaiting, false);
 });
 
-test('a question leaves the agent waiting for the answer', async () => {
-  const { rec, runner, said } = setup({ results: [{ result: 'SPOKEN: Should I push it?', is_error: false, session_id: 's', url: 'u' }] });
+test('without a reply URL the routine text has no reply lines, and a queued reply is announced', async () => {
+  const { runner, started } = setup({ agent: { noReply: true } });
   await runner('owner', 'tradingbot', 'r1');
-  assert.equal(rec.awaiting, true);
-  assert.equal(rec.question, 'Should I push it?');
-  assert.equal(said[0].text, 'Should I push it?');
+  assert.equal(started[0], 'Repository: stephen3303/trading-bot\nBranch: main\n\nadd tests');
+  const b = setup({ agent: { noReply: true, cloudNew: false, cloudId: 'sess_1', pending: ['yes'] },
+    results: [{ result: '', is_error: false, session_id: 'sess_1', url: 'u', queued: true }] });
+  await b.runner('owner', 'tradingbot', 'r1');
+  assert.match(b.said[0].text, /Its answer will be in the Claude app/);
 });
 
 test('a failed turn is spoken and the agent still goes idle', async () => {
-  const { rec, runner, said } = setup({ results: [new Error('not signed in')] });
+  const { rec, runner, said } = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['yes'] }, results: [new Error('not signed in')] });
   await runner('owner', 'tradingbot', 'r1');
   assert.match(said[0].text, /trading bot failed. not signed in/);
   assert.equal(rec.busy, false);
 });
 
 test('after stop (another run took the agent) nothing is spoken or written', async () => {
-  const { rec, runner, said } = setup({ results: [{ result: 'SPOKEN: Done.', is_error: false, session_id: 's', url: 'u', hook: (r) => { r.run = 'r2'; } }] });
+  const { rec, runner, said } = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['yes'] },
+    results: [{ result: 'SPOKEN: Done.', is_error: false, session_id: 's', url: 'u', hook: (r) => { r.run = 'r2'; } }] });
   await runner('owner', 'tradingbot', 'r1');
   assert.deepEqual(said, []);
   assert.equal(rec.busy, true, "the new run's state is untouched");
-  assert.equal(rec.cloudId, null);
 });
 
 test('a reply with no session to go to says so instead of starting one', async () => {
@@ -96,11 +96,10 @@ test('a reply with no session to go to says so instead of starting one', async (
   assert.match(said[0].text, /lost track of its cloud session/);
 });
 
-test('with the project routine set up, a new session is marked and the routine fires once it is done', async () => {
-  const { runner, started, fired } = setup({ agent: { routine: true } });
+test('with the project routine set up, a new session is marked', async () => {
+  const { runner, started } = setup({ agent: { routine: true } });
   await runner('owner', 'tradingbot', 'r1');
   assert.match(started[0], /\n\nBridge voice task: add tests$/);
-  assert.equal(fired.length, 1);
 });
 
 test('without the task routine a new task says how to set it up, and nothing runs', async () => {

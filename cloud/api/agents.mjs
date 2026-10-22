@@ -5,8 +5,8 @@
 // through the inbox. Other accounts still get the honest "not switched on" answer: their usage would need
 // API billing (cloud/DESIGN.md, build step 4).
 // Dependencies are passed in, so tests run with fakes and no AWS.
-import { randomUUID } from 'node:crypto';
-import { OWNER } from './owner.mjs';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { OWNER, tokenHash } from './owner.mjs';
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|approved?|do it|go ahead|go for it)\b[\s.!]*$/i;
 const NO = /^(no|nope|nah|don'?t|deny|denied|cancel)\b[\s.!]*$/i;
@@ -16,6 +16,11 @@ const INFO = /^\/?(?:usage|context)\b/i;
 // A runner that died without saying so (the container was lost) mustn't keep its agent busy for good. The
 // runner gives up on a turn after an hour (CLOUD_TIMEOUT_MS), so anything older than this is stale.
 export const STALE_MS = 75 * 60_000;
+
+// The token a task's cloud session sends its spoken answers with: cloud/runner/turns.mjs makes one per task and
+// keeps only its SHA-256 on the agent (replyHash). It names its agent, so checking it is one read.
+export const REPLY_TOKEN = /^brt\.([a-z0-9]{1,64})\.[A-Za-z0-9_-]{43}$/;
+const MAX_SPOKEN = 600;
 
 export const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -43,13 +48,16 @@ export function resolveProject(spoken, projects) {
  *     as its turn, under the new run id
  *   queue(user, key, text, staleBefore) -> true when text was added to a busy (not stale) agent's pending turns
  *   update(user, key, fields, run) (only while the agent is still on that run), remove(user, key)
+ *   answered(user, key, fields, hash): sets fields only while the agent's replyHash is still hash
  * }
+ * deps.deliver(user, text, from): posts to the inbox and pushes it (index.mjs)
  * deps.runTask(user, key, run) -> the runner's task ARN; deps.stopTask(arn)
  * `run` names one busy spell: the runner only writes to the agent while it's still its run, so a runner
  * that outlived "stop" (or a stale one) can't touch the next task under the same name.
  * deps.now() -> ms, deps.log(...)
  * Returns startTask(user, { project, task, photo }) -> the line spoken at once (voice.mjs), and
- * awaiting(user) -> true when an agent asked a question, so a bare "yes" answers it.
+ * awaiting(user) -> true when an agent asked a question, so a bare "yes" answers it, and
+ * answer(bearer, body) -> { status, text }: a cloud session sending its spoken answer (POST /api/agent/reply).
  */
 export function makeAgents(deps) {
   const now = deps.now ?? Date.now;
@@ -165,5 +173,24 @@ export function makeAgents(deps) {
     return null;
   }
 
-  return { startTask, awaiting, splitTask, notOn };
+  // The session says its SPOKEN line here, and whether it's a yes-or-no question waiting on the owner. The token
+  // is the session's own; a new task under the same name gets a new one, so an old session can't speak for it.
+  async function answer(bearer, body) {
+    const token = String(bearer || '').replace(/^Bearer\s+/i, '');
+    const m = REPLY_TOKEN.exec(token);
+    if (!m) return { status: 401, text: 'Not a reply token.' };
+    const a = (await deps.store.agents(OWNER)).find((x) => x.key === m[1]);
+    const hash = tokenHash(token);
+    if (!a?.replyHash || !/^[0-9a-f]{64}$/.test(a.replyHash)
+      || !timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(a.replyHash, 'hex'))) return { status: 401, text: 'Not a reply token.' };
+    let said = String(body?.spoken ?? '').replace(/^\s*SPOKEN:\s*/i, '').replace(/\s+/g, ' ').trim();
+    if (!said) return { status: 400, text: 'Send {"spoken": "...", "question": false}.' };
+    if (said.length > MAX_SPOKEN) said = `${said.slice(0, MAX_SPOKEN - 1)}…`;
+    const question = body?.question === true;
+    await deps.store.answered(OWNER, a.key, { awaiting: question, question: question ? said : '', lastAt: now() }, a.replyHash);
+    await deps.deliver(OWNER, said, a.name);
+    return { status: 200, text: 'Said.' };
+  }
+
+  return { startTask, awaiting, splitTask, notOn, answer };
 }

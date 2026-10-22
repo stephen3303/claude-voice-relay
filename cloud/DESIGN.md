@@ -138,8 +138,11 @@ moved: each task is a claude.ai cloud session that shows in the Claude app.
   agent idle and exits. When Claude Code refreshes the login, the runner writes the new one back.
   Claude Code's print mode can't start a new cloud session (2.1.260 and later refuse), so a new task fires the
   owner's "Bridge task" routine (`bridge/owner-routine`, `{ url, token }`) with the repo and the task as its text;
-  its prompt is `cloud/setup/task-routine-prompt.txt`. The runner then waits on that session with
-  `claude -p --cloud <id>`, and replies go to it the same way.
+  its prompt is `cloud/setup/task-routine-prompt.txt`. The CLI can only queue a message to a cloud session, not wait
+  for its answer, so the session sends each spoken answer itself: the text also carries a Reply URL
+  (`POST /api/agent/reply`, no API Gateway authorizer) and a per-task reply token (`brt.<agent>.<random>`; only its
+  SHA-256 is kept, as the agent's `replyHash`). Replies go to the session with `claude -p --cloud <id>` and are
+  answered the same way. The cloud environment's Trusted network allows `*.amazonaws.com`.
 - **Setup**: `cloud/setup/setup-owner.ps1` on the PC stores the token's hash, signs a new claude.ai login in and stores
   it, asks once for the task routine's Fire URL and token, and writes the projects. `cloud/setup/deploy-branch.ps1` deploys BridgeApi from an unmerged branch on the PC and
   then runs it, to try a change before it's merged.

@@ -248,6 +248,13 @@ const agentStore = {
   async remove(user, key) {
     await db.send(new DeleteCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` } }));
   },
+  async answered(user, key, fields, hash) {
+    const names = {}, values = { ':h': hash };
+    const sets = Object.entries(fields).map(([f, v], i) => { names[`#f${i}`] = f; values[`:v${i}`] = v; return `#f${i} = :v${i}`; });
+    await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` },
+      UpdateExpression: `SET ${sets.join(', ')}`, ConditionExpression: 'replyHash = :h',
+      ExpressionAttributeNames: names, ExpressionAttributeValues: values }));
+  },
 };
 
 async function queryPrefix(user, prefix) {
@@ -284,6 +291,7 @@ const agentTasks = makeAgents({
   async stopTask(arn) {
     await ecs.send(new StopTaskCommand({ cluster: process.env.RUNNER_CLUSTER, task: arn, reason: 'Stopped by voice' }));
   },
+  deliver: (user, text, from) => deliver(user, text, from),
   log: (...a) => console.log(...a),
 });
 
@@ -298,7 +306,8 @@ async function startTask(user, req) {
 // The owner has every Pro feature, with paid Pro's allowances: there's no App Store subscription to check.
 const proForOwner = { ...pro, plan: async (user) => (user === OWNER ? 'Production' : pro.plan(user)) };
 
-export const handler = makeHandler({ store, look, startTask, devices, deliver, speak, pro: proForOwner, agentAwaiting: agentTasks.awaiting, splitTask: agentTasks.splitTask });
+export const handler = makeHandler({ store, look, startTask, devices, deliver, speak, pro: proForOwner, agentAwaiting: agentTasks.awaiting, splitTask: agentTasks.splitTask,
+  agentAnswer: agentTasks.answer });
 
 // App Store Server Notifications v2 (POST /api/appstore/notifications, no authorizer: Apple signs the body).
 export async function appStore(event) {

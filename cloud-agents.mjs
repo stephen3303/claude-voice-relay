@@ -158,12 +158,13 @@ export function runCloud({ spawn, claudeBin, env, cwd, sessionId, prompt, timeou
 // that isn't a question or an error: each run is a full project thread, so follow-ups don't start more; the
 // thread links the session, where they continue. A session without the mark never fires: the routine can't find it.
 //
-// Claude Code's print mode can only message an existing cloud session (2.1.260 and later refuse to start one).
-// With startSession(a, task) -> { sessionId, url } (Bridge Cloud's runner fires a routine with the task), a new
-// task starts its session that way, and the turn then sends WAIT_PROMPT to it, so the CLI waits for its answer.
-export const WAIT_PROMPT = 'Automatic message from Bridge, nothing new to do: keep working on the task until it is done, then end your final message with the SPOKEN line.';
+// Claude Code's print mode can only message an existing cloud session (2.1.260 and later refuse to start one,
+// and a message to an existing one is only queued: the CLI doesn't wait for its answer). With
+// startSession(a, task) -> { sessionId, url } (Bridge Cloud's runner fires a routine with the task), a new task
+// starts its session that way and the turn ends there: the session sends its own answers back (quietQueued
+// then also keeps a queued follow-up silent, since its answer comes the same way).
 export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, speakResult, save = () => {}, log = () => {},
-  mark = false, onDone = () => {}, startSession = null }) {
+  mark = false, onDone = () => {}, startSession = null, quietQueued = false }) {
   return async function cloudTurn(a, prompt) {
     // A reply with no session to go to (its conversation ran on the PC before cloud mode, or the first turn
     // failed after the session may have started) would start one with only that one line, next to an orphan
@@ -187,14 +188,13 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
       a.cloudId = id; a.cloudUrl = url; save();
       log(a.name, 'cloud session', id, url);
     };
-    let task = fresh && mark ? `${BRIDGE_MARK} ${asTask(prompt)}` : prompt;
+    const task = fresh && mark ? `${BRIDGE_MARK} ${asTask(prompt)}` : prompt;
     if (fresh) a.cloudToRecord = mark;
     if (fresh && startSession) {
       const s = await startSession(a, task);
       if (!s?.sessionId || !SESSION_ID.test(s.sessionId)) throw new Error("the routine didn't start a session.");
       onSession(s.sessionId, s.url || '');
-      if (a.stopped) return;
-      task = WAIT_PROMPT;
+      return;
     }
     try { r = await run({ cwd: a.repoPath, sessionId: a.cloudId, prompt: task, onSession, onSpawn: (p) => { a.proc = p; } }); }
     catch (e) {
@@ -208,6 +208,7 @@ export function makeCloudTurn({ run = runCloud, checkRepo, unsafe, exists, say, 
     a.cloudUrl = r.url || a.cloudUrl;
     if (r.queued) {
       a.awaiting = false; a.question = '';
+      if (quietQueued) return;
       return say(`${a.name}: sent. Its answer will be in the Claude app.`, { spoken: `Sent to ${a.name}. Its answer will be in the Claude app.` });
     }
     speakResult(a, r);
