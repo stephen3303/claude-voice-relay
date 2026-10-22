@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeRunner, spokenError, NO_ROUTINE } from './turns.mjs';
+import { makeRunner, spokenError, NO_ROUTINE, NO_LOGIN } from './turns.mjs';
 import { WAIT_PROMPT } from '../../cloud-agents.mjs';
 
 // One agent record with main.mjs's conditional writes, in memory.
@@ -118,4 +118,5 @@ test('spokenError keeps whole sentences instead of cutting mid-word', () => {
   assert.ok(out.length <= 100);
   assert.match(out, /here\.$/);
   assert.match(spokenError('word '.repeat(50), 60), /word…$/);
+  assert.equal(spokenError('Cloud sessions need a claude.ai sign-in. Run `claude auth login` (or /login in a local session), then try again.'), NO_LOGIN);
 });

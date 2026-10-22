@@ -14,9 +14,13 @@ export const NO_ROUTINE = "New tasks need the Bridge task routine, and it isn't 
 // What the task routine's session gets: the repo to work in, then the task (the routine's prompt says so).
 export const routineText = (a, task) => `Repository: ${a.repo}\nBranch: ${a.branch || 'the default branch'}\n\n${task}`;
 
+export const NO_LOGIN = "The claude.ai login for cloud agents was signed out. Run the deploy script on your PC once without SkipLogin to sign in again. The task may still have started; check the Claude app.";
+
 // An error said aloud and shown in the history: whole sentences, so it isn't cut off mid-word.
 export function spokenError(message, max = 400) {
   const m = String(message ?? '').replace(/\s+/g, ' ').trim();
+  // Claude Code's own wording points at a terminal the owner doesn't have here.
+  if (/claude\.ai sign-in|claude auth login/i.test(m)) return NO_LOGIN;
   if (m.length <= max) return m;
   const cut = m.slice(0, max);
   const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));

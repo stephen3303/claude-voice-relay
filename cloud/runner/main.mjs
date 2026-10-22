@@ -92,6 +92,9 @@ async function keepLogin() {
   try { now = fs.readFileSync(credFile, 'utf8'); JSON.parse(now); } catch { return; }   // mid-write: next time
   if (now === saved) return;
   saved = now;
+  // A refresh token the server rejected is blanked on disk; saving that would only hide the original login.
+  const oauth = JSON.parse(now)?.claudeAiOauth;
+  if (!oauth?.accessToken || !oauth?.refreshToken) { log('the claude.ai login was rejected; it needs a new sign-in'); return; }
   await sm.send(new PutSecretValueCommand({ SecretId: CLAUDE_SECRET, SecretString: JSON.stringify({ ...secret, credentials: JSON.parse(now) }) }));
   log('saved the refreshed claude.ai login');
 }
