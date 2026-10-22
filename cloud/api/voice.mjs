@@ -13,6 +13,9 @@ const NO = /^(?:no|nope|nah|don'?t(?: send(?: it)?)?)[\s.!]*$/i;
 const ASK = 'What do you want to send?';
 const TASK_PREFIX = /^(new\s+)?task\b\s*[:,.]?\s*/i;
 const PROJECT = /^(?:in|on|for)\s+(.+?)\s*[,:;]\s*([\s\S]+)$/i;
+// "in trading bot add tests" said without "task": dictation drops the comma, so a known project name after
+// in, on or for still makes it a task. A reply can't start that way by mistake: it starts with the agent's name.
+const IN_PROJECT = /^(?:in|on|for)\s/i;
 const SEND_TO = /^(?:send|give|show)\s+(?:this|it|that)(?:\s+(?:photo|picture))?\s+to\s+(.+?)(?:\s*[,:;.]\s*([\s\S]*))?$/i;
 const HOLD_MS = 10 * 60_000;          // an unconfirmed task expires, as on the relay
 const INBOX_KEEP_S = 7 * 24 * 3600;   // inbox messages are kept a week (DynamoDB TTL)
@@ -88,6 +91,11 @@ export function makeHandler(deps) {
       return project ? `OK. What do you want to tell ${project}?` : `OK. ${ASK}`;
     }
     const m = body.match(PROJECT);
+    const said = !isTask && !held?.project && !m && IN_PROJECT.test(body) ? (await deps.splitTask?.(user, body)) ?? null : null;
+    if (said) {
+      await deps.store.setHeld(user, { text: body, parsed: said, at: now() });
+      return `Here's your message to Claude for ${said.project}, ${said.task}. Ready to send it?`;
+    }
     if (isTask || held?.project) {
       // After "change it", the next words are the task for the project that was held, whatever they
       // start with: "for the README, fix typos" must not re-target it. "Cancel" lets you pick another.
@@ -110,7 +118,7 @@ export function makeHandler(deps) {
     if (!body) return "I didn't catch that. Say it again.";
     const m = body.match(PROJECT);
     if (m) return deps.startTask(user, { project: m[1].trim(), task: m[2].trim() });
-    const split = TASK_PREFIX.test(raw) ? await deps.splitTask?.(user, body) : null;
+    const split = TASK_PREFIX.test(raw) || IN_PROJECT.test(body) ? await deps.splitTask?.(user, body) : null;
     return deps.startTask(user, split ?? { project: null, task: body });
   }
 

@@ -372,3 +372,24 @@ test('a task with no comma after the project is split by the account\'s projects
   await say('send', 'task: in trading bot fix it');
   assert.deepEqual(started[1], { project: 'trading bot', task: 'fix it' });
 });
+
+test('"in <project> ..." without "task" or a comma is still a task, and anything else stays a reply', async () => {
+  let held = null;
+  const started = [];
+  const handler = makeHandler({
+    store: { getHeld: async () => held, setHeld: async (u, h) => { held = h; } },
+    startTask: async (u, t) => { started.push(t); return 'ok'; },
+    splitTask: async (u, body) => (body.startsWith('in trading bot ') ? { project: 'trading bot', task: body.slice(15) } : null),
+    pro: { plan: async () => null },
+  });
+  const say = (route, body) => handler({ requestContext: { http: { method: 'POST' }, authorizer: { lambda: { sub: 'owner' } } },
+    rawPath: `/api/voice/${route}`, body });
+  await say('send', 'in trading bot list the open pull requests');
+  assert.deepEqual(started[0], { project: 'trading bot', task: 'list the open pull requests' });
+  await say('send', 'in the end it worked');
+  assert.deepEqual(started[1], { project: null, task: 'in the end it worked' });
+  assert.equal((await say('confirm', 'in trading bot add tests')).body, "Here's your message to Claude for trading bot, add tests. Ready to send it?");
+  await say('confirm', 'send it');
+  assert.deepEqual(started[2], { project: 'trading bot', task: 'add tests' });
+  assert.equal((await say('confirm', 'in the end it worked')).body, "Here's your message to Claude, in the end it worked. Ready to send it?");
+});
