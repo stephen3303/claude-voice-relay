@@ -22,6 +22,7 @@ for ($i = 0; $i -lt 10 -and -not $record; $i++) {
 }
 $status = (Aws acm describe-certificate --certificate-arn $arn).Certificate.Status
 if ($status -ne 'ISSUED') {
+  if (-not $record) { throw 'AWS has not published the check record yet. Run this again in a minute.' }
   Write-Host "`nIn Cloudflare (talktobridge.com > DNS > Add record), add this record, Proxy status: DNS only (grey cloud):"
   Write-Host "  Type:   CNAME"
   Write-Host "  Name:   $($record.Name.TrimEnd('.') -replace '\.talktobridge\.com$', '')"
@@ -33,13 +34,16 @@ if ($status -ne 'ISSUED') {
 Write-Host 'Certificate issued.'
 
 # 2. The custom domain, mapped to the API's default stage.
-$existing = & aws apigatewayv2 get-domain-name --domain-name $domain --region $region --output json 2>$null
-$dn = if ($LASTEXITCODE) {
-  Aws apigatewayv2 create-domain-name --domain-name $domain `
+# Listed rather than fetched by name: a missing name makes aws write to stderr, which Windows PowerShell 5.1
+# turns into a terminating error under 'Stop'.
+$dn = (Aws apigatewayv2 get-domain-names).Items | Where-Object { $_.DomainName -eq $domain } | Select-Object -First 1
+if (-not $dn) {
+  $dn = Aws apigatewayv2 create-domain-name --domain-name $domain `
     --domain-name-configurations "CertificateArn=$arn,EndpointType=REGIONAL,SecurityPolicy=TLS_1_2"
-} else { $existing | ConvertFrom-Json }
-$apiId = ((Aws apigatewayv2 get-apis).Items | Where-Object { $_.Name -eq 'bridge-api' }).ApiId
-if (-not $apiId) { throw 'No HTTP API named bridge-api in us-east-1' }
+}
+$apis = @((Aws apigatewayv2 get-apis).Items | Where-Object { $_.Name -eq 'bridge-api' })
+if ($apis.Count -ne 1) { throw "Expected one HTTP API named bridge-api in us-east-1, found $($apis.Count)" }
+$apiId = $apis[0].ApiId
 $mapped = (Aws apigatewayv2 get-api-mappings --domain-name $domain).Items | Where-Object { $_.ApiId -eq $apiId }
 if (-not $mapped) { Aws apigatewayv2 create-api-mapping --domain-name $domain --api-id $apiId --stage '$default' | Out-Null }
 
