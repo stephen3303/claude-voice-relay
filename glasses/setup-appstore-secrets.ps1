@@ -40,20 +40,29 @@ if (-not $hasMain) {
 }
 Write-Host "Environment ${envName}: main only"
 
-# 2. The secrets, in that environment.
-gh secret set APPLE_TEAM_ID      -R $repo --env $envName -b $team.Trim()
-gh secret set ASC_KEY_ID         -R $repo --env $envName -b $keyId.Trim()
-gh secret set ASC_ISSUER_ID      -R $repo --env $envName -b $issuer.Trim()
-gh secret set ASC_KEY_P8_BASE64  -R $repo --env $envName -b $b64
+# 2. The secrets, in that environment. $ErrorActionPreference doesn't stop on a failed gh, so check each one:
+#    step 3 must never delete a repository copy whose replacement didn't land.
+function Set-EnvSecret($name, $value) {
+  gh secret set $name -R $repo --env $envName -b $value
+  if ($LASTEXITCODE) { throw "setting $name in $envName failed; nothing was deleted" }
+}
+Set-EnvSecret APPLE_TEAM_ID     $team.Trim()
+Set-EnvSecret ASC_KEY_ID        $keyId.Trim()
+Set-EnvSecret ASC_ISSUER_ID     $issuer.Trim()
+Set-EnvSecret ASC_KEY_P8_BASE64 $b64
 if ($metaId.Trim() -and $metaToken.Trim()) {
-  gh secret set META_APP_ID        -R $repo --env $envName -b $metaId.Trim()
-  gh secret set META_CLIENT_TOKEN  -R $repo --env $envName -b $metaToken.Trim()
+  Set-EnvSecret META_APP_ID       $metaId.Trim()
+  Set-EnvSecret META_CLIENT_TOKEN $metaToken.Trim()
 }
 
-# 3. Repository-level copies, which any branch's workflow could read.
+# 3. Repository-level copies, which any branch's workflow could read. Only those the environment now holds:
+#    skipped Meta prompts leave earlier repository values in place rather than dropping them.
+$envSecrets = (gh secret list -R $repo --env $envName --json name | ConvertFrom-Json).name
+if ($LASTEXITCODE) { throw "listing the $envName secrets failed; nothing was deleted" }
 $repoSecrets = (gh secret list -R $repo --json name | ConvertFrom-Json).name
+if ($LASTEXITCODE) { throw 'listing the repository secrets failed; nothing was deleted' }
 foreach ($name in 'APPLE_TEAM_ID', 'ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_P8_BASE64', 'META_APP_ID', 'META_CLIENT_TOKEN') {
-  if ($repoSecrets -contains $name) {
+  if ($repoSecrets -contains $name -and $envSecrets -contains $name) {
     gh secret delete $name -R $repo
     if ($LASTEXITCODE) { throw "deleting the repository secret $name failed" }
     Write-Host "Removed the repository-level $name"
