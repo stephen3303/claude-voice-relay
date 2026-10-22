@@ -17,8 +17,11 @@ $secret = @{ teamId = $team; keyId = $keyId; key = (Get-Content $p8 -Raw) } | Co
 $file = New-TemporaryFile
 try {
   Set-Content -Path $file -Value $secret -NoNewline
-  aws secretsmanager describe-secret --region $region --secret-id $name *> $null
-  if ($LASTEXITCODE) {
+  # Listed rather than described: a missing secret makes aws write to stderr, which Windows PowerShell 5.1
+  # turns into a terminating error under 'Stop'.
+  $found = aws secretsmanager list-secrets --region $region --query "SecretList[?Name=='$name'].Name" --output text
+  if ($LASTEXITCODE) { throw 'Listing secrets failed' }
+  if (-not $found) {
     aws secretsmanager create-secret --region $region --name $name --secret-string "file://$file" | Out-Null
   } else {
     aws secretsmanager put-secret-value --region $region --secret-id $name --secret-string "file://$file" | Out-Null
