@@ -54,13 +54,11 @@ jobs:
       # Catches template keys CloudFormation would reject before they roll BridgeApi back. ci.yml runs it
       # too, but the deploy doesn't wait for CI.
       - name: Check the templates
-        env:
-          SENTRY_DSN_CLOUD: ${{ secrets.SENTRY_DSN_CLOUD }}   # error reports (cloud/api/sentry.mjs); empty means off
         run: npx cdk synth -q && node check-template.mjs
 
       - name: Deploy the API
         env:
-          SENTRY_DSN_CLOUD: ${{ secrets.SENTRY_DSN_CLOUD }}
+          SENTRY_DSN_CLOUD: ${{ secrets.SENTRY_DSN_CLOUD }}   # error reports (cloud/api/sentry.mjs); empty means off
         run: npx cdk deploy BridgeApi --require-approval never --outputs-file outputs.json
 
       # Separate, so the API still ships while AWS has CloudFront blocked pending account verification.
