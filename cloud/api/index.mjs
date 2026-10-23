@@ -12,25 +12,13 @@ import { makeAuth } from './auth.mjs';
 import { makeApns, makeNotifier, http2Send } from './push.mjs';
 import { makeSpeak } from './speech.mjs';
 import { makePro } from './storekit.mjs';
-import { makeSentry } from './sentry.mjs';
+import { makeSentry, reportConsoleErrors, withReports } from './sentry.mjs';
 
 // Error reports (sentry.mjs), when the stack was deployed with a DSN. Every failure the handlers catch is already
 // logged as console.error(place, error), so those are reported too, tagged with the place (a route, "push failed").
 const sentry = makeSentry({ dsn: process.env.SENTRY_DSN, environment: 'cloud', release: process.env.AWS_LAMBDA_FUNCTION_NAME, log: console.warn });
-if (sentry.enabled) {
-  const logError = console.error.bind(console);
-  console.error = (...args) => {
-    logError(...args);
-    const error = args.find((a) => a instanceof Error);
-    if (error) sentry.capture(error, typeof args[0] === 'string' ? args[0] : 'console.error');
-  };
-}
-// Reports an error a handler throws, and waits (up to 3 s) for reports in flight: Lambda freezes once it answers.
-const reported = (fn) => async (event, context) => {
-  try { return await fn(event, context); }
-  catch (e) { sentry.capture(e, `unhandled in ${context?.functionName ?? 'handler'}`); throw e; }
-  finally { await sentry.flush(); }
-};
+reportConsoleErrors(sentry);
+const reported = (fn) => withReports(sentry, fn);
 
 const TABLE = process.env.TABLE;
 const LOOK_MODEL = process.env.LOOK_MODEL || 'us.anthropic.claude-haiku-5-5';

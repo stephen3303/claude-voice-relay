@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDsn, clean, frames, toEvent, makeSentry } from './sentry.mjs';
+import { parseDsn, clean, frames, toEvent, makeSentry, reportConsoleErrors, withReports } from './sentry.mjs';
 
 const DSN = 'https://0123456789abcdef0123456789abcdef@o123.sentry.example/456';
 
@@ -128,4 +128,38 @@ test('flush waits for reports in flight, and no longer than its limit', async ()
   await s.flush(50);
   clearInterval(alive);
   assert.ok(Date.now() - started < 500);
+});
+
+function fakeSentry(enabled = true) {
+  const captured = [];
+  let flushed = 0;
+  return { captured, flushes: () => flushed, enabled, capture: (e, where) => { captured.push([e, where]); return Promise.resolve(); },
+    flush: async () => { flushed++; } };
+}
+
+test('reportConsoleErrors still logs, and reports an Error argument tagged with the first string', () => {
+  const s = fakeSentry();
+  const logged = [];
+  const target = { error: (...a) => logged.push(a) };
+  reportConsoleErrors(s, target);
+  const e = new Error('x');
+  target.error('POST /voice/send', e);
+  target.error('no error here');
+  target.error(e);
+  assert.equal(logged.length, 3);
+  assert.deepEqual(s.captured, [[e, 'POST /voice/send'], [e, 'console.error']]);
+
+  const off = { error: () => {} }, before = off.error;
+  reportConsoleErrors(fakeSentry(false), off);
+  assert.equal(off.error, before);
+});
+
+test('withReports reports a thrown error, rethrows it, and flushes either way', async () => {
+  const s = fakeSentry();
+  assert.equal(await withReports(s, async (ev) => ev + 1)(1, {}), 2);
+  assert.equal(s.flushes(), 1);
+  const e = new Error('boom');
+  await assert.rejects(withReports(s, async () => { throw e; })({}, { functionName: 'Voice' }), e);
+  assert.deepEqual(s.captured, [[e, 'unhandled in Voice']]);
+  assert.equal(s.flushes(), 2);
 });

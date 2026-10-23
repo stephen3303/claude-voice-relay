@@ -114,3 +114,21 @@ export function makeSentry({ dsn, environment = 'production', release, fetch = g
 
   return { enabled: true, capture, flush };
 }
+
+// console.error(place, error) also reports the error, tagged with the place.
+export function reportConsoleErrors(sentry, target = console) {
+  if (!sentry.enabled) return;
+  const logError = target.error.bind(target);
+  target.error = (...args) => {
+    logError(...args);
+    const error = args.find((a) => a instanceof Error);
+    if (error) sentry.capture(error, typeof args[0] === 'string' ? args[0] : 'console.error');
+  };
+}
+
+// A Lambda handler that reports what it throws, and waits for reports in flight: Lambda freezes once it answers.
+export const withReports = (sentry, fn) => async (event, context) => {
+  try { return await fn(event, context); }
+  catch (e) { sentry.capture(e, `unhandled in ${context?.functionName ?? 'handler'}`); throw e; }
+  finally { await sentry.flush(); }
+};
