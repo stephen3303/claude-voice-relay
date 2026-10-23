@@ -510,9 +510,10 @@ final class Conversation: NSObject, ObservableObject {
         text.range(of: #"^(in|on)\s"#, options: [.regularExpression, .caseInsensitive]) != nil ? "task: \(text)" : text
     }
 
-    /// "Look at this, ...", "take a picture", "what am I looking at", "send this to <project>, ..."
+    /// The answer to a photo request in a build with no camera (the App Store build has no glasses toolkit).
     nonisolated static let noCamera = "This version of Bridge can't take photos."
 
+    /// "Look at this, ...", "take a picture", "what am I looking at", "send this to <project>, ..."
     nonisolated static func wantsPhoto(_ text: String) -> Bool {
         text.range(of: #"^(take a (picture|photo)|look at (this|that)|what am i looking at|what('s| is) (this|that)\b|(send|show|give) (this|it|that)( photo| picture)? to )"#,
                    options: [.regularExpression, .caseInsensitive]) != nil
