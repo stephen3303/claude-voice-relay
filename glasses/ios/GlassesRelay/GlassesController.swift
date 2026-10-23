@@ -7,8 +7,6 @@ import MWDATCamera
 /// Registers with Meta AI and listens for "Hey Meta, start Bridge".
 /// Modeled on the toolkit's BirdSpotter sample (DatGlassesVoiceRepository): wait for registration,
 /// open the voice channel, follow the device list, and reopen the channel whenever it drops.
-/// The App Store build has no toolkit (appstore.yml): Meta doesn't allow toolkit apps on the App Store yet,
-/// so there it only holds the conversation, and the glasses parts of the screens are hidden.
 @MainActor
 final class GlassesController: ObservableObject {
     /// One per app, shared with the Shortcuts actions.
@@ -25,6 +23,8 @@ final class GlassesController: ObservableObject {
     nonisolated(unsafe) static var screenshotMode = false
 
     #if APP_STORE
+    // No toolkit in this build (appstore.yml): Meta doesn't allow toolkit apps on the App Store yet,
+    // so it only holds the conversation, and the glasses parts of the screens are hidden.
     private init() {}
 
     func start() async {}

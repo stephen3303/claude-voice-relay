@@ -405,7 +405,7 @@ final class Conversation: NSObject, ObservableObject {
         Task {
             phase = .thinking
             let reply: String
-            // No camera (the App Store build has no glasses toolkit): "what is this…" is just a question for the agent.
+            // Without a camera, "what is this…" is just a question for the agent.
             if Self.wantsPhoto(text), takePhoto != nil, !Store.shared.isPro {
                 reply = Store.Locked.needsPro.localizedDescription
             } else if Self.wantsPhoto(text), let takePhoto {

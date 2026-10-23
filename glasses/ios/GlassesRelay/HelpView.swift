@@ -8,8 +8,8 @@ struct HelpView: View {
         NavigationStack {
             List {
                 Section("Getting started") {
-                    // The App Store build has no glasses toolkit (appstore.yml), so it starts at signing in.
                     #if APP_STORE
+                    // No glasses toolkit in this build (appstore.yml), so it starts at signing in.
                     HelpItem("1. Sign in", "In Settings, sign in with Apple. Your agents run in Bridge Cloud, so there's nothing else to set up. Demo gives sample replies so you can try it first.")
                     HelpItem("2. Start talking", "Tap Talk, say \"Hey Siri, talk to Bridge\", or use the Action Button. Bridge says \"Go ahead\" when it's listening. AirPods or any Bluetooth headset keep your hands free.")
                     #else

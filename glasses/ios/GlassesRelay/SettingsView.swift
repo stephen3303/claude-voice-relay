@@ -65,7 +65,7 @@ struct SettingsView: View {
                 #endif
                 connectionSection
                 #if !APP_STORE
-                glassesSection   // the App Store build has no glasses toolkit (appstore.yml)
+                glassesSection
                 #endif
                 Section {
                     Toggle("Read back what I said", isOn: $readBack)
