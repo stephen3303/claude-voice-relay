@@ -11,7 +11,7 @@ test('the owner token matches its stored hash, and nothing else does', async () 
   assert.equal(await check(TOKEN), true);
   assert.equal(await check(TOKEN.toUpperCase()), false);
   assert.equal(await check('cd'.repeat(32)), false);
-  assert.equal(reads, 1, 'read once per container');
+  assert.equal(reads, 1, 'read once, not per request');
 });
 
 test('a short token never reads the secret', async () => {
@@ -51,4 +51,29 @@ test('the authorizer lets the owner token in as the owner', async () => {
     appleKeys: async () => ({ keys: [] }), sign: async () => Buffer.alloc(0), publicJwk: async () => null, deleteUser: async () => {} });
   assert.deepEqual(await authorize({ headers: { authorization: `Bearer ${TOKEN}` } }), { isAuthorized: true, context: { sub: OWNER } });
   assert.deepEqual(await authorize({ headers: { authorization: `Bearer ${'cd'.repeat(32)}` } }), { isAuthorized: false });
+});
+
+test("the owner's Apple account maps to OWNER; other accounts and a missing or odd appleSub don't", async () => {
+  const check = makeOwner({ secret: async () => ({ tokenHash: tokenHash(TOKEN), appleSub: 'apple.001.abc' }) });
+  assert.equal(await check.userFor('apple.001.abc'), OWNER);
+  assert.equal(await check.userFor('apple.002.xyz'), 'apple.002.xyz');
+  assert.equal(await makeOwner({ secret: async () => ({ tokenHash: tokenHash(TOKEN) }) }).userFor('apple.001.abc'), 'apple.001.abc');
+  assert.equal(await makeOwner({ secret: async () => ({ appleSub: 'owner' }) }).userFor('owner'), 'owner');
+  assert.equal(await makeOwner({ secret: async () => ({ appleSub: '' }) }).userFor(''), '');
+  assert.equal(await makeOwner({ secret: async () => null }).userFor('apple.001.abc'), 'apple.001.abc');
+  assert.equal(await makeOwner({ secret: async () => { throw Object.assign(new Error('x'), { name: 'AccessDenied' }); } }).userFor('apple.001.abc'), 'apple.001.abc');
+});
+
+test('a changed secret is picked up within minutes, and a failed read keeps the last one', async () => {
+  let stored = { tokenHash: tokenHash(TOKEN) }, fail = false, clock = 0;
+  const check = makeOwner({ secret: async () => { if (fail) throw Object.assign(new Error('x'), { name: 'ThrottlingException' }); return stored; }, now: () => clock });
+  assert.equal(await check.userFor('apple.001.abc'), 'apple.001.abc');
+  stored = { tokenHash: tokenHash(TOKEN), appleSub: 'apple.001.abc' };
+  assert.equal(await check.userFor('apple.001.abc'), 'apple.001.abc', 'not before the next read');
+  clock += 5 * 60_000;
+  assert.equal(await check.userFor('apple.001.abc'), OWNER);
+  fail = true;
+  clock += 5 * 60_000;
+  assert.equal(await check(TOKEN), true);
+  assert.equal(await check.userFor('apple.001.abc'), OWNER);
 });

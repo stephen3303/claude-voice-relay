@@ -22,7 +22,7 @@ function appleToken(claims) {
   return `${body}.${createSign('RSA-SHA256').update(body).sign(apple.privateKey).toString('base64url')}`;
 }
 
-function setup() {
+function setup({ userFor } = {}) {
   let clock = NOW;
   const clients = new Map(), grants = new Map(), refresh = new Map(), started = [], inbox = [];
   const keys = {
@@ -50,6 +50,7 @@ function setup() {
         for (const [k, r] of refresh) if (k.startsWith(`${u}|`) && r.data.family === family) refresh.delete(k);
       },
     },
+    userFor,
     startTask: async (user, t) => { started.push({ user, ...t }); return 'Sent.'; },
     messagesAfter: async (user, after) => inbox.filter((m) => m.user === user && m.id > after).slice(0, 20),
     latestMessages: async (user, n) => inbox.filter((m) => m.user === user).slice(-n),
@@ -306,6 +307,19 @@ test('deleting the account disconnects Claude', async () => {
   const { client, refresh_token } = await connect();
   deleteAccount('apple.001.abc');
   assert.equal((await refreshWith(client.client_id, refresh_token)).statusCode, 400);
+});
+
+test("the owner's Apple account uses the owner's agents and inbox; refresh stays with the account", async () => {
+  const { connect, mcp, refreshWith, started, inbox } = setup({ userFor: async (sub) => (sub === 'apple.001.abc' ? 'owner' : sub) });
+  const { client, access_token, refresh_token } = await connect();
+  await mcp(access_token, { jsonrpc: '2.0', id: 1, method: 'tools/call',
+    params: { name: 'send_task', arguments: { project: 'bridge', task: 'list the open pull requests' } } });
+  assert.deepEqual(started, [{ user: 'owner', project: 'bridge', task: 'list the open pull requests' }]);
+  inbox.push({ user: 'owner', id: 1, text: 'One open pull request.', at: NOW }, { user: 'apple.001.abc', id: 2, text: 'not the owner inbox', at: NOW });
+  const read = JSON.parse((await mcp(access_token, { jsonrpc: '2.0', id: 2, method: 'tools/call',
+    params: { name: 'read_inbox', arguments: {} } })).body);
+  assert.deepEqual(read.result.structuredContent.messages.map((m) => m.text), ['One open pull request.']);
+  assert.equal((await refreshWith(client.client_id, refresh_token)).statusCode, 200, 'refresh tokens are still found under the Apple account');
 });
 
 test('read_inbox with no cursor gives the newest messages', async () => {

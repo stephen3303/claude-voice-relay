@@ -85,6 +85,7 @@ const sameSecret = (a, b) => a.length === b.length && timingSafeEqual(a, b);
  *   token used in one step and says whether it already was. Refresh tokens are kept under the user's
  *   own records, so deleting the account revokes them.
  * deps.startTask(user, { project, task }) -> spoken line
+ * deps.userFor(sub) -> the user whose tasks and inbox the tools use (optional; the owner's Apple account is OWNER)
  * deps.messagesAfter(user, id) -> [{ id, text, at }], deps.latestMessages(user, n) -> the newest n, oldest first
  * deps.now() -> ms
  */
@@ -308,11 +309,13 @@ export function makeConnector(deps) {
     if (raw.length > BODY_MAX) return json(413, rpcError(null, -32600, 'Request too large.'));
     let body;
     try { body = JSON.parse(raw.toString('utf8')); } catch { return json(400, rpcError(null, -32700, 'Parse error.')); }
+    // Refresh tokens stay under the signed-in account; only the tools act as the owner.
+    const user = deps.userFor ? await deps.userFor(claims.sub) : claims.sub;
     if (Array.isArray(body)) {
-      const out = (await Promise.all(body.map((m) => rpc(claims.sub, m)))).filter(Boolean);
+      const out = (await Promise.all(body.map((m) => rpc(user, m)))).filter(Boolean);
       return out.length ? json(200, out) : accepted();
     }
-    const out = await rpc(claims.sub, body);
+    const out = await rpc(user, body);
     return out ? json(200, out) : accepted();
   }
 

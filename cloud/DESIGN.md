@@ -126,6 +126,10 @@ moved: each task is a claude.ai cloud session that shows in the Claude app.
   relay token (by default the relay's own `VOICE_TOKEN`). The authorizer compares it with the SHA-256 in Secrets
   Manager (`bridge/owner`) and lets it in as the user `owner`, who has every Pro feature. The app only changes its
   relay address to `<ApiUrl>/api`; the voice protocol is the same, and Tailscale is no longer needed.
+- **The Claude connector** signs in with Sign in with Apple, as `apple.<sub>`. `bridge/owner` can also hold the
+  owner's `appleSub` (setup-owner.ps1 offers the accounts that connected Claude, by date); the connector's tools then
+  act as `owner`, so Claude on claude.ai starts the owner's agents and reads their inbox. Its refresh tokens stay
+  under the Apple account, and the app's own Apple sign-in is unchanged.
 - **Agents** (`cloud/api/agents.mjs`): only `owner` gets them, because they run on Stephen's claude.ai
   subscription and the Agent SDK terms keep subscription sign-in out of products for others. Everyone else still
   gets the "not switched on" answer until build step 4 (API billing). Projects (`PROJECT#` items) come from his

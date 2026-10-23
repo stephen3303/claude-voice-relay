@@ -458,6 +458,7 @@ export const connector = makeConnector({
   publicJwk: getPublicJwk,
   store: grants,
   startTask,
+  userFor: isOwner.userFor,
   messagesAfter: (user, after) => store.messagesAfter(user, after),
   latestMessages,
 });

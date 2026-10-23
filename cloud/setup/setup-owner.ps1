@@ -3,7 +3,8 @@
 # replace the claude.ai login:
 #   powershell -ExecutionPolicy Bypass -File cloud\setup\setup-owner.ps1
 # It stores, straight from this PC to AWS (never through chat or the repo):
-#   bridge/owner         the SHA-256 of your owner token: by default the relay's VOICE_TOKEN, so the app keeps its token
+#   bridge/owner         the SHA-256 of your owner token: by default the relay's VOICE_TOKEN, so the app keeps its token,
+#                        and your Apple account id, so the Claude connector reaches your agents (-AppleAccount to re-pick)
 #   bridge/owner-claude  a claude.ai login made just for Bridge Cloud (a browser window opens), plus the relay's
 #                        project routine and ntfy settings from its .env
 #   bridge/owner-routine the claude.ai routine new tasks start as ({ url, token }), asked for once (-TaskRoutine to replace it)
@@ -14,7 +15,8 @@ param(
   [string]$RelayDir = '',
   [switch]$SkipLogin,
   [switch]$SkipProjects,
-  [switch]$TaskRoutine
+  [switch]$TaskRoutine,
+  [switch]$AppleAccount
 )
 $ErrorActionPreference = 'Stop'
 $region = 'us-east-1'
@@ -85,8 +87,49 @@ if (-not $token -or $token -notmatch '^[\x21-\x7e]{24,512}$') {
 }
 $sha = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($token))
 $hash = -join ($sha | ForEach-Object { $_.ToString('x2') })
-Save-Secret 'bridge/owner' (@{ tokenHash = $hash } | ConvertTo-Json -Compress)
-Write-Host 'Saved bridge/owner (the token''s hash only).'
+
+# ---------- your Apple account, for the Claude connector ----------
+# The connector signs in with Sign in with Apple, as Bridge account "apple.<id>". Saving yours here lets Claude on
+# claude.ai reach your agents too. Picked from the accounts that connected Claude, by when they did.
+$appleSub = $null
+if (-not (Quiet-Exit { aws secretsmanager describe-secret --region $region --secret-id 'bridge/owner' })) {
+  $appleSub = (aws secretsmanager get-secret-value --region $region --secret-id 'bridge/owner' --query SecretString --output text | ConvertFrom-Json).appleSub
+}
+if ($AppleAccount -or -not $appleSub) {
+  $values = New-TemporaryFile
+  try {
+    Set-Content -Path $values -Value '{":u":{"S":"USER#apple."},":rt":{"S":"RT#"}}' -NoNewline
+    $scan = aws dynamodb scan --region $region --table-name $table --output json `
+      --filter-expression 'begins_with(pk, :u) AND begins_with(sk, :rt)' --expression-attribute-values "file://$values" | ConvertFrom-Json
+    if ($LASTEXITCODE) { throw 'Could not read the Claude connector sign-ins.' }
+  } finally { Remove-Item $values -Force }
+  $seen = @{}
+  foreach ($i in $scan.Items) {
+    $sub = $i.pk.S.Substring('USER#'.Length)
+    $at = [long]$i.data.M.auth_time.N
+    if (-not $seen.ContainsKey($sub) -or $seen[$sub] -lt $at) { $seen[$sub] = $at }
+  }
+  $accounts = @($seen.GetEnumerator() | Sort-Object Value -Descending)
+  if (-not $accounts.Count) {
+    Write-Host 'No Apple account has connected Bridge in Claude yet. Connect it in Claude (Settings, Connectors), then run this again with -AppleAccount.'
+  } else {
+    Write-Host ''
+    Write-Host 'Accounts that connected Bridge in Claude, newest first. Which one is you?'
+    for ($n = 0; $n -lt $accounts.Count; $n++) {
+      $when = [DateTimeOffset]::FromUnixTimeSeconds($accounts[$n].Value).LocalDateTime.ToString('ddd d MMM yyyy, h:mm tt')
+      $id = $accounts[$n].Key
+      Write-Host "  $($n + 1). connected $when (account ending $($id.Substring([Math]::Max(0, $id.Length - 6))))"
+    }
+    $pick = (Read-Host 'Number (Enter to skip)').Trim()
+    if ($pick -match '^\d+$' -and [int]$pick -ge 1 -and [int]$pick -le $accounts.Count) {
+      $appleSub = $accounts[[int]$pick - 1].Key
+    } elseif ($pick) { throw 'That is not one of the numbers.' }
+  }
+}
+$owner = @{ tokenHash = $hash }
+if ($appleSub) { $owner.appleSub = $appleSub }
+Save-Secret 'bridge/owner' ($owner | ConvertTo-Json -Compress)
+Write-Host "Saved bridge/owner (the token's hash only$(if ($appleSub) { ', and your Apple account for the Claude connector' }))."
 
 # ---------- a claude.ai login for Bridge Cloud ----------
 # Its own sign-in, in a throwaway folder: sharing this PC's login would break one of them each time the
