@@ -58,6 +58,9 @@
       <li><strong>Service logs.</strong> Bridge Cloud's logs record errors and events (such as whether a push was delivered) so problems can be fixed. They are deleted after 30 days.</li>
     </ul>
 
+    <h2>Photos</h2>
+    <p>The Bridge app doesn't take photos. If a photo is sent to Bridge Cloud's photo route, it is answered by a Claude model through Amazon Bedrock on Bridge's Amazon Web Services account, and not stored.</p>
+
     <h2>Spoken replies</h2>
     <p>By default, replies are spoken by your iPhone's own voices and nothing leaves the phone to speak them. Natural voice starts off on new installs; if you already heard it with Bridge Pro on Bridge Cloud before the switch was added, it stays on until you turn it off. With Bridge Pro and Natural voice turned on, the text of each reply is sent to Amazon Polly, on Bridge's Amazon Web Services account, to be turned into speech. The text isn't stored; only the character count above is.</p>
 
@@ -66,7 +69,7 @@
 
     <h2>Who processes your data</h2>
     <ul>
-      <li><strong>Amazon Web Services</strong> (United States) hosts Bridge Cloud, its database and Amazon Polly.</li>
+      <li><strong>Amazon Web Services</strong> (United States) hosts Bridge Cloud, its database, Amazon Bedrock and Amazon Polly.</li>
       <li><strong>Apple</strong> provides Sign in with Apple, speech recognition, push notifications and App Store purchases.</li>
       <li><strong>Sentry</strong> receives crash and error reports, below.</li>
       <li><strong>GitHub</strong> hosts this website.</li>

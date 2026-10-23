@@ -14,6 +14,10 @@ targets:
         product: MWDATCamera
     info:
       properties:
+        CFBundleURLTypes:                   # Meta AI calls back here after registration (MWDAT.AppLinkURLScheme)
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: com.talktobridge.bridge
+            CFBundleURLSchemes: [glassesrelay]
         MWDAT:
           AppLinkURLScheme: "glassesrelay://"
           MetaAppID: $(META_APP_ID)          # "0" = Developer Mode, no attestation
@@ -27,6 +31,7 @@ targets:
         NSBluetoothAlwaysUsageDescription: Connects to your Meta glasses.
         NSLocalNetworkUsageDescription: Lets your phone find and connect to your glasses over Wi-Fi.
         NSBonjourServices: [_bonjour._tcp]
+        NSMicrophoneUsageDescription: Hears you through your glasses, headset or phone microphone.
         NSCameraUsageDescription: Takes photos with your glasses camera when you ask, for Claude to look at.
     settings:
       base:

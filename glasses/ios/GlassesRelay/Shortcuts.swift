@@ -9,7 +9,11 @@ struct TalkToBridge: AppIntent {
     static let openAppWhenRun = true   // the conversation needs the app's audio session
 
     @MainActor func perform() async throws -> some IntentResult {
+        #if APP_STORE
+        GlassesController.shared.conversation.begin(trigger: .button)   // no glasses link to wait for
+        #else
         GlassesController.shared.conversation.begin(trigger: .glasses)
+        #endif
         return .result()
     }
 }

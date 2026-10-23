@@ -130,5 +130,5 @@ conversation transcript, the Bridge Pro sheet) and add them in App Store Connect
 
 - **Ongoing value (guideline 3.1.2):** Apple sometimes rejects subscriptions that only unlock
   features. If that happens, switch Pro to a one-time non-consumable purchase in `Store.swift`.
-- **Account (2.1):** the reviewer signs in with Apple, or uses the demo, plus the video above.
-- **MFi accessory protocol:** see step 7.
+- **Account (2.1):** the reviewer signs in with Apple, or uses the demo.
+- **App icon:** it shows glasses, which this build doesn't support; worth a new icon before review.

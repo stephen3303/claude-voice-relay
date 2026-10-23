@@ -405,8 +405,11 @@ final class Conversation: NSObject, ObservableObject {
         Task {
             phase = .thinking
             let reply: String
-            // Without a camera, "what is this…" is just a question for the agent.
-            if Self.wantsPhoto(text), takePhoto != nil, !Store.shared.isPro {
+            // Without a camera (no glasses toolkit in the App Store build), a photo request is answered here:
+            // sent on, it could be taken as the answer to a read-back or an agent's question.
+            if Self.wantsPhoto(text), takePhoto == nil {
+                reply = Self.noCamera
+            } else if Self.wantsPhoto(text), !Store.shared.isPro {
                 reply = Store.Locked.needsPro.localizedDescription
             } else if Self.wantsPhoto(text), let takePhoto {
                 await say("Taking a picture.")
@@ -454,7 +457,7 @@ final class Conversation: NSObject, ObservableObject {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, canSendText else { return false }
         transcript.append(("You", text))
-        if Self.wantsPhoto(text), takePhoto != nil { transcript.append(("Relay", "Photos are voice-only. Ask out loud.")); return true }
+        if Self.wantsPhoto(text) { transcript.append(("Relay", takePhoto == nil ? Self.noCamera : "Photos are voice-only. Ask out loud.")); return true }
         sendingText = true
         Task {
             defer { sendingText = false }
@@ -508,6 +511,8 @@ final class Conversation: NSObject, ObservableObject {
     }
 
     /// "Look at this, ...", "take a picture", "what am I looking at", "send this to <project>, ..."
+    nonisolated static let noCamera = "This version of Bridge can't take photos."
+
     nonisolated static func wantsPhoto(_ text: String) -> Bool {
         text.range(of: #"^(take a (picture|photo)|look at (this|that)|what am i looking at|what('s| is) (this|that)\b|(send|show|give) (this|it|that)( photo| picture)? to )"#,
                    options: [.regularExpression, .caseInsensitive]) != nil

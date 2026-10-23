@@ -1,6 +1,7 @@
 // Creates Bridge Pro in App Store Connect with the API key: the subscription group, the monthly
 // and yearly subscriptions, their prices in every territory (Apple's equalized prices from the
-// US price), availability, and a 1-week free trial. Safe to run again: it skips what exists.
+// US price), availability, and a 1-week free trial. Safe to run again: it skips what exists, and brings an
+// existing subscription's description and review note up to date.
 //   ASC_KEY_ID=... ASC_ISSUER_ID=... ASC_KEY_P8=path node glasses/asc-subscriptions.mjs
 import { createSign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -9,10 +10,11 @@ const BUNDLE_ID = 'com.talktobridge.bridge';
 const GROUP = 'Bridge Pro';
 const PLANS = [
   { productId: `${BUNDLE_ID}.pro.monthly`, name: 'Bridge Pro Monthly', period: 'ONE_MONTH', price: '4.99', level: 2,
-    description: 'Natural voice, Shortcuts and hosted agents' },
+    description: 'Natural voice and the Ask shortcut' },
   { productId: `${BUNDLE_ID}.pro.yearly`, name: 'Bridge Pro Yearly', period: 'ONE_YEAR', price: '49.99', level: 1,
-    description: 'Natural voice, Shortcuts and hosted agents' },
+    description: 'Natural voice and the Ask shortcut' },
 ];
+const REVIEW_NOTE = 'Unlocks the natural cloud voice and the Ask Bridge Shortcuts action. Demo replies are built in: Settings > Connection > Connect to: Demo.';
 
 const { ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 } = process.env;
 const key = readFileSync(ASC_KEY_P8, 'utf8');
@@ -77,7 +79,7 @@ for (const plan of PLANS) {
       type: 'subscriptions',
       attributes: { name: plan.name, productId: plan.productId, subscriptionPeriod: plan.period,
         familySharable: false, groupLevel: plan.level,
-        reviewNote: 'Unlocks the natural cloud voice and the Ask Bridge Shortcuts action. A demo relay is built in: Settings > PC relay > Use demo.' },
+        reviewNote: REVIEW_NOTE },
       relationships: { group: rel('subscriptionGroups', group.id) },
     })).data;
     await api('POST', '/v1/subscriptionLocalizations', {
@@ -85,6 +87,25 @@ for (const plan of PLANS) {
       relationships: { subscription: rel('subscriptions', sub.id) },
     });
     console.log(`created ${plan.productId} ${sub.id}`);
+  } else {
+    // An existing subscription keeps what Pro used to promise unless its texts are brought up to date.
+    if (sub.attributes.reviewNote !== REVIEW_NOTE) {
+      await api('PATCH', `/v1/subscriptions/${sub.id}`, { type: 'subscriptions', id: sub.id, attributes: { reviewNote: REVIEW_NOTE } });
+      console.log(`updated the review note of ${plan.productId}`);
+    }
+    const loc = (await all(`/v1/subscriptions/${sub.id}/subscriptionLocalizations`)).find((l) => l.attributes.locale === 'en-US');
+    if (!loc) {
+      await api('POST', '/v1/subscriptionLocalizations', {
+        type: 'subscriptionLocalizations', attributes: { locale: 'en-US', name: plan.name, description: plan.description },
+        relationships: { subscription: rel('subscriptions', sub.id) },
+      });
+      console.log(`added the description of ${plan.productId}`);
+    } else if (loc.attributes.description !== plan.description || loc.attributes.name !== plan.name) {
+      await api('PATCH', `/v1/subscriptionLocalizations/${loc.id}`, {
+        type: 'subscriptionLocalizations', id: loc.id, attributes: { name: plan.name, description: plan.description },
+      });
+      console.log(`updated the description of ${plan.productId}`);
+    }
   }
 
   // Availability first: prices and offers can only be set in territories it is sold in.

@@ -35,12 +35,16 @@ struct GlassesRelayApp: App {
         // The simulator has no glasses or toolkit, so show the state a set-up user sees.
         GlassesController.screenshotMode = true
         UserDefaults.standard.set(true, forKey: "welcomed")
+        let glasses = GlassesController.shared
+        #if APP_STORE
+        Relay.shared.baseURL = Relay.cloudAddress   // what the listing describes: agents in Bridge Cloud
+        #else
         Relay.shared.baseURL = "https://my-pc.tail1234.ts.net"
         Relay.shared.token = "screenshot-token"
-        let glasses = GlassesController.shared
         glasses.registration = "Registered"
         glasses.deviceCount = 1
         glasses.cameraAllowed = true
+        #endif
         glasses.conversation.phase = .listening
         glasses.conversation.transcript = [
             ("You", "In trading bot, add a stop-loss check to the order router"),

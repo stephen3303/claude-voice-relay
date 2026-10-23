@@ -29,14 +29,10 @@ targets:
         UILaunchScreen:                     # navy, with the icon in the middle (Assets.xcassets)
           UIColorName: LaunchBackground
           UIImageName: LaunchLogo
-        CFBundleURLTypes:
-          - CFBundleTypeRole: Editor
-            CFBundleURLName: com.talktobridge.bridge
-            CFBundleURLSchemes: [glassesrelay]
         SentryDSN: $(SENTRY_DSN)            # empty unless CI sets it from the SENTRY_DSN secret (ErrorReporting.swift)
         # audio: keeps the conversation alive in your pocket. The flavours add their own modes.
         UIBackgroundModes: [audio]
-        NSMicrophoneUsageDescription: Hears you through your glasses, headset or phone microphone.
+        NSMicrophoneUsageDescription: Hears you through your headset or phone microphone.
         NSSpeechRecognitionUsageDescription: Turns what you say into text for your Claude agents.
     settings:
       base:
