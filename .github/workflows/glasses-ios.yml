@@ -44,6 +44,24 @@ jobs:
           brew install xcodegen xcbeautify
           if [ "${{ matrix.flavor }}" = appstore ]; then xcodegen generate --spec appstore.yml; else xcodegen generate; fi
 
+      # base.yml's settings are merged with each flavour's (arrays append), and a missing background mode or
+      # a leftover accessory protocol compiles fine, so check the generated Info.plist itself.
+      - name: Check the flavour's Info.plist
+        run: |
+          plist() { /usr/libexec/PlistBuddy -c "Print :$1" GlassesRelay/Info.plist 2>/dev/null; }
+          modes=$(plist UIBackgroundModes); echo "UIBackgroundModes: $modes"
+          echo "$modes" | grep -qx ' *audio' || { echo "::error::audio background mode missing"; exit 1; }
+          plist SentryDSN >/dev/null || { echo "::error::base.yml properties missing"; exit 1; }
+          if [ "${{ matrix.flavor }}" = appstore ]; then
+            echo "$modes" | grep -qx ' *voip' || { echo "::error::voip background mode missing"; exit 1; }
+            if plist UISupportedExternalAccessoryProtocols || plist MWDAT || echo "$modes" | grep -q external-accessory; then
+              echo "::error::the App Store build must not declare the Meta glasses accessory"; exit 1
+            fi
+          else
+            echo "$modes" | grep -qx ' *external-accessory' || { echo "::error::external-accessory background mode missing"; exit 1; }
+            plist UISupportedExternalAccessoryProtocols | grep -q com.meta.ar.wearable || { echo "::error::glasses accessory protocol missing"; exit 1; }
+          fi
+
       - name: Build unsigned device app
         run: |
           set -o pipefail
