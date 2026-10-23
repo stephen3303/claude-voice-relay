@@ -14,9 +14,6 @@ $issuer = Read-Host 'App Store Connect Issuer ID'
 $p8     = Read-Host 'Path to the AuthKey_XXXX.p8 file (e.g. C:\Users\steph\Downloads\AuthKey_ABC123.p8)'
 $p8     = $p8.Trim('"')
 if (-not (Test-Path $p8)) { throw "No file at $p8" }
-# The Meta values can wait: left empty, the build uses "0" (Meta Developer Mode), fine for TestFlight.
-$metaId    = Read-Host 'Meta App ID (Wearables Developer Center > your app; Enter to skip for now)'
-$metaToken = if ($metaId.Trim()) { Read-Host 'Meta Client Token (same page)' } else { '' }
 
 $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($p8))
 
@@ -50,18 +47,13 @@ Set-EnvSecret APPLE_TEAM_ID     $team.Trim()
 Set-EnvSecret ASC_KEY_ID        $keyId.Trim()
 Set-EnvSecret ASC_ISSUER_ID     $issuer.Trim()
 Set-EnvSecret ASC_KEY_P8_BASE64 $b64
-if ($metaId.Trim() -and $metaToken.Trim()) {
-  Set-EnvSecret META_APP_ID       $metaId.Trim()
-  Set-EnvSecret META_CLIENT_TOKEN $metaToken.Trim()
-}
 
-# 3. Repository-level copies, which any branch's workflow could read. Only those the environment now holds:
-#    skipped Meta prompts leave earlier repository values in place rather than dropping them.
+# 3. Repository-level copies, which any branch's workflow could read. Only those the environment now holds.
 $envSecrets = (gh secret list -R $repo --env $envName --json name | ConvertFrom-Json).name
 if ($LASTEXITCODE) { throw "listing the $envName secrets failed; nothing was deleted" }
 $repoSecrets = (gh secret list -R $repo --json name | ConvertFrom-Json).name
 if ($LASTEXITCODE) { throw 'listing the repository secrets failed; nothing was deleted' }
-foreach ($name in 'APPLE_TEAM_ID', 'ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_P8_BASE64', 'META_APP_ID', 'META_CLIENT_TOKEN') {
+foreach ($name in 'APPLE_TEAM_ID', 'ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_P8_BASE64') {
   if ($repoSecrets -contains $name -and $envSecrets -contains $name) {
     gh secret delete $name -R $repo
     if ($LASTEXITCODE) { throw "deleting the repository secret $name failed" }

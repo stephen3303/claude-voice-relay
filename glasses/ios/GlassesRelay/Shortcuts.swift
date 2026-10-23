@@ -5,11 +5,15 @@ import AppIntents
 
 struct TalkToBridge: AppIntent {
     static let title: LocalizedStringResource = "Talk to Bridge"
-    static let description = IntentDescription("Start a hands-free conversation with your Claude agents through your glasses.")
+    static let description = IntentDescription("Start a hands-free conversation with your Claude agents.")
     static let openAppWhenRun = true   // the conversation needs the app's audio session
 
     @MainActor func perform() async throws -> some IntentResult {
+        #if APP_STORE
+        GlassesController.shared.conversation.begin(trigger: .button)   // no glasses link to wait for
+        #else
         GlassesController.shared.conversation.begin(trigger: .glasses)
+        #endif
         return .result()
     }
 }
@@ -17,7 +21,7 @@ struct TalkToBridge: AppIntent {
 struct AskBridge: AppIntent {
     static let title: LocalizedStringResource = "Ask Bridge"
     static let description = IntentDescription(
-        "Send a message to your PC relay and get its reply, with the same read-back as the glasses. Start with \"in <project>,\" to begin a task, then send \"yes\" when it asks \"Ready to send it?\"")
+        "Send a message to your agents and get the reply, with the same read-back as a spoken conversation. Start with \"in <project>,\" to begin a task, then send \"yes\" when it asks \"Ready to send it?\"")
 
     @Parameter(title: "Message", requestValueDialog: "What should I send?")
     var message: String
@@ -29,6 +33,8 @@ struct AskBridge: AppIntent {
     }
 }
 
+// The glasses camera needs the Meta toolkit.
+#if !APP_STORE
 struct LookWithBridge: AppIntent {
     static let title: LocalizedStringResource = "Look with Bridge"
     static let description = IntentDescription(
@@ -44,6 +50,7 @@ struct LookWithBridge: AppIntent {
         return .result(value: reply, dialog: "\(reply)")
     }
 }
+#endif
 
 struct BridgeShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
@@ -53,8 +60,10 @@ struct BridgeShortcuts: AppShortcutsProvider {
         AppShortcut(intent: AskBridge(),
                     phrases: ["Ask \(.applicationName)", "Send to \(.applicationName)"],
                     shortTitle: "Ask", systemImageName: "text.bubble")
+        #if !APP_STORE
         AppShortcut(intent: LookWithBridge(),
                     phrases: ["Look with \(.applicationName)", "What am I looking at with \(.applicationName)"],
                     shortTitle: "Look", systemImageName: "camera")
+        #endif
     }
 }
