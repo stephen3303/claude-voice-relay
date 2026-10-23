@@ -12,6 +12,7 @@
 | Website | `pages.yml` | merge to main touching `site/**` | nothing |
 | App Store | `glasses-appstore.yml`, `glasses-subscriptions.yml` | by hand | the `ASC_*` and `APPLE_TEAM_ID` secrets, in the main-only `appstore` environment (`glasses/setup-appstore-secrets.ps1`) |
 | Crash reports | `glasses-release.yml`, `glasses-appstore.yml` (not the per-push `glasses-ios.yml` check, whose builds have no symbols) | release builds | optional: `SENTRY_DSN` and `SENTRY_AUTH_TOKEN` secrets, `SENTRY_ORG` and `SENTRY_PROJECT` variables (`glasses/setup-sentry-secrets.ps1`), and the Sentry setting "Prevent Storing of IP Addresses" on, which `site/privacy.html` relies on; without them the app reports nothing |
+| Cloud error reports | `cloud-deploy.yml` | deploy | optional: `SENTRY_DSN_CLOUD` secret (the `bridge-cloud` Sentry project's DSN), passed to the Lambdas as `SENTRY_DSN`; without it Bridge Cloud reports nothing |
 
 Main is production: there is no staging stack, so `ci.yml` and the Claude review are the gate before a merge.
 
