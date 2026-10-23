@@ -163,3 +163,12 @@ test('withReports reports a thrown error, rethrows it, and flushes either way', 
   assert.deepEqual(s.captured, [[e, 'unhandled in Voice']]);
   assert.equal(s.flushes(), 2);
 });
+
+test('a stack trace quoted in the message is not sent as frames', () => {
+  const e = new Error('claude exited 1: Error: x\n    at secretFn (C:\\proj\\private-payroll.js:1:2)');
+  const json = JSON.stringify(toEvent(e, 'x'));
+  assert.doesNotMatch(json, /secretFn|private-payroll/);
+  assert.ok(toEvent(e, 'x').exception.values[0].stacktrace.frames.length > 0);
+  const odd = Object.assign(new Error('m'), { stack: 'weird\n    at leak (a.js:1:1)' });
+  assert.deepEqual(toEvent(odd, 'x').exception.values[0].stacktrace.frames, []);
+});

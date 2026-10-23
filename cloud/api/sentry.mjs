@@ -44,6 +44,14 @@ export function frames(stack) {
   return out.reverse();
 }
 
+// The stack without its first lines, which repeat the message: one with a trace quoted in it would read as frames.
+// A stack that doesn't start with the message is someone else's format, so none of it is sent.
+function stackAfterMessage(e) {
+  const head = e.message ? `${e.name}: ${e.message}` : e.name;
+  const stack = typeof e.stack === 'string' ? e.stack : '';
+  return stack.startsWith(head) ? stack.slice(head.length) : '';
+}
+
 export function toEvent(error, where, { environment, release, now = Date.now() } = {}) {
   const e = error instanceof Error ? error : new Error(typeof error === 'string' ? error : 'non-Error thrown');
   const tags = { where: clean(where) || 'unknown' };
@@ -60,7 +68,7 @@ export function toEvent(error, where, { environment, release, now = Date.now() }
     exception: { values: [{
       type: clean(e.name) || 'Error',
       value: clean(e.report) || '(message not sent)',
-      stacktrace: { frames: frames(e.stack) },
+      stacktrace: { frames: frames(stackAfterMessage(e)) },
     }] },
   };
 }
