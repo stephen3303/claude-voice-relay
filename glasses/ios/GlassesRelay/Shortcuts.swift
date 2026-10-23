@@ -17,7 +17,7 @@ struct TalkToBridge: AppIntent {
 struct AskBridge: AppIntent {
     static let title: LocalizedStringResource = "Ask Bridge"
     static let description = IntentDescription(
-        "Send a message to your PC relay and get its reply, with the same read-back as the glasses. Start with \"in <project>,\" to begin a task, then send \"yes\" when it asks \"Ready to send it?\"")
+        "Send a message to your agents and get the reply, with the same read-back as a spoken conversation. Start with \"in <project>,\" to begin a task, then send \"yes\" when it asks \"Ready to send it?\"")
 
     @Parameter(title: "Message", requestValueDialog: "What should I send?")
     var message: String

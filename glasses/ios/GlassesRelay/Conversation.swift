@@ -214,7 +214,7 @@ final class Conversation: NSObject, ObservableObject {
             onHiFi = false   // only once the glasses' mic is back, so a failed switch is tried again
             if report { status = "Using \(hfp.portName)" }
         } else if report {
-            status = "Glasses mic not found — using phone mic"
+            status = "Headset mic not found — using phone mic"
         }
     }
 
@@ -263,7 +263,7 @@ final class Conversation: NSObject, ObservableObject {
             // Still no glasses mic after a few tries (none connected, or it keeps refusing): listen on the phone.
             if onHiFi && micRetries >= 3 {
                 onHiFi = false
-                status = failure.map { "Glasses mic failed (\($0)) — using phone mic" } ?? "Glasses mic not found — using phone mic"
+                status = failure.map { "Headset mic failed (\($0)) — using phone mic" } ?? "Headset mic not found — using phone mic"
             }
         }
         // The glasses are listed as an input before their HFP link is up, and until it is the engine reports the
