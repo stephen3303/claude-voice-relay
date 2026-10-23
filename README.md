@@ -104,6 +104,16 @@ The ntfy server receives every message in readable form, agent replies included 
 repo details), so its operator can read them; for private repos, use your own ntfy server with
 `NTFY_TOKEN`.
 
+### Error reports with Sentry (optional)
+To hear about relay failures you weren't there for (a failed agent turn, a crash that `start.ps1`
+restarted), create a Node project in Sentry, copy its DSN from Client Keys, and set `SENTRY_DSN=` to it in
+`.env`, then restart the relay. There's no SDK: `sentry.mjs` posts one event per error. A report is the
+error's type and code, where in the relay it happened, and the stack as function and file names. The
+error's message is never sent, since it can quote what you said, an answer or a project name. The same error is sent at
+most once a minute and 30 reports an hour in all. Agents never see the DSN. Sentry sees the address the
+report comes from, which is your home's public IP, so turn on "Prevent Storing of IP Addresses" (Settings >
+Security & Privacy) before you set the DSN.
+
 ## GitHub access for agents
 Agents never hold a GitHub token, yours or any other. They commit on a branch and ask for it to be
 pushed; after the turn the relay mints a token from its own GitHub App that only covers that agent's
