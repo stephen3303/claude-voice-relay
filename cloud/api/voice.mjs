@@ -13,6 +13,9 @@ const NO = /^(?:no|nope|nah|don'?t(?: send(?: it)?)?)[\s.!]*$/i;
 const ASK = 'What do you want to send?';
 const TASK_PREFIX = /^(new\s+)?task\b\s*[:,.]?\s*/i;
 const PROJECT = /^(?:in|on|for)\s+(.+?)\s*[,:;]\s*([\s\S]+)$/i;
+// "in trading bot add tests" said without "task": dictation drops the comma, so a known project name after
+// in, on or for still makes it a task. A reply can't start that way by mistake: it starts with the agent's name.
+const IN_PROJECT = /^(?:in|on|for)\s/i;
 const SEND_TO = /^(?:send|give|show)\s+(?:this|it|that)(?:\s+(?:photo|picture))?\s+to\s+(.+?)(?:\s*[,:;.]\s*([\s\S]*))?$/i;
 const HOLD_MS = 10 * 60_000;          // an unconfirmed task expires, as on the relay
 const INBOX_KEEP_S = 7 * 24 * 3600;   // inbox messages are kept a week (DynamoDB TTL)
@@ -37,7 +40,14 @@ export const LOOK_PROMPT = [
 /**
  * deps.store: { getHeld(user), setHeld(user, held|null), addMessage(user, text), messagesAfter(user, id) }
  * deps.look(jpegBytes, said) -> spoken answer (Claude on Bedrock)
- * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not)
+ * deps.startTask(user, { project, task, photo? }) -> spoken line ("Sent." or why not); with no project, the
+ *   words are for the user's agents (agents.mjs: a reply, status or stop)
+ * deps.agentAwaiting(user) -> true when an agent asked a question (optional)
+ * deps.splitTask(user, body) -> { project, task } for a task said without a comma after the project, or null (optional)
+ * deps.orchestrate(user, said) -> { say } (a status report or briefing), { task: { project, task } } ("tell X to ..."),
+ *   or null when it isn't one (orchestrator.mjs; optional)
+ * deps.agentAnswer(bearer, body) -> { status, text }: POST /api/agent/reply, a cloud session's spoken answer. It has
+ *   no API Gateway authorizer (the session holds a reply token, not a Bridge session) and checks its own (optional)
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
  * deps.deliver(user, text, from) -> posts to the inbox and pushes it to the user's phones
  * deps.speak(text) -> MP3 bytes of `text` in a natural voice (Amazon Polly)
@@ -70,11 +80,22 @@ export function makeHandler(deps) {
     if (!body) return `I didn't catch that. ${ASK}`;
     if (SEND.test(body)) {
       if (held?.project) return `What do you want to tell ${held.project}?`;
-      if (!held) return expired ? `That message waited over ten minutes, so I didn't send it. ${ASK}` : `There's nothing to send yet. ${ASK}`;
+      if (expired) return `That message waited over ten minutes, so I didn't send it. ${ASK}`;
+      // With nothing held, "yes" or "go ahead" (not "send it") answers an agent's yes-or-no question, as in confirm.mjs.
+      if (!held && !/^(?:\S+\s+)?sen[dt]\b/i.test(body) && await deps.agentAwaiting?.(user)) return deps.startTask(user, { project: null, task: 'yes' });
+      if (!held) return `There's nothing to send yet. ${ASK}`;
       await deps.store.setHeld(user, null);
       return deps.startTask(user, held.parsed ?? { project: null, task: held.text });
     }
     if (CANCEL.test(body) || (held && NO.test(body))) { await deps.store.setHeld(user, null); return "OK, I won't send it."; }
+    // Reports are answered at once and leave a held task as it was; "tell X to ..." is read back like a task.
+    // Not after "change it", where the next words are the held project's new task whatever they say, nor after "task".
+    const o = held?.project || isTask ? null : await deps.orchestrate?.(user, body);
+    if (o?.say) return o.say;
+    if (o?.task) {
+      await deps.store.setHeld(user, { text: body, parsed: o.task, at: now() });
+      return `Here's your message to Claude for ${o.task.project}, ${o.task.task}. Ready to send it?`;
+    }
     if (held && CHANGE.test(body)) {
       // Keep the project, so the new words go where the old ones were going.
       const project = held.project ?? held.parsed?.project;
@@ -82,10 +103,16 @@ export function makeHandler(deps) {
       return project ? `OK. What do you want to tell ${project}?` : `OK. ${ASK}`;
     }
     const m = body.match(PROJECT);
+    const said = !isTask && !held?.project && !m && IN_PROJECT.test(body) ? (await deps.splitTask?.(user, body)) ?? null : null;
+    if (said) {
+      await deps.store.setHeld(user, { text: body, parsed: said, at: now() });
+      return `Here's your message to Claude for ${said.project}, ${said.task}. Ready to send it?`;
+    }
     if (isTask || held?.project) {
       // After "change it", the next words are the task for the project that was held, whatever they
       // start with: "for the README, fix typos" must not re-target it. "Cancel" lets you pick another.
-      const parsed = held?.project ? { project: held.project, task: body } : m ? { project: m[1].trim(), task: m[2].trim() } : null;
+      const parsed = held?.project ? { project: held.project, task: body } : m ? { project: m[1].trim(), task: m[2].trim() }
+        : (await deps.splitTask?.(user, body)) ?? null;
       if (!parsed) {
         await deps.store.setHeld(user, null);
         return `I can't tell which project "${body}" is for. Start with in and the project name. ${ASK}`;
@@ -101,8 +128,13 @@ export function makeHandler(deps) {
   async function send(user, raw) {
     const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
     if (!body) return "I didn't catch that. Say it again.";
+    const o = TASK_PREFIX.test(raw) ? null : await deps.orchestrate?.(user, body);
+    if (o?.say) return o.say;
+    if (o?.task) return deps.startTask(user, o.task);
     const m = body.match(PROJECT);
-    return deps.startTask(user, m ? { project: m[1].trim(), task: m[2].trim() } : { project: null, task: body });
+    if (m) return deps.startTask(user, { project: m[1].trim(), task: m[2].trim() });
+    const split = TASK_PREFIX.test(raw) || IN_PROJECT.test(body) ? await deps.splitTask?.(user, body) : null;
+    return deps.startTask(user, split ?? { project: null, task: body });
   }
 
   async function inbox(user, query) {
@@ -160,6 +192,14 @@ export function makeHandler(deps) {
   }
 
   return async function handler(event) {
+    if (deps.agentAnswer && event.requestContext?.http?.method === 'POST' && event.rawPath === '/api/agent/reply') {
+      let body = null;
+      try { body = JSON.parse(event.body ? Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8').toString('utf8') : ''); } catch {}
+      try {
+        const r = await deps.agentAnswer(event.headers?.authorization ?? '', body);
+        return text(r.status, r.text);
+      } catch (e) { console.error('agent reply', e); return text(500, 'Bridge Cloud hit an error.'); }
+    }
     const user = userOf(event);
     if (!user) return text(401, 'Sign in to Bridge first.');
     const route = `${event.requestContext.http.method} ${event.rawPath.replace(/^\/api/, '')}`;

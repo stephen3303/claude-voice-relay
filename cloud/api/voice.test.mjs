@@ -335,3 +335,106 @@ test('sandbox Pro gets a few photo answers a day; paid Pro has no photo cap', as
   for (let i = 0; i < 7; i++) assert.match((await photo('u2')).body, /whiteboard/);
   assert.equal(budget.has(`PHOTO#u2/${day}`), false);
 });
+
+test('with nothing held, "yes" answers an agent that asked, but "send it" does not', async () => {
+  const started = [];
+  let waiting = true;
+  const handler = makeHandler({
+    store: { getHeld: async () => null, setHeld: async () => {} },
+    startTask: async (u, t) => { started.push(t); return 'Sent to trading bot.'; },
+    agentAwaiting: async () => waiting,
+    pro: { plan: async () => null },
+  });
+  const say = (body) => handler({ requestContext: { http: { method: 'POST' }, authorizer: { lambda: { sub: 'owner' } } },
+    rawPath: '/api/voice/confirm', body });
+  assert.equal((await say('yes')).body, 'Sent to trading bot.');
+  assert.deepEqual(started, [{ project: null, task: 'yes' }]);
+  assert.match((await say('send it')).body, /nothing to send/);
+  waiting = false;
+  assert.match((await say('yes')).body, /nothing to send/);
+  assert.equal(started.length, 1);
+});
+
+test('a task with no comma after the project is split by the account\'s projects', async () => {
+  let held = null;
+  const started = [];
+  const handler = makeHandler({
+    store: { getHeld: async () => held, setHeld: async (u, h) => { held = h; } },
+    startTask: async (u, t) => { started.push(t); return 'Starting trading bot.'; },
+    splitTask: async (u, body) => (body.startsWith('in trading bot ') ? { project: 'trading bot', task: body.slice(15) } : null),
+    pro: { plan: async () => null },
+  });
+  const say = (route, body) => handler({ requestContext: { http: { method: 'POST' }, authorizer: { lambda: { sub: 'owner' } } },
+    rawPath: `/api/voice/${route}`, body });
+  assert.equal((await say('confirm', 'task: in trading bot add tests')).body, "Here's your message to Claude for trading bot, add tests. Ready to send it?");
+  assert.equal((await say('confirm', 'send it')).body, 'Starting trading bot.');
+  assert.deepEqual(started, [{ project: 'trading bot', task: 'add tests' }]);
+  await say('send', 'task: in trading bot fix it');
+  assert.deepEqual(started[1], { project: 'trading bot', task: 'fix it' });
+});
+
+test('"in <project> ..." without "task" or a comma is still a task, and anything else stays a reply', async () => {
+  let held = null;
+  const started = [];
+  const handler = makeHandler({
+    store: { getHeld: async () => held, setHeld: async (u, h) => { held = h; } },
+    startTask: async (u, t) => { started.push(t); return 'ok'; },
+    splitTask: async (u, body) => (body.startsWith('in trading bot ') ? { project: 'trading bot', task: body.slice(15) } : null),
+    pro: { plan: async () => null },
+  });
+  const say = (route, body) => handler({ requestContext: { http: { method: 'POST' }, authorizer: { lambda: { sub: 'owner' } } },
+    rawPath: `/api/voice/${route}`, body });
+  await say('send', 'in trading bot list the open pull requests');
+  assert.deepEqual(started[0], { project: 'trading bot', task: 'list the open pull requests' });
+  await say('send', 'in the end it worked');
+  assert.deepEqual(started[1], { project: null, task: 'in the end it worked' });
+  assert.equal((await say('confirm', 'in trading bot add tests')).body, "Here's your message to Claude for trading bot, add tests. Ready to send it?");
+  await say('confirm', 'send it');
+  assert.deepEqual(started[2], { project: 'trading bot', task: 'add tests' });
+  assert.equal((await say('confirm', 'in the end it worked')).body, "Here's your message to Claude, in the end it worked. Ready to send it?");
+});
+
+test('POST /api/agent/reply needs no Bridge session and hands the token and body to agentAnswer', async () => {
+  const calls = [];
+  const handler = makeHandler({
+    store: {}, startTask: async () => '', pro: { plan: async () => null },
+    agentAnswer: async (bearer, body) => { calls.push({ bearer, body }); return { status: 200, text: 'Said.' }; },
+  });
+  const r = await handler({ requestContext: { http: { method: 'POST' } }, rawPath: '/api/agent/reply',
+    headers: { authorization: 'Bearer brt.x.y' }, body: '{"spoken":"Done.","question":false}' });
+  assert.equal(r.statusCode, 200);
+  assert.deepEqual(calls, [{ bearer: 'Bearer brt.x.y', body: { spoken: 'Done.', question: false } }]);
+  const bad = await handler({ requestContext: { http: { method: 'POST' } }, rawPath: '/api/agent/reply', headers: {}, body: 'not json' });
+  assert.equal(bad.statusCode, 200);
+  assert.equal(calls[1].body, null);
+  const other = await handler({ requestContext: { http: { method: 'POST' } }, rawPath: '/api/voice/send', body: 'hi' });
+  assert.equal(other.statusCode, 401);
+});
+
+test('orchestrator commands: reports answer at once, "tell X to" is read back, and "change it" words stay a task', async () => {
+  let held = null;
+  const started = [];
+  const handler = makeHandler({
+    store: { getHeld: async () => held, setHeld: async (u, h) => { held = h; } },
+    startTask: async (u, t) => { started.push(t); return 'Starting trading bot.'; },
+    orchestrate: async (u, said) => (/^status on all/i.test(said) ? { say: '2 projects reporting: 2 on track.' }
+      : /^tell the trader to (.+)$/i.test(said) ? { task: { project: 'trading bot', task: said.replace(/^tell the trader to /i, '') } } : null),
+    pro: { plan: async () => null },
+  });
+  const say = async (route, body) => (await handler({ requestContext: { http: { method: 'POST' }, authorizer: { lambda: { sub: 'owner' } } },
+    rawPath: `/api/voice/${route}`, body })).body;
+  assert.equal(await say('confirm', 'Status on all programs.'), '2 projects reporting: 2 on track.');
+  assert.equal(held, null);
+  assert.equal(await say('confirm', 'tell the trader to add a stop loss'), "Here's your message to Claude for trading bot, add a stop loss. Ready to send it?");
+  assert.equal(await say('confirm', 'status on all programs'), '2 projects reporting: 2 on track.', 'a report leaves the held task');
+  assert.equal(await say('confirm', 'send it'), 'Starting trading bot.');
+  assert.deepEqual(started, [{ project: 'trading bot', task: 'add a stop loss' }]);
+  held = { project: 'trading bot', at: Date.now() };
+  assert.match(await say('confirm', 'status on all programs'), /^Here's your message to Claude for trading bot, status on all programs/);
+  held = null;
+  assert.equal(await say('send', 'tell the trader to merge it'), 'Starting trading bot.');
+  assert.equal(await say('send', 'status on all programs'), '2 projects reporting: 2 on track.');
+  assert.deepEqual(started.at(-1), { project: 'trading bot', task: 'merge it' });
+  assert.equal(await say('send', 'task: status on all programs belongs on the home page'), 'Starting trading bot.', 'said as a task, it stays a task');
+  assert.match(await say('confirm', 'task: status on all programs belongs on the home page'), /^(?!2 projects)/);
+});

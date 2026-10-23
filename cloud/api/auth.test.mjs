@@ -78,6 +78,13 @@ test('refresh and delete need a session', async () => {
   assert.deepEqual(deleted, ['apple.1']);
 });
 
+test('the owner token can neither mint a session nor delete the owner account', async () => {
+  const { call, deleted } = setup();
+  assert.equal((await call('POST', '/api/auth/refresh', { sub: 'owner' })).statusCode, 403);
+  assert.equal((await call('DELETE', '/api/account', { sub: 'owner' })).statusCode, 403);
+  assert.deepEqual(deleted, []);
+});
+
 test('userOf reads either authorizer', () => {
   assert.equal(userOf({ requestContext: { authorizer: { lambda: { sub: 'a' } } } }), 'a');
   assert.equal(userOf({ requestContext: { authorizer: { jwt: { claims: { sub: 'b' } } } } }), 'b');

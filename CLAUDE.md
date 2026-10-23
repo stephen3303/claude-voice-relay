@@ -24,7 +24,11 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   in `cloud/api`. `DESIGN.md` is the architecture and build order. Stacks: `BridgeApi` (HTTP API,
   Lambda, DynamoDB, KMS session key, Sign in with Apple, APNs push in `cloud/api/push.mjs` with the key
   in Secrets Manager `bridge/apns`, set by `cloud/setup/setup-apns.ps1`) and `BridgeWeb` (S3 + CloudFront for
-  talktobridge.com, DNS at Cloudflare).
+  talktobridge.com, DNS at Cloudflare). `BridgeApi` also runs Stephen's own agents in place of the PC relay: the owner token
+  (`cloud/api/owner.mjs`), agent state (`cloud/api/agents.mjs`) and the Fargate runner (`cloud/runner`, which reuses
+  `cloud-agents.mjs`), set up by `cloud/setup/setup-owner.ps1` (DESIGN.md, "The owner's agents"). The orchestrator (`cloud/api/orchestrator.mjs`,
+  status files in `cloud/api/status.mjs`) answers "status on all programs", "what needs me" and the briefings from each
+  project's `STATUS#` item (DESIGN.md, "The orchestrator").
 - `site/` — the website (home, privacy, terms, support) for the App Store product only, live at https://talktobridge.com
   on GitHub Pages (Cloudflare DNS only); CloudFront (`BridgeWeb`) later. The app and listing link to talktobridge.com.
 - `hooks/`, `agent/` — Claude Code notification hook; the agent container image.

@@ -117,6 +117,62 @@ AWS CDK (TypeScript) in `cloud/infra`, deployed from GitHub Actions with OIDC (n
 Lambdas, DynamoDB, S3), `BridgeAgents` (ECR, ECS cluster, task definition). Lambdas live in `cloud/api`;
 the agent image in `cloud/agent`.
 
+## The owner's agents: the PC relay, moved into Bridge Cloud
+
+Stephen's own use runs here instead of on his PC, so the PC hosts nothing. It's the relay's `AGENT_MODE=cloud`,
+moved: each task is a claude.ai cloud session that shows in the Claude app.
+
+- **Owner token** (`cloud/api/owner.mjs`): the sideloaded app has no Sign in with Apple, so it keeps sending a
+  relay token (by default the relay's own `VOICE_TOKEN`). The authorizer compares it with the SHA-256 in Secrets
+  Manager (`bridge/owner`) and lets it in as the user `owner`, who has every Pro feature. The app only changes its
+  relay address to `<ApiUrl>/api`; the voice protocol is the same, and Tailscale is no longer needed.
+- **The Claude connector** signs in with Sign in with Apple, as `apple.<sub>`. `bridge/owner` can also hold the
+  owner's `appleSub` (setup-owner.ps1 offers the accounts that connected Claude, by date); the connector's tools then
+  act as `owner`, so Claude on claude.ai starts the owner's agents and reads their inbox. Its refresh tokens stay
+  under the Apple account, and the app's own Apple sign-in is unchanged.
+- **Agents** (`cloud/api/agents.mjs`): only `owner` gets them, because they run on Stephen's claude.ai
+  subscription and the Agent SDK terms keep subscription sign-in out of products for others. Everyone else still
+  gets the "not switched on" answer until build step 4 (API billing). Projects (`PROJECT#` items) come from his
+  project folders' GitHub remotes; each agent's state, pending turns and run id are an `AGENT#` item. Task, reply,
+  status and stop work as on the relay; usage, context and photos to agents don't (they need the PC).
+- **Runner** (`cloud/runner`, Fargate, 0.5 vCPU / 1 GB, public subnets, no NAT): the Voice Lambda starts one task per
+  busy spell of an agent. It signs Claude Code in with a claude.ai login made for Bridge Cloud (`bridge/owner-claude`),
+  shallow-clones the repo (or makes an empty repo with the same remote, for a private one), runs the pending turns with
+  the relay's own `cloud-agents.mjs`, writes each answer to the inbox (and ntfy), fires the project routine, marks the
+  agent idle and exits. When Claude Code refreshes the login, the runner writes the new one back.
+  Claude Code's print mode can't start a new cloud session (2.1.260 and later refuse), so a new task fires the
+  owner's "Bridge task" routine (`bridge/owner-routine`, `{ url, token }`) with the repo and the task as its text;
+  its prompt is `cloud/setup/task-routine-prompt.txt`. The CLI can only queue a message to a cloud session, not wait
+  for its answer, so the session sends each spoken answer itself: the text also carries a Reply URL
+  (`POST /api/agent/reply`, no API Gateway authorizer) and a per-task reply token (`brt.<agent>.<random>`; only its
+  SHA-256 is kept, as the agent's `replyHash`). Replies go to the session with `claude -p --cloud <id>` and are
+  answered the same way. The cloud environment's Trusted network allows `*.amazonaws.com`.
+- **Setup**: `cloud/setup/setup-owner.ps1` on the PC stores the token's hash, signs a new claude.ai login in and stores
+  it, asks once for the task routine's Fire URL and token, and writes the projects. `cloud/setup/deploy-branch.ps1` deploys BridgeApi from an unmerged branch on the PC and
+  then runs it, to try a change before it's merged.
+- **Cost** at about 10 tasks a day: roughly $5 to $8 a month, nearly all Fargate time while a session works and
+  Secrets Manager; nothing runs between tasks.
+- **Known limits**: two runners starting at once with an expired login can race on its refresh and sign the
+  other out (rerun the setup script). Sideloaded builds get no push, so answers arrive while the app listens, and through ntfy.
+
+## The orchestrator: status on all of the owner's projects
+
+One entry point for every spoken request about the owner's projects (`cloud/api/orchestrator.mjs`). It's plain code in
+the Voice Lambda, not a model: matching a project and reading reports need no judgement, so answers are instant, the
+same words always route the same way, and nothing runs between requests. The Claude work stays in the workers.
+
+- **Registry**: the `PROJECT#` items (name, repo, aliases, and a `tag` such as CVR from `setup-owner.ps1`).
+- **Status files** (`cloud/api/status.mjs`): a `STATUS#<project>` item per project in the standard format (health, done,
+  in progress and its ID, next, needs the owner, assigned to, where, needs to continue overnight). Workers send it as
+  `status` with each answer to `/api/agent/reply` (the routine prompt asks for it), any Claude session can write it with
+  the connector's `update_status`, and the runner marks a project "needs attention" when a run fails. Live agent state
+  outranks the file: a question waiting on the owner, or a run that went quiet, shows in every report.
+- **Voice**: "status on all programs", "status on X and Y", "what needs me?", "details on X", "tell X to ...",
+  "morning briefing", "evening brief". Reports answer at once; "tell X to" is read back like a task. The connector's
+  `get_status` gives the same reports to Claude.
+- **Worker text is data**: status fields are capped, links and paths are kept to `where`, and `get_status` labels them as
+  worker reports, since workers read repos anyone may have changed. Reports are capped at 2,000 characters, under the cloud voice's limit.
+
 ## Build order
 
 1. Deploy role + GitHub OIDC; Bedrock access check. Domain, ACM certificate, website moved to S3/CloudFront.
