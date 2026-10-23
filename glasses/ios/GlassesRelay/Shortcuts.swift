@@ -29,7 +29,8 @@ struct AskBridge: AppIntent {
     }
 }
 
-#if !APP_STORE   // the glasses camera needs the Meta toolkit, which the App Store build leaves out
+// The glasses camera needs the Meta toolkit, which the App Store build leaves out.
+#if !APP_STORE
 struct LookWithBridge: AppIntent {
     static let title: LocalizedStringResource = "Look with Bridge"
     static let description = IntentDescription(
