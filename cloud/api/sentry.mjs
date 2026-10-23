@@ -123,7 +123,8 @@ export function makeSentry({ dsn, environment = 'production', release, fetch = g
   return { enabled: true, capture, flush };
 }
 
-// console.error(place, error) also reports the error, tagged with the place.
+// console.error(place, error) also reports the error, tagged with the place. The place goes out as is, so it must
+// be fixed words or a route, never a template with a project name or what was said (cloud/api/sentry.test.mjs checks).
 export function reportConsoleErrors(sentry, target = console) {
   if (!sentry.enabled) return;
   const logError = target.error.bind(target);
