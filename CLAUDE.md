@@ -80,7 +80,7 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
 - App Store: Stephen has enrolled. Still needed: the App Store Connect API key and the app record, stored with
   `glasses/setup-appstore-secrets.ps1`. The App Store build has no glasses until Meta allows toolkit apps there (`glasses/APP_STORE.md`). Then run the
   subscriptions workflow, then the App Store upload. The site describes the App Store product only (Bridge
-  Cloud, Pro); `site/privacy.html` covers it, but still names "the developer of Bridge" and
-  support@talktobridge.com, which needs a real legal name and a working mailbox before upload. Also set App Store Server Notifications (Version 2, production and sandbox URLs)
+  Cloud, Pro); `site/privacy.html` and `site/terms.html` name Stephen Ryan Smitherman as the developer, and
+  support@talktobridge.com forwards to him (Cloudflare Email Routing, receive-only). Also set App Store Server Notifications (Version 2, production and sandbox URLs)
   to the `AppStoreNotificationsUrl` output, so renewals and refunds reach Bridge Pro's cloud check (`cloud/api/storekit.mjs`).
 - Cloud agents (Fargate + GitHub App) aren't built yet; the cloud API answers tasks honestly.
