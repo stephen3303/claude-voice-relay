@@ -217,16 +217,15 @@ const proStore = {
 const pro = makePro({ store: proStore, bundleId: process.env.BUNDLE_ID });
 
 // Cloud agents (Fargate, GitHub App) are build step 4 in cloud/DESIGN.md. Until then a confirmed task
-// is answered honestly instead of pretending to run. The answer comes back straight away, not "Sent.", and
+// is answered honestly instead of pretending to run. The answer is the reply itself, not "Sent.", and
 // says there's nothing to switch on: "aren't switched on yet" made Claude tell people to find a setting.
 const NO_AGENTS = (project) =>
   `Bridge Cloud can't run agents yet, so ${project ?? 'your task'} didn't start. ` +
   "This isn't a setting: there's nothing to turn on in the Bridge app or in Claude. " +
   'Send it through your PC relay instead, with the Bridge app in My PC mode.';
+// Only as the reply: an inbox copy would be read out a second time, or rung through as a call.
 async function startTask(user, { project }) {
-  const line = NO_AGENTS(project);
-  await deliver(user, line, project);
-  return line;
+  return NO_AGENTS(project);
 }
 
 export const handler = makeHandler({ store, look, startTask, devices, deliver, speak, pro });
