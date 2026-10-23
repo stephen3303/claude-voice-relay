@@ -4,7 +4,8 @@
 # Needs: the AWS CLI signed in as an admin (aws sts get-caller-identity), Docker Desktop running (CDK builds the
 # agent runner's image), Node 22 and Claude Code. The next Cloud deploy from main puts main's BridgeApi back,
 # which removes the runner again until this branch is merged.
-# -SkipLogin keeps the claude.ai login already stored (a rerun after a code change).
+# -SkipLogin keeps the claude.ai login already stored (a rerun after a code change). The first run also asks for
+# the Sentry DSN, so the branch's Lambdas report errors as main's do.
 param([string]$RelayDir = (Join-Path $env:USERPROFILE 'Projects\claude-voice-relay'), [switch]$SkipLogin)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -15,6 +16,23 @@ aws sts get-caller-identity *> $null; $awsOk = -not $LASTEXITCODE
 $ErrorActionPreference = $prev
 if (-not $dockerOk) { throw 'Docker is not running. Start Docker Desktop and run this again.' }
 if (-not $awsOk) { throw 'The AWS CLI is not signed in (aws sts get-caller-identity failed).' }
+
+# Error reports (cloud/api/sentry.mjs): CDK gives the Lambdas the bridge-cloud project's DSN from SENTRY_DSN_CLOUD, as
+# main's Cloud deploy does from its secret. It's an ingest-only key, asked for once and kept in .bridge on this PC;
+# Enter skips reports (delete .bridge\sentry-dsn-cloud.txt to be asked again).
+if (-not $env:SENTRY_DSN_CLOUD) {
+  $dsnFile = Join-Path $env:USERPROFILE '.bridge\sentry-dsn-cloud.txt'
+  if (-not (Test-Path $dsnFile)) {
+    Write-Host 'Sentry DSN for the bridge-cloud project (Sentry: Settings, Projects, bridge-cloud, Client Keys), or Enter to skip:'
+    $dsn = (Read-Host 'DSN').Trim()
+    if ($dsn -and $dsn -notmatch '^https://[0-9a-f]+@[A-Za-z0-9.-]+/\d+$') { throw 'That is not a Sentry DSN.' }
+    New-Item -ItemType Directory -Force -Path (Split-Path $dsnFile) | Out-Null
+    Set-Content -Path $dsnFile -Value $dsn -NoNewline
+  }
+  $env:SENTRY_DSN_CLOUD = (Get-Content $dsnFile -Raw -ErrorAction SilentlyContinue)
+  if ($env:SENTRY_DSN_CLOUD) { $env:SENTRY_DSN_CLOUD = $env:SENTRY_DSN_CLOUD.Trim() }
+}
+Write-Host "Error reports: $(if ($env:SENTRY_DSN_CLOUD) { 'on' } else { 'off' })."
 
 Push-Location (Join-Path $root 'cloud\infra')
 try {
