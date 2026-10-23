@@ -122,3 +122,15 @@ test('spokenError keeps whole sentences instead of cutting mid-word', () => {
   assert.match(spokenError('word '.repeat(50), 60), /word…$/);
   assert.equal(spokenError('Cloud sessions need a claude.ai sign-in. Run `claude auth login` (or /login in a local session), then try again.'), NO_LOGIN);
 });
+
+test('an error result marks the status file too, and a replaced run writes no status', async () => {
+  const { runner, statuses } = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['yes'] },
+    results: [{ result: 'Rate limited.', is_error: true, session_id: 'sess_1' }] });
+  await runner('owner', 'tradingbot', 'r1');
+  assert.equal(statuses.length, 1);
+  assert.equal(statuses[0].fields.health, 'needs attention');
+  const stopped = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['yes'] },
+    results: [{ hook: (rec) => { rec.run = 'r2'; }, result: 'x', is_error: true, session_id: 'sess_1' }] });
+  await stopped.runner('owner', 'tradingbot', 'r1');
+  assert.deepEqual(stopped.statuses, []);
+});
