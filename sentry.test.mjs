@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseDsn, clean, frames, toEvent, makeSentry } from './sentry.mjs';
 
-const DSN = 'https://0123456789abcdef0123456789abcdef@o123.ingest.us.sentry.io/456';
+const DSN = 'https://0123456789abcdef0123456789abcdef@o123.sentry.example/456';
 
 test('parseDsn reads the key and the envelope URL, and refuses anything else', () => {
-  assert.deepEqual(parseDsn(DSN), { key: '0123456789abcdef0123456789abcdef', url: 'https://o123.ingest.us.sentry.io/api/456/envelope/', dsn: DSN });
+  assert.deepEqual(parseDsn(DSN), { key: '0123456789abcdef0123456789abcdef', url: 'https://o123.sentry.example/api/456/envelope/', dsn: DSN });
   assert.equal(parseDsn('http://0123456789abcdef@host/1'), null);
   assert.equal(parseDsn('https://host/1'), null);
   assert.equal(parseDsn('https://0123456789abcdef:secret@host/1'), null);
@@ -13,20 +13,20 @@ test('parseDsn reads the key and the envelope URL, and refuses anything else', (
 });
 
 test('clean keeps the start of a message and takes out what identifies anyone', () => {
-  assert.equal(clean("ENOENT: no such file or directory, open 'C:\\Users\\steph\\x'"), 'ENOENT');
+  assert.equal(clean("ENOENT: no such file or directory, open 'C:\\Users\\you\\x'"), 'ENOENT');
   assert.equal(clean('claude exited 1: here is what you asked about your bank'), 'claude exited 1');
-  assert.equal(clean('fetch https://powerspec.tail.ts.net/voice?x=1 refused'), 'fetch <url> refused');
+  assert.equal(clean('fetch https://mypc.example/voice?x=1 refused'), 'fetch <url> refused');
   assert.equal(clean('no route to 100.64.1.2'), 'no route to <ip>');
   assert.equal(clean('mail stephen@example.com'), 'mail <email>');
-  assert.equal(clean('cannot open C:\\Users\\steph\\Projects\\a.txt'), 'cannot open <path>');
+  assert.equal(clean('cannot open C:\\Users\\you\\Projects\\a.txt'), 'cannot open <path>');
   assert.equal(clean('cannot open /home/user/x'), 'cannot open <path>');
-  assert.equal(clean('bad token sk-ant-oat01-abcdefghijklmnopqrstuvwxyz'), 'bad token <redacted>');
+  assert.equal(clean('bad token abcdefghijklmnopqrstuvwxyz0123'), 'bad token <redacted>');
   assert.equal(clean('x'.repeat(500)).length <= 160, true);
   assert.equal(clean(undefined), '');
 });
 
 test('frames are oldest first, with file names only', () => {
-  const stack = 'Error: boom\n    at inner (C:\\Users\\steph\\Projects\\relay\\relay.mjs:10:5)\n    at file:///home/user/x/outer.mjs:20:3\n    at node:internal/process/task_queues:95:5';
+  const stack = 'Error: boom\n    at inner (C:\\Users\\you\\Projects\\relay\\relay.mjs:10:5)\n    at file:///home/user/x/outer.mjs:20:3\n    at node:internal/process/task_queues:95:5';
   assert.deepEqual(frames(stack), [
     { function: '?', filename: 'task_queues', lineno: 95, colno: 5, in_app: false },
     { function: '?', filename: 'outer.mjs', lineno: 20, colno: 3, in_app: true },
@@ -63,7 +63,7 @@ test('makeSentry posts an envelope with the auth header, and is off without a DS
   const s = makeSentry({ dsn: DSN, environment: 'cloud', fetch, now: () => 5_000_000 });
   await s.capture(new Error('boom'), 'GET /voice/inbox');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://o123.ingest.us.sentry.io/api/456/envelope/');
+  assert.equal(calls[0].url, 'https://o123.sentry.example/api/456/envelope/');
   assert.equal(calls[0].opts.redirect, 'error');
   assert.match(calls[0].opts.headers['x-sentry-auth'], /sentry_key=0123456789abcdef0123456789abcdef/);
   const [head, item, event] = calls[0].opts.body.split('\n').map((l) => JSON.parse(l));

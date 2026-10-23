@@ -14,7 +14,7 @@ export const parseDsn = (dsn) => {
   return m ? { key: m[1], url: `https://${m[2]}/api/${m[3]}/envelope/`, dsn: m[0] } : null;
 };
 
-// The start of a message, before any quoted detail ("ENOENT: no such file, open 'C:\Users\...'" keeps
+// The start of a message, before any quoted detail ("ENOENT: no such file, open 'C:\Users\you\...'" keeps
 // "ENOENT"; "claude exited 1: <its output>" keeps "claude exited 1"), with anything identifying taken out.
 export function clean(message) {
   return String(message ?? '').split(/:\s/)[0]
