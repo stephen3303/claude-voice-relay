@@ -14,6 +14,7 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    header
                     status
                     controls
                     recent
@@ -21,8 +22,11 @@ struct HomeView: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
+            // The title stays for VoiceOver and History's back button; the header row below shows it instead of the bar.
             .navigationTitle("Bridge")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) { EmptyView() }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showHelp = true } label: { Label("Help", systemImage: "questionmark.circle") }
                 }
@@ -37,18 +41,30 @@ struct HomeView: View {
 
     // MARK: status
 
+    /// "Bridge" with three icons beside it, side by side: listening, glasses, and the PC (or cloud) connection.
+    private var header: some View {
+        HStack(spacing: 14) {
+            Text("Bridge").font(.largeTitle.bold())
+                .lineLimit(1).minimumScaleFactor(0.6)   // room for the icons at large text sizes
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+            StatusIcon(symbol: phaseSymbol, label: "Listening", value: conversation.phase.rawValue,
+                       tint: conversation.phase == .idle ? .secondary : Color.accentColor,
+                       animate: conversation.phase == .listening)
+            StatusIcon(symbol: "eyeglasses", label: "Glasses", value: glassesValue,
+                       tint: glasses.deviceCount > 0 ? .green : .orange)
+            StatusIcon(symbol: relayURL == Relay.cloudAddress ? "cloud.fill" : "desktopcomputer", label: "Connection", value: connectionValue,
+                       tint: relayURL.isEmpty ? .orange : .green)
+        }
+    }
+
     private var status: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(conversation.phase.rawValue, systemImage: phaseSymbol)
-                .font(.title2.bold())
-                .foregroundStyle(conversation.phase == .idle ? Color.primary : Color.accentColor)
-                .symbolEffect(.variableColor.iterative, isActive: conversation.phase == .listening)
-            Divider()
-            StatusRow(title: "Glasses", value: glassesValue, ok: glasses.deviceCount > 0)
-            StatusRow(title: "Connection", value: connectionValue, ok: !relayURL.isEmpty)
+        VStack(alignment: .leading, spacing: 6) {
             #if APP_STORE
             StatusRow(title: "Bridge Pro", value: store.isPro ? "Active" : "Not subscribed", ok: store.isPro)
             #endif
+            if glasses.deviceCount == 0 { Text("Glasses: \(glassesValue)").font(.footnote).foregroundStyle(.secondary) }
+            if relayURL.isEmpty { Text("Connection: \(connectionValue)").font(.footnote).foregroundStyle(.secondary) }
             if !conversation.status.isEmpty {
                 Text(conversation.status).font(.footnote).foregroundStyle(.secondary)
             }
@@ -56,9 +72,7 @@ struct HomeView: View {
                 Text(e).font(.footnote).foregroundStyle(.red)
             }
         }
-        .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var phaseSymbol: String {
@@ -137,6 +151,21 @@ struct HomeView: View {
     }
 }
 
+private struct StatusIcon: View {
+    let symbol: String, label: String, value: String, tint: Color
+    var animate = false
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.title3)
+            .foregroundStyle(tint)
+            .symbolEffect(.variableColor.iterative, isActive: animate)
+            .frame(width: 32, height: 32)
+            .accessibilityElement()
+            .accessibilityLabel(label)
+            .accessibilityValue(value)
+    }
+}
+
 private struct StatusRow: View {
     let title: String, value: String, ok: Bool
     var body: some View {
@@ -158,7 +187,7 @@ struct TranscriptLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(who).font(.caption).foregroundStyle(.secondary)
-            Text(text)
+            Text(text).textSelection(.enabled)   // press and hold to select and copy
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -171,21 +200,35 @@ struct TranscriptLine: View {
     }
 }
 
-/// Every saved line, newest first, with Clear.
+/// Every saved line, oldest to newest with the newest at the bottom by the message field, with Clear.
 struct HistoryView: View {
     @EnvironmentObject var conversation: Conversation
     @State private var confirmClear = false
+    @State private var draft = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
-        List {
-            if conversation.transcript.isEmpty {
-                Text("Nothing yet. Your conversations appear here.").foregroundStyle(.secondary)
+        // Oldest at the top, newest at the bottom beside the message field, which stays put above the keyboard.
+        ScrollViewReader { proxy in
+            List {
+                if conversation.transcript.isEmpty {
+                    Text("Nothing yet. Your conversations appear here.").foregroundStyle(.secondary)
+                }
+                ForEach(Array(conversation.transcript.enumerated()), id: \.offset) { _, line in
+                    TranscriptLine(who: line.who, text: line.text)
+                }
             }
-            ForEach(Array(Array(conversation.transcript.enumerated()).reversed()), id: \.offset) { _, line in
-                TranscriptLine(who: line.who, text: line.text)
-            }
+            .listStyle(.plain)
+            .scrollDismissesKeyboard(.interactively)
+            .onAppear { scrollToNewest(proxy, animated: false) }
+            .onChange(of: conversation.transcript.count) { _, _ in scrollToNewest(proxy) }
+            .onChange(of: conversation.transcript.last?.text) { _, _ in scrollToNewest(proxy) }   // the list stops growing at 200 lines
+            .onChange(of: focused) { _, isFocused in if isFocused { scrollToNewest(proxy) } }   // keyboard up: keep the newest in view
         }
         .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .task { await conversation.followInboxQuietly() }   // replies to typed tasks; stops when History closes
         .toolbar {
             if !conversation.transcript.isEmpty {
                 Button("Clear", role: .destructive) { confirmClear = true }
@@ -194,5 +237,37 @@ struct HistoryView: View {
         .confirmationDialog("Clear the conversation history?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear history", role: .destructive) { conversation.transcript = [] }
         }
+    }
+
+    /// Type to the relay instead of speaking: the same read-back as voice ("Ready to send it?", then type yes).
+    private var composer: some View {
+        HStack(spacing: 8) {
+            TextField("Message the relay", text: $draft, axis: .vertical)
+                .lineLimit(1...4)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .submitLabel(.send)
+                .onSubmit(send)
+                // A multi-line field puts Return in the text instead of submitting: treat it as Send.
+                .onChange(of: draft) { _, text in if text.hasSuffix("\n") { draft.removeLast(); send() } }
+            Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title) }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !conversation.canSendText)
+                .accessibilityLabel("Send")
+        }
+        .padding(.horizontal).padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func scrollToNewest(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        let last = conversation.transcript.count - 1
+        guard last >= 0 else { return }
+        // After layout, so the new row exists (and the keyboard has moved the list's bottom edge).
+        DispatchQueue.main.async {
+            if animated { withAnimation { proxy.scrollTo(last, anchor: .bottom) } } else { proxy.scrollTo(last, anchor: .bottom) }
+        }
+    }
+
+    private func send() {
+        if conversation.sendText(draft) { draft = "" }   // kept while a voice conversation is on
     }
 }

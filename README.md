@@ -200,23 +200,24 @@ One-time setup in Apple Developer (only the account holder can do this):
    `Bridge web`, identifier `com.talktobridge.bridge.web` (it must be exactly this; it's
    `SERVICES_ID` in `cloud/infra/lib/api.mjs`).
 2. Open it, tick **Sign in with Apple**, **Configure**: Primary App ID = the Bridge app
-   (`com.talktobridge.bridge`, so you get the same account as in the app). Domain: the host of
-   the `AppleReturnUrl` output of the Cloud deploy run (`<id>.execute-api.us-east-1.amazonaws.com`).
-   Return URL: the `AppleReturnUrl` itself (`https://<id>.execute-api.us-east-1.amazonaws.com/api/oauth/apple`).
+   (`com.talktobridge.bridge`, so you get the same account as in the app). Domain: `api.talktobridge.com`.
+   Return URL: `https://api.talktobridge.com/api/oauth/apple`. Apple refuses the API's own
+   `*.execute-api.amazonaws.com` host ("domain unavailable"), so give the API that address first with
+   `cloud/setup/setup-api-domain.ps1` (two CNAME records in Cloudflare, DNS only).
    Save, then Continue, then Save.
 
 Add it to Claude:
 1. claude.ai → **Settings → Connectors → Add custom connector**.
-2. Name `Bridge`; URL: the `ConnectorUrl` output (`https://<id>.execute-api.us-east-1.amazonaws.com/api/mcp`).
+2. Name `Bridge`; URL: `https://api.talktobridge.com/api/mcp`.
    Leave the advanced OAuth fields empty: Claude registers itself.
 3. **Connect**, then **Sign in with Apple**. The connector then works in the Claude iPhone app too.
 
-For Claude Code: `claude mcp add --transport http bridge <ConnectorUrl>`, then `/mcp` to sign in.
+For Claude Code: `claude mcp add --transport http bridge https://api.talktobridge.com/api/mcp`, then `/mcp` to sign in.
 
 How it works: `cloud/api/connector.mjs`. The MCP endpoint is stateless streamable HTTP (JSON
 responses). Sign-in is OAuth 2.1 with dynamic client registration and PKCE; only Claude's and
 localhost redirect addresses can register. Access tokens last an hour; a sign-in lasts 30 days.
 Refresh tokens are kept with the account, work once each, and deleting the account disconnects
 Claude. Access tokens are signed by the same KMS key as app sessions but for another audience, so
-neither works in place of the other. Until cloud agents are built (cloud/DESIGN.md step 4), send_task answers that
-they aren't switched on yet, the same as the app does in Cloud mode.
+neither works in place of the other. Until cloud agents are built (cloud/DESIGN.md step 4), send_task answers at once
+that Bridge Cloud can't run agents yet and that there's no setting to change, the same as the app does in Cloud mode.

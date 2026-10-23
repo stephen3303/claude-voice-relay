@@ -28,6 +28,7 @@ const INSTRUCTIONS = [
   "Bridge runs the user's Claude Code agents, one per project, and reads their answers aloud on the user's",
   'phone and glasses. Use send_task to start work in a project or to answer an agent that asked something,',
   'and read_inbox to hear back. Agents work on their own and answer later, so check the inbox after a while.',
+  "When Bridge says it can't do something, tell the user what it said; don't guess at a setting to change.",
 ].join(' ');
 
 export const TOOLS = [

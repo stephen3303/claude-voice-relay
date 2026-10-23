@@ -27,7 +27,9 @@ targets:
     info:
       path: GlassesRelay/Info.plist
       properties:
-        CFBundleDisplayName: Bridge          # must match the app name in the Wearables Developer Center
+        CFBundleDisplayName: $(APP_DISPLAY_NAME)   # must match the Meta app's name (Wearables Developer Center); a CI build may override it
+        INAlternativeAppNames:              # Siri still answers to "Bridge" when the home-screen name is longer
+          - INAlternativeAppName: Bridge
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)   # CI sets this to the run number
         ITSAppUsesNonExemptEncryption: false          # HTTPS only: exempt, so no export paperwork per upload
@@ -67,6 +69,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
+        APP_DISPLAY_NAME: Bridge
         META_APP_ID: "0"
         CLIENT_TOKEN: "0"
         SENTRY_DSN: ""

@@ -295,12 +295,17 @@ const agentTasks = makeAgents({
   log: (...a) => console.log(...a),
 });
 
-// Other accounts' tasks would need API billing (cloud/DESIGN.md, build step 4): until then a confirmed task is
-// acknowledged honestly instead of pretending to run.
+// Other accounts' tasks would need API billing (cloud/DESIGN.md, build step 4). Until then a confirmed task
+// is answered honestly instead of pretending to run. The answer is the reply itself, not "Sent.", and
+// says there's nothing to switch on: "aren't switched on yet" made Claude tell people to find a setting.
+const NO_AGENTS = (project) =>
+  `Bridge Cloud can't run agents yet, so ${project ?? 'your task'} didn't start. ` +
+  "This isn't a setting: there's nothing to turn on in the Bridge app or in Claude. " +
+  'Send it through your PC relay instead, with the Bridge app in My PC mode.';
+// Only as the reply: an inbox copy would be read out a second time, or rung through as a call.
 async function startTask(user, req) {
   if (user === OWNER) return agentTasks.startTask(user, req);
-  await deliver(user, agentTasks.notOn(req?.project), req?.project);
-  return 'Sent.';
+  return NO_AGENTS(req?.project);
 }
 
 // The owner has every Pro feature, with paid Pro's allowances: there's no App Store subscription to check.
