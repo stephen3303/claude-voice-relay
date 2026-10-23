@@ -4,7 +4,8 @@ import Foundation
 import StoreKit
 #endif
 
-/// Bridge Pro: photos, Bridge Cloud's natural voice and the Ask/Look Shortcuts actions. Voice conversations stay free.
+/// Bridge Pro: Bridge Cloud's natural voice and the Ask Shortcuts action (plus glasses photos and Look where the build
+/// has the glasses toolkit). Voice conversations stay free.
 /// The personal (sideloaded) build has everything unlocked; only the App Store build sells Pro.
 @MainActor
 final class Store: ObservableObject {
@@ -93,7 +94,11 @@ final class Store: ObservableObject {
     }
 
     /// The one description of what Pro gives, used in the settings section and the subscription sheet.
+    #if APP_STORE
+    static let summary = "The natural voice on Bridge Cloud (turn on Natural voice in Settings), and the Ask action for Shortcuts. Voice conversations stay free."
+    #else
     static let summary = "Photos from your glasses, the natural voice on Bridge Cloud (turn on Natural voice in Settings), and the Ask and Look actions for Shortcuts. Voice conversations stay free."
+    #endif
 
     enum Locked: LocalizedError {
         case needsPro

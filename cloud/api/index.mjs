@@ -16,6 +16,13 @@ import { makePro } from './storekit.mjs';
 import { makeAgents } from './agents.mjs';
 import { makeOwner, OWNER } from './owner.mjs';
 import { ECSClient, RunTaskCommand, StopTaskCommand } from '@aws-sdk/client-ecs';
+import { makeSentry, reportConsoleErrors, withReports } from './sentry.mjs';
+
+// Error reports (sentry.mjs), when the stack was deployed with a DSN. Every failure the handlers catch is already
+// logged as console.error(place, error), so those are reported too, tagged with the place (a route, "push failed").
+const sentry = makeSentry({ dsn: process.env.SENTRY_DSN, environment: 'cloud', release: process.env.AWS_LAMBDA_FUNCTION_NAME, log: console.warn });
+reportConsoleErrors(sentry);
+const reported = (fn) => withReports(sentry, fn);
 
 const TABLE = process.env.TABLE;
 const LOOK_MODEL = process.env.LOOK_MODEL || 'us.anthropic.claude-haiku-5-5';
@@ -311,11 +318,11 @@ async function startTask(user, req) {
 // The owner has every Pro feature, with paid Pro's allowances: there's no App Store subscription to check.
 const proForOwner = { ...pro, plan: async (user) => (user === OWNER ? 'Production' : pro.plan(user)) };
 
-export const handler = makeHandler({ store, look, startTask, devices, deliver, speak, pro: proForOwner, agentAwaiting: agentTasks.awaiting, splitTask: agentTasks.splitTask,
-  agentAnswer: agentTasks.answer });
+export const handler = reported(makeHandler({ store, look, startTask, devices, deliver, speak, pro: proForOwner, agentAwaiting: agentTasks.awaiting, splitTask: agentTasks.splitTask,
+  agentAnswer: agentTasks.answer }));
 
 // App Store Server Notifications v2 (POST /api/appstore/notifications, no authorizer: Apple signs the body).
-export async function appStore(event) {
+export const appStore = reported(async (event) => {
   try {
     const r = await pro.notify(Buffer.from(event.body || '', event.isBase64Encoded ? 'base64' : 'utf8').toString('utf8'));
     if (r.status !== 200) console.warn('App Store notification refused:', r.body.error);
@@ -324,7 +331,7 @@ export async function appStore(event) {
     console.error('App Store notification', e);
     return { statusCode: 500, body: '' };   // Apple sends it again later
   }
-}
+});
 
 // ---------- accounts (auth.mjs): Sign in with Apple, sessions signed by KMS ----------
 let appleKeys = null, appleKeysAt = 0, publicJwk = null;
@@ -391,7 +398,8 @@ const accounts = makeAuth({
   publicJwk: getPublicJwk,
   deleteUser,
 });
-export const { auth, authorize } = accounts;
+export const auth = reported(accounts.auth);
+export const authorize = reported(accounts.authorize);
 
 // ---------- Claude connector (connector.mjs): MCP server and its OAuth sign-in ----------
 import { makeConnector } from './connector.mjs';
@@ -449,7 +457,7 @@ async function latestMessages(user, n) {
   return (r.Items ?? []).reverse().map(({ id, text, at }) => ({ id, text, at }));
 }
 
-export const connector = makeConnector({
+export const connector = reported(makeConnector({
   issuer: process.env.ISSUER,
   servicesId: process.env.SERVICES_ID,
   publicUrl: process.env.PUBLIC_URL,
@@ -461,4 +469,4 @@ export const connector = makeConnector({
   userFor: isOwner.userFor,
   messagesAfter: (user, after) => store.messagesAfter(user, after),
   latestMessages,
-});
+}));

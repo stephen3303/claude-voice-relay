@@ -5,13 +5,27 @@ Two builds come from the same code:
 | | Personal (sideloaded) | App Store |
 |---|---|---|
 | Built by | `Glasses iOS build` (artifact) | `Glasses App Store upload` (signed, uploaded) |
-| "Hey Meta, start Bridge" | yes | no: Meta marks voice invocation experimental, and experimental features "cannot be published yet" |
+| XcodeGen spec | `project.yml` (`base.yml` + Meta Wearables toolkit) | `appstore.yml` (`base.yml` only) |
+| Ray-Ban Meta glasses | yes | no (see below) |
 | Start a conversation | Hey Meta, Siri, Shortcuts, app | Siri ("Talk to Bridge"), Action Button, Shortcuts, app |
-| Photos | still from the camera stream | still from the camera stream |
-| Bridge Pro | everything unlocked | photos + Ask/Look Shortcuts need the subscription |
+| Talk through | glasses, any Bluetooth headset, the phone | AirPods, any Bluetooth headset, the phone |
+| Photos | still from the glasses camera stream | none |
+| Bridge Pro | everything unlocked | natural cloud voice + Ask Shortcut need the subscription |
 
-When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` in
-`GlassesController.start()` and ship it in the App Store build too.
+**Why the App Store build has no glasses.** Meta's iOS integration guide (Device Access Toolkit 1.0) says
+"Publishing to the App Store is not currently supported, but we plan to do so in the future", and that
+because the toolkit uses the `ExternalAccessory` framework, an app with it "will lead to App Store rejection
+due to Apple's MFi program and privacy manifest requirements". Meta only lets developers share a toolkit app
+through one private, invite-only release channel. So `appstore.yml` leaves the toolkit, the
+`com.meta.ar.wearable` accessory protocol and the Bluetooth, local network and camera permissions out, and the
+glasses code and screens sit behind `#if !APP_STORE`.
+
+When Meta opens App Store publishing: move the toolkit parts of `project.yml` into `appstore.yml`, turn the
+`#if !APP_STORE` glasses blocks back on for the App Store build (keeping "Hey Meta" out while Meta still
+marks voice invocation experimental), create a project named **Talk to Bridge** in the Wearables Developer
+Center (the App Store build's home-screen name; "Bridge" is taken), put its App ID and Client Token in the
+build, bring photos back into Bridge Pro, and declare `NSPrivacyCollectedDataTypePhotosorVideos` again in
+`PrivacyInfo.xcprivacy` (and Photos in the App Privacy answers).
 
 ## Steps only you can do
 
@@ -33,14 +47,8 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
    with the **Admin** role (the upload's cloud signing creates the distribution certificate, which an
    App Manager key can't do). Then run `glasses/setup-appstore-secrets.ps1`, which stores `ASC_KEY_ID`,
    `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` and `APPLE_TEAM_ID` in the `appstore` environment, which only
-   main can use (so the upload runs from main only). Leave the Meta
-   prompts empty until step 7; the build then uses Meta Developer Mode, which is fine for TestFlight.
-7. **Meta, for production:** in the Wearables Developer Center, name the app **Talk to Bridge** (the App Store build's
-   home-screen name; "Bridge" is taken on the App Store), set the app's Apple Team ID to the paid team,
-   take its **App ID** and **Client Token** into the `META_APP_ID` and `META_CLIENT_TOKEN` secrets,
-   and publish a release channel for App Store users. Ask Meta how DAT apps meet Apple's MFi
-   requirement: the app declares the `com.meta.ar.wearable` accessory protocol, and App Review
-   asks the accessory maker to approve that.
+   main can use (so the upload runs from main only).
+7. **Meta:** nothing for now; the App Store build has no glasses (see above).
 8. **Upload:** Actions > Glasses App Store upload > Run workflow. The build appears in TestFlight in about 15 minutes.
 9. **Test on TestFlight**, then add screenshots (below) and submit for review.
 
@@ -54,13 +62,13 @@ When Meta takes voice invocation out of experimental, drop the `#if !APP_STORE` 
 - **Privacy policy URL:** https://talktobridge.com/privacy.html
 - **Support URL:** https://talktobridge.com/support.html
 - **Marketing URL:** https://talktobridge.com/
-- **Keywords (100 max):** voice,coding,agents,developer,hands-free,glasses,ray-ban,headset,shortcuts,siri,claude
+- **Keywords (100 max):** voice,coding,agents,developer,hands-free,airpods,headset,bluetooth,shortcuts,siri,claude
 - **Promotional text:** Run your coding agents from anywhere: talk, hear the answer, keep your hands free.
 
 **Description:**
 
-Bridge lets you talk to your Claude agents hands-free, through Ray-Ban Meta glasses or any Bluetooth
-headset. Your agents run in Bridge Cloud, so all you need is your iPhone and a Bridge account.
+Bridge lets you talk to your Claude agents hands-free, through AirPods or any Bluetooth headset.
+Your agents run in Bridge Cloud, so all you need is your iPhone and a Bridge account.
 
 Say "in my project, add a stop-loss check". Bridge reads the task back, and when you say "send it",
 your agent starts work. When it's done, or needs a yes or no from you, it calls you.
@@ -73,17 +81,15 @@ your agent starts work. When it's done, or needs a yes or no from you, it calls 
 - Private: Sign in with Apple, no email address, no ads, no tracking; delete your account in the app
 
 Bridge Pro:
-- "Look at this": take a photo with your glasses and hear what Claude sees
-- "Send this to my project": hand the photo to that agent
 - A natural cloud voice for replies
-- Ask Bridge and Look with Bridge actions for Shortcuts and automations
+- The Ask Bridge action for Shortcuts and automations
 
 Bridge Pro is an auto-renewing subscription, monthly or yearly, with a 1-week free trial. Payment
 is charged to your Apple ID. It renews unless cancelled at least 24 hours before the end of the
 period; manage or cancel it in Settings > Apple ID > Subscriptions.
 Terms: https://talktobridge.com/terms.html
 
-Not affiliated with Anthropic or Meta. Ray-Ban is a trademark of Luxottica.
+Not affiliated with Anthropic.
 
 ## App Review notes (paste into "Notes" under App Review Information)
 
@@ -95,9 +101,7 @@ Bridge is a voice front end for the user's Claude agents, which run in Bridge Cl
 2. Tap "Talk now" and allow the microphone and speech recognition.
 3. Say "in demo, write a test". Bridge reads it back. Say "send it". Then say "goodbye".
 
-The glasses camera features (Bridge Pro) need Ray-Ban Meta glasses; a video of them working is at:
-<add a link to a screen recording here>. Subscriptions can be tested in the sandbox from the
-Bridge Pro section.
+Subscriptions can be tested in the sandbox from the Bridge Pro section.
 
 Background audio is used only during a conversation the user starts: the app keeps listening
 through the headset microphone while an agent works, and speaks its answer, until the user
@@ -109,10 +113,9 @@ Must match https://talktobridge.com/privacy.html and `PrivacyInfo.xcprivacy`. No
 
 - **Identifiers > User ID:** linked to the user, app functionality (the Sign in with Apple identifier).
 - **Purchases > Purchase history:** linked, app functionality (Bridge Pro transactions checked by Bridge Cloud).
-- **User content > Photos:** linked, app functionality (photos the user asks about or sends to an agent).
 - **User content > Other user content:** linked, app functionality (task text and agents' messages).
 - **Identifiers > Device ID:** linked, app functionality (the app's per-install ID and push tokens, to deliver agents' calls and notifications).
-- **Usage data > Product interaction:** linked, app functionality (daily natural-voice characters and photo answers, kept 3 days, for limits).
+- **Usage data > Product interaction:** linked, app functionality (daily natural-voice characters, kept 3 days, for limits).
 - **Diagnostics > Crash data, Performance data, Other diagnostic data:** not linked, app functionality (Sentry).
 
 Not collected: contact info (no email is requested; the first name stays on the phone), audio,
@@ -127,5 +130,5 @@ conversation transcript, the Bridge Pro sheet) and add them in App Store Connect
 
 - **Ongoing value (guideline 3.1.2):** Apple sometimes rejects subscriptions that only unlock
   features. If that happens, switch Pro to a one-time non-consumable purchase in `Store.swift`.
-- **Account (2.1):** the reviewer signs in with Apple, or uses the demo, plus the video above.
-- **MFi accessory protocol:** see step 7.
+- **Account (2.1):** the reviewer signs in with Apple, or uses the demo.
+- **App icon:** it shows glasses, which this build doesn't support; worth a new icon before review.

@@ -53,13 +53,13 @@
       <li><strong>Your agents' messages.</strong> What your agents say to you is kept in your inbox for 7 days, so you hear it even if you weren't listening when it arrived, then expires and is deleted automatically, usually within a day or two.</li>
       <li><strong>Push tokens.</strong> To let agents call you or send a notification, the app registers your iPhone's push tokens, whether a headset is connected, and whether you allow calls. They are replaced whenever they change and removed when you sign out. A call or notification carries the project's name and the start of the agent's message (up to 180 characters) through Apple's push service, and shows it on your iPhone, including the lock screen.</li>
       <li><strong>Bridge Pro status.</strong> When you subscribe, the app sends Apple's signed record of the purchase to Bridge Cloud, which checks it with Apple and stores the subscription's transaction IDs, the product and when it ends. When the account is deleted, the link between it and the subscription is removed, but the subscription's original transaction ID, and the IDs of any refunded transactions, are kept, so one subscription can't unlock Bridge Pro for more than one account or after a refund.</li>
-      <li><strong>Daily usage counts.</strong> For the natural voice and photo answers, Bridge Cloud counts how many characters and photos you used each day, to keep within daily limits. Each count expires after 3 days and is deleted automatically soon after.</li>
+      <li><strong>Daily usage counts.</strong> For the natural voice, Bridge Cloud counts how many characters you used each day, to keep within daily limits. Each count expires after 3 days and is deleted automatically soon after.</li>
       <li><strong>Connector sign-ins.</strong> If you connect Claude to Bridge, Bridge Cloud keeps the connection's sign-in record for up to 30 days after you last sign in, so Claude stays connected.</li>
       <li><strong>Service logs.</strong> Bridge Cloud's logs record errors and events (such as whether a push was delivered) so problems can be fixed. They are deleted after 30 days.</li>
     </ul>
 
     <h2>Photos</h2>
-    <p>Photos are taken only when you ask, with your Ray-Ban Meta glasses, and are a Bridge Pro feature. A photo you ask about is sent to Bridge Cloud, answered by a Claude model through Amazon Bedrock on Bridge's Amazon Web Services account, and not stored. A photo you send to one of your agents goes to that agent's task.</p>
+    <p>The Bridge app doesn't take photos. If a photo is sent to Bridge Cloud's photo route, it is answered by a Claude model through Amazon Bedrock on Bridge's Amazon Web Services account, and not stored.</p>
 
     <h2>Spoken replies</h2>
     <p>By default, replies are spoken by your iPhone's own voices and nothing leaves the phone to speak them. Natural voice starts off on new installs; if you already heard it with Bridge Pro on Bridge Cloud before the switch was added, it stays on until you turn it off. With Bridge Pro and Natural voice turned on, the text of each reply is sent to Amazon Polly, on Bridge's Amazon Web Services account, to be turned into speech. The text isn't stored; only the character count above is.</p>
@@ -77,10 +77,7 @@
     <p>Bridge does not sell your data, share it for advertising, or use it to train AI models.</p>
 
     <h2>Crash and error reports</h2>
-    <p>When the app crashes, freezes, or a step fails (for example the glasses camera or a call to Bridge Cloud), it sends a report to Sentry, a crash reporting service, under Sentry's privacy policy. A report holds the error, where in the app it happened, the app version, and the iPhone's model, iOS version and state (such as free memory and battery). It holds no name, account, audio, text of what you say, photos or answers, and it is not linked to you. Sentry is set not to store IP addresses. Reports are used only to fix Bridge.</p>
-
-    <h2>Ray-Ban Meta glasses</h2>
-    <p>The Meta AI app connects the glasses to your iPhone, under Meta's terms. Bridge opts out of the analytics and crash reporting in the Meta Wearables toolkit it uses.</p>
+    <p>When the app crashes, freezes, or a step fails (for example a call to Bridge Cloud), it sends a report to Sentry, a crash reporting service, under Sentry's privacy policy. A report holds the error, where in the app it happened, the app version, and the iPhone's model, iOS version and state (such as free memory and battery). It holds no name, account, audio, text of what you say or answers, and it is not linked to you. Bridge Cloud reports its own errors to Sentry the same way: the error and which part of Bridge Cloud it came from, with no account, no text of what you say and no answers. Sentry is set not to store IP addresses. Reports are used only to fix Bridge.</p>
 
     <h2>Payments</h2>
     <p>Bridge Pro subscriptions are handled by Apple through the App Store. Bridge receives Apple's record of the purchase, described above, but never your name, payment card or billing details.</p>

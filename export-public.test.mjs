@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, mkdirSync
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { stripAppStore, publicReadme, publicProject, included, exportPublic, textOf, FORBIDDEN, MARKER } from './export-public.mjs';
+import { stripAppStore, publicReadme, included, exportPublic, textOf, FORBIDDEN, MARKER } from './export-public.mjs';
 
 test('keeps the personal branch of APP_STORE blocks and drops the App Store one', () => {
   const src = ['a', '#if APP_STORE', 'paid', '#else', 'free', '#endif', '  #if !APP_STORE', '  hey', '  #endif', 'b'].join('\n');
@@ -29,19 +29,15 @@ test('refuses #elseif inside an APP_STORE block', () => {
   assert.throws(() => stripAppStore('#if APP_STORE\na\n#elseif DEBUG\nb\n#endif'), /elseif/);
 });
 
-test('the public project drops the voip background mode', () => {
-  const src = ['        # voip: an agent call', '        UIBackgroundModes: [audio, external-accessory, voip]'].join('\n');
-  assert.equal(publicProject(src), '        UIBackgroundModes: [audio, external-accessory]');
-});
-
 test('drops the paid README sections', () => {
   const src = '# t\n\n## Setup\nrun it\n## Use Bridge from Claude (custom connector)\npaid\n## Bridge Cloud\nmore\n';
   assert.equal(publicReadme(src), '# t\n\n## Setup\nrun it\n');
 });
 
-test('drops the App Store comment from project.yml', () => {
-  const src = 'a: 1\n        # The App Store flavour is selected with\n        # APP_STORE on the command line.\nb: 2';
-  assert.equal(publicProject(src), 'a: 1\nb: 2');
+test('the public app gets the glasses spec and its shared base, not the App Store spec', () => {
+  assert.ok(included('glasses/ios/project.yml'));
+  assert.ok(included('glasses/ios/base.yml'));
+  assert.ok(!included('glasses/ios/appstore.yml'));
 });
 
 test('keeps the paid product out', () => {

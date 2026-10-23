@@ -6,8 +6,8 @@
 #                               distribution certificate, which an App Manager key can't)
 #   ASC_KEY_P8_BASE64           that key's .p8 file, base64-encoded
 #   APPLE_TEAM_ID               paid Apple Developer Program team ID
-#   META_APP_ID, META_CLIENT_TOKEN   from the app in the Wearables Developer Center; while they're
-#                               unset the build uses "0" (Meta Developer Mode, fine for TestFlight)
+# No Meta values: the App Store build is generated from appstore.yml, without the Meta glasses toolkit, which
+# Meta doesn't allow on the App Store yet (glasses/APP_STORE.md).
 # Optional, for crash reports (glasses/setup-sentry-secrets.ps1):
 #   SENTRY_DSN, SENTRY_AUTH_TOKEN secrets; SENTRY_ORG, SENTRY_PROJECT variables
 # The home-screen name is "Talk to Bridge": "Bridge" is another developer's app on the App Store (ITMS-90129).
@@ -36,7 +36,7 @@ jobs:
       - name: Generate Xcode project
         run: |
           brew install xcodegen xcbeautify
-          xcodegen generate
+          xcodegen generate --spec appstore.yml
 
       - name: Install API key
         env:
@@ -51,14 +51,9 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          META_APP_ID: ${{ secrets.META_APP_ID }}
-          META_CLIENT_TOKEN: ${{ secrets.META_CLIENT_TOKEN }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         run: |
           set -o pipefail
-          if [ -z "$META_APP_ID" ]; then
-            echo "::warning::No META_APP_ID secret: this build uses Meta Developer Mode (\"0\"). Fine for TestFlight; set the real Meta values before App Store review."
-          fi
           xcodebuild -project GlassesRelay.xcodeproj -scheme GlassesRelay -configuration Release \
             -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Bridge.xcarchive" \
             -skipPackagePluginValidation -skipMacroValidation \
@@ -68,7 +63,7 @@ jobs:
             DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic CODE_SIGN_ENTITLEMENTS=AppStore.entitlements \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             'APP_DISPLAY_NAME=Talk to Bridge' \
-            META_APP_ID="${META_APP_ID:-0}" CLIENT_TOKEN="${META_CLIENT_TOKEN:-0}" SENTRY_DSN="$SENTRY_DSN" \
+            SENTRY_DSN="$SENTRY_DSN" \
             'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) APP_STORE' \
             archive | xcbeautify --renderer github-actions
 
