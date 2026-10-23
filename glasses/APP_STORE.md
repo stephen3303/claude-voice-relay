@@ -24,7 +24,8 @@ When Meta opens App Store publishing: move the toolkit parts of `project.yml` in
 `#if !APP_STORE` glasses blocks back on for the App Store build (keeping "Hey Meta" out while Meta still
 marks voice invocation experimental), create a project named **Talk to Bridge** in the Wearables Developer
 Center (the App Store build's home-screen name; "Bridge" is taken), put its App ID and Client Token in the
-build, and bring photos back into Bridge Pro.
+build, bring photos back into Bridge Pro, and declare `NSPrivacyCollectedDataTypePhotosorVideos` again in
+`PrivacyInfo.xcprivacy` (and Photos in the App Privacy answers).
 
 ## Steps only you can do
 

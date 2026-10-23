@@ -139,7 +139,7 @@ struct SettingsView: View {
         }
         if hangUpAfter == 0 {
             let goodbye = wakeWord ? "Bridge, goodbye" : "goodbye"
-            text += " Bridge stays on until you say \"\(goodbye)\", which uses more battery and keeps the glasses on call-quality audio."
+            text += " Bridge stays on until you say \"\(goodbye)\", which uses more battery and keeps your headset on call-quality audio."
         }
         text += " The phone voice speaks unless the natural voice is on and available; download Premium voices in iPhone Settings > Accessibility > Spoken Content > Voices."
         if mode.wrappedValue == .pc {
@@ -147,7 +147,7 @@ struct SettingsView: View {
         } else if mode.wrappedValue == .cloud {
             text += " Natural voice is spoken by Amazon Polly and needs Bridge Pro."
         }
-        text += " High-quality speech plays replies over the glasses' music link, which sounds much better, but each reply starts and listening resumes about a second later."
+        text += " High-quality speech plays replies over your headset's music link, which sounds much better, but each reply starts and listening resumes about a second later."
         return text
     }
 
@@ -188,7 +188,7 @@ struct SettingsView: View {
             Button("Test call") { Task { await push.testCall() } }
             if !push.status.isEmpty { Text(push.status).font(.footnote) }
         } header: { Text("Calls") } footer: {
-            Text("With glasses or headphones connected, an agent that wants you rings like a phone call. Otherwise you get a notification.")
+            Text("With headphones connected, an agent that wants you rings like a phone call. Otherwise you get a notification.")
         }
     }
 

@@ -168,7 +168,7 @@ final class Push: NSObject, ObservableObject {
         upload()
         status = Self.headsetConnected && callsAllowed
             ? "Calling in 10 seconds. Lock your phone if you like."
-            : "Sending a notification in 10 seconds. Connect glasses or headphones to get a call instead."
+            : "Sending a notification in 10 seconds. Connect headphones to get a call instead."
         do { try await Self.cloud("POST", "api/push/test", session: session, body: ["delay": 10], timeout: 30) }
         catch { status = "Test call failed: \(error.localizedDescription)"; ErrorReporting.report(error, "test call") }
     }

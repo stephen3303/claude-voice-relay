@@ -24,7 +24,7 @@ struct HelpView: View {
                     HelpItem("Read-back", "With Read back on, Bridge reads your message back like Siri does: \"Here's your message to Claude for trading bot, ... Ready to send it?\" Say \"send\" or \"yes\" to send it, \"change it\" to say it differently, or \"cancel\" or \"no\". Nothing is sent until you say yes. Turn it off in Settings to send after a 2-second pause instead.")
                     HelpItem("Answers", "While a conversation is open, your agents' replies are read to you as they arrive. Answer a yes-or-no question with \"yes\".")
                     #if APP_STORE
-                    HelpItem("Calls from your agents", "With Bridge Cloud, an agent that has something for you rings like a phone call when glasses or headphones are connected. Answer it to hear the message and reply. Otherwise you get a notification. Turn it off in Settings > Calls.")
+                    HelpItem("Calls from your agents", "With Bridge Cloud, an agent that has something for you rings like a phone call when headphones are connected. Answer it to hear the message and reply. Otherwise you get a notification. Turn it off in Settings > Calls.")
                     #endif
                     HelpItem("Finish", "Say \"Bridge, goodbye\" or \"Bridge, hang up\" (just \"goodbye\" works if \"Only answer to Bridge\" is off). Bridge also hangs up after a quiet spell (set how long, or Never, in Settings > Voice), and waits longer while an agent is working.")
                 }
