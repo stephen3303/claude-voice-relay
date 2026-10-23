@@ -405,11 +405,12 @@ final class Conversation: NSObject, ObservableObject {
         Task {
             phase = .thinking
             let reply: String
-            // Without a camera (no glasses toolkit in the App Store build), a photo request is answered here:
-            // sent on, it could be taken as the answer to a read-back or an agent's question.
-            if Self.wantsPhoto(text), takePhoto == nil {
+            // Without a camera (no glasses toolkit in the App Store build), a plain request for one is answered
+            // here: sent on, it could be taken as the answer to a read-back or an agent's question. Anything
+            // wantsPhoto also catches ("what is this error", "send it to production") still goes to the agent.
+            if takePhoto == nil, Self.asksForCamera(text) {
                 reply = Self.noCamera
-            } else if Self.wantsPhoto(text), !Store.shared.isPro {
+            } else if takePhoto != nil, Self.wantsPhoto(text), !Store.shared.isPro {
                 reply = Store.Locked.needsPro.localizedDescription
             } else if Self.wantsPhoto(text), let takePhoto {
                 await say("Taking a picture.")
@@ -457,7 +458,10 @@ final class Conversation: NSObject, ObservableObject {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, canSendText else { return false }
         transcript.append(("You", text))
-        if Self.wantsPhoto(text) { transcript.append(("Relay", takePhoto == nil ? Self.noCamera : "Photos are voice-only. Ask out loud.")); return true }
+        if takePhoto == nil ? Self.asksForCamera(text) : Self.wantsPhoto(text) {
+            transcript.append(("Relay", takePhoto == nil ? Self.noCamera : "Photos are voice-only. Ask out loud."))
+            return true
+        }
         sendingText = true
         Task {
             defer { sendingText = false }
@@ -512,6 +516,12 @@ final class Conversation: NSObject, ObservableObject {
 
     /// The answer to a photo request in a build with no camera (the App Store build has no glasses toolkit).
     nonisolated static let noCamera = "This version of Bridge can't take photos."
+
+    /// Only an unmistakable request for the camera: what a build with no camera answers with noCamera.
+    nonisolated static func asksForCamera(_ text: String) -> Bool {
+        text.range(of: #"^(take a (picture|photo)|look at (this|that)|what am i looking at|(send|show|give) (this|that) (photo|picture) to )"#,
+                   options: [.regularExpression, .caseInsensitive]) != nil
+    }
 
     /// "Look at this, ...", "take a picture", "what am I looking at", "send this to <project>, ..."
     nonisolated static func wantsPhoto(_ text: String) -> Bool {
