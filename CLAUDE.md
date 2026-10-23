@@ -10,13 +10,16 @@ no Mac). The repo is public: never commit secrets, tokens, `.env`, `state.json`,
   (https://powerspec.taila78b6c.ts.net). `AGENT_MODE=cloud` runs tasks as claude.ai cloud sessions instead
   (`cloud-agents.mjs`, host `claude -p --cloud`), so they show in the Claude app. Voice routes: `/voice/confirm` (read-back), `/voice/send`
   (no read-back), `/voice/inbox` (long-poll), `/voice/photo`, `/voice/tts`.
-- `glasses/ios` — the Bridge iPhone app (SwiftUI, XcodeGen `project.yml`, Meta Wearables DAT 1.0.1).
-  Two flavours from one source: personal (sideloaded, everything unlocked, experimental "Hey Meta"
-  voice invocation) and App Store (`APP_STORE` compilation condition: StoreKit Bridge Pro, Sign in with Apple,
+- `glasses/ios` — the Bridge iPhone app (SwiftUI, XcodeGen, Meta Wearables DAT 1.0.1).
+  Two flavours from one source: personal (sideloaded, `project.yml` = `base.yml` + the Meta toolkit, everything unlocked,
+  experimental "Hey Meta" voice invocation) and App Store (`appstore.yml` = `base.yml` with no glasses, since Meta doesn't
+  allow toolkit apps on the App Store yet; glasses code behind `#if !APP_STORE`; `APP_STORE` compilation condition: StoreKit Bridge Pro, Sign in with Apple,
   Bridge Cloud, agent calls via PushKit + CallKit in `Push.swift`, `AppStore.entitlements`). Screens: `HomeView` (main), `SettingsView`, `HelpView`,
   `HistoryView`, `WelcomeView` (App Store first launch). Crash and error reports go to Sentry
   (`ErrorReporting.swift`) when CI builds with the `SENTRY_DSN` secret (`glasses/setup-sentry-secrets.ps1`);
-  never send speech, photos, replies, the PC address or the token.
+  never send speech, photos, replies, the PC address or the token. The relay and Bridge Cloud report errors with
+  `sentry.mjs` (no SDK; `cloud/api/sentry.mjs` is an identical copy, checked by its test): Sentry projects
+  `bridge-relay` (`SENTRY_DSN` in `.env`) and `bridge-cloud` (repo secret `SENTRY_DSN_CLOUD`, set on the Lambdas at deploy).
 - `cloud/` — Bridge Cloud on AWS (account 651325958035, us-east-1), CDK in `cloud/infra`, Lambda code
   in `cloud/api`. `DESIGN.md` is the architecture and build order. Stacks: `BridgeApi` (HTTP API,
   Lambda, DynamoDB, KMS session key, Sign in with Apple, APNs push in `cloud/api/push.mjs` with the key
@@ -78,8 +81,8 @@ See `.github/CICD.md` for the pipeline, the subagents in `.claude/agents`, and t
 - AWS account verification: blocks CloudFront (talktobridge.com) and Bedrock (photo answers in the
   cloud). Once it clears, rerun Cloud deploy and give Stephen the Cloudflare CNAMEs (DNS only) for
   talktobridge.com and www, pointing at the `CloudFrontTarget` output.
-- App Store: Stephen has enrolled. Still needed: the App Store Connect API key, the app record, and
-  the Meta app ID and client token, stored with `glasses/setup-appstore-secrets.ps1`. Then run the
+- App Store: Stephen has enrolled. Still needed: the App Store Connect API key and the app record, stored with
+  `glasses/setup-appstore-secrets.ps1`. The App Store build has no glasses until Meta allows toolkit apps there (`glasses/APP_STORE.md`). Then run the
   subscriptions workflow, then the App Store upload. The site describes the App Store product only (Bridge
   Cloud, Pro); `site/privacy.html` covers it, but still names "the developer of Bridge" and
   support@talktobridge.com, which needs a real legal name and a working mailbox before upload. Also set App Store Server Notifications (Version 2, production and sandbox URLs)

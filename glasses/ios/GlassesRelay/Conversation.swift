@@ -214,7 +214,7 @@ final class Conversation: NSObject, ObservableObject {
             onHiFi = false   // only once the glasses' mic is back, so a failed switch is tried again
             if report { status = "Using \(hfp.portName)" }
         } else if report {
-            status = "Glasses mic not found — using phone mic"
+            status = "Headset mic not found — using phone mic"
         }
     }
 
@@ -263,7 +263,7 @@ final class Conversation: NSObject, ObservableObject {
             // Still no glasses mic after a few tries (none connected, or it keeps refusing): listen on the phone.
             if onHiFi && micRetries >= 3 {
                 onHiFi = false
-                status = failure.map { "Glasses mic failed (\($0)) — using phone mic" } ?? "Glasses mic not found — using phone mic"
+                status = failure.map { "Headset mic failed (\($0)) — using phone mic" } ?? "Headset mic not found — using phone mic"
             }
         }
         // The glasses are listed as an input before their HFP link is up, and until it is the engine reports the
@@ -405,7 +405,12 @@ final class Conversation: NSObject, ObservableObject {
         Task {
             phase = .thinking
             let reply: String
-            if Self.wantsPhoto(text), !Store.shared.isPro {
+            // Without a camera (no glasses toolkit in the App Store build), a plain request for one is answered
+            // here: sent on, it could be taken as the answer to a read-back or an agent's question. Anything
+            // wantsPhoto also catches ("what is this error", "send it to production") still goes to the agent.
+            if takePhoto == nil, Self.asksForCamera(text) {
+                reply = Self.noCamera
+            } else if takePhoto != nil, Self.wantsPhoto(text), !Store.shared.isPro {
                 reply = Store.Locked.needsPro.localizedDescription
             } else if Self.wantsPhoto(text), let takePhoto {
                 await say("Taking a picture.")
@@ -417,7 +422,11 @@ final class Conversation: NSObject, ObservableObject {
             } else {
                 do { reply = try await Relay.shared.say(Self.forRelay(text), readBack: Self.readBack) }
                 catch {
+                    #if APP_STORE
+                    reply = "I couldn't reach Bridge Cloud. \(error.localizedDescription)"
+                    #else
                     reply = "I couldn't reach your PC. \(error.localizedDescription)"
+                    #endif
                     ErrorReporting.report(error, "say")
                 }
             }
@@ -453,7 +462,10 @@ final class Conversation: NSObject, ObservableObject {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, canSendText else { return false }
         transcript.append(("You", text))
-        if Self.wantsPhoto(text) { transcript.append(("Relay", "Photos are voice-only. Ask out loud.")); return true }
+        if takePhoto == nil ? Self.asksForCamera(text) : Self.wantsPhoto(text) {
+            transcript.append(("Relay", takePhoto == nil ? Self.noCamera : "Photos are voice-only. Ask out loud."))
+            return true
+        }
         sendingText = true
         Task {
             defer { sendingText = false }
@@ -504,6 +516,15 @@ final class Conversation: NSObject, ObservableObject {
     /// Anything else (send it, yes, status, an answer to an agent) goes through as said.
     nonisolated static func forRelay(_ text: String) -> String {
         text.range(of: #"^(in|on)\s"#, options: [.regularExpression, .caseInsensitive]) != nil ? "task: \(text)" : text
+    }
+
+    /// The answer to a photo request in a build with no camera (the App Store build has no glasses toolkit).
+    nonisolated static let noCamera = "This version of Bridge can't take photos."
+
+    /// Only an unmistakable request for the camera: what a build with no camera answers with noCamera.
+    nonisolated static func asksForCamera(_ text: String) -> Bool {
+        text.range(of: #"^(take a (picture|photo)|look at (this|that)\W*$|what am i looking at|(send|show|give) (this|that) (photo|picture) to )"#,
+                   options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     /// "Look at this, ...", "take a picture", "what am I looking at", "send this to <project>, ..."

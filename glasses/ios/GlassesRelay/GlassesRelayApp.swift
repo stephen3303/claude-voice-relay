@@ -1,5 +1,7 @@
 import SwiftUI
+#if !APP_STORE
 import MWDATCore
+#endif
 
 @main
 struct GlassesRelayApp: App {
@@ -11,6 +13,7 @@ struct GlassesRelayApp: App {
     init() {
         ErrorReporting.start()
         Conversation.noteNaturalVoiceBefore()
+        #if !APP_STORE
         // The toolkit must be configured once, before anything touches Wearables.shared.
         // If it fails (or on the simulator), Wearables.shared must never be touched: the toolkit
         // traps on access. The app still works for voice; the glasses features say why they're off.
@@ -22,6 +25,7 @@ struct GlassesRelayApp: App {
             GlassesController.toolkitError = "\(error)"
             ErrorReporting.report(error, "Wearables.configure")
         }
+        #endif
         // CI launches the simulator with -screenshots to take the App Store screenshots.
         if CommandLine.arguments.contains("-screenshots") { Self.seedScreenshots() }
     }
@@ -31,12 +35,16 @@ struct GlassesRelayApp: App {
         // The simulator has no glasses or toolkit, so show the state a set-up user sees.
         GlassesController.screenshotMode = true
         UserDefaults.standard.set(true, forKey: "welcomed")
+        let glasses = GlassesController.shared
+        #if APP_STORE
+        Relay.shared.baseURL = Relay.cloudAddress   // what the listing describes: agents in Bridge Cloud
+        #else
         Relay.shared.baseURL = "https://my-pc.tail1234.ts.net"
         Relay.shared.token = "screenshot-token"
-        let glasses = GlassesController.shared
         glasses.registration = "Registered"
         glasses.deviceCount = 1
         glasses.cameraAllowed = true
+        #endif
         glasses.conversation.phase = .listening
         glasses.conversation.transcript = [
             ("You", "In trading bot, add a stop-loss check to the order router"),
@@ -56,7 +64,7 @@ struct GlassesRelayApp: App {
                 .task { await glasses.start() }
                 #if APP_STORE
                 .task { await Account.shared.check() }
-                #endif
+                #else
                 // Meta AI calls back into the app after registration; only its links go to the toolkit.
                 .onOpenURL { url in
                     guard URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -67,6 +75,7 @@ struct GlassesRelayApp: App {
                         catch { glasses.lastError = "Meta AI callback failed: \(error)"; ErrorReporting.report(error, "Meta AI callback") }
                     }
                 }
+                #endif
         }
     }
 }

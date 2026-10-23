@@ -30,6 +30,9 @@ const OWNER_CLAUDE_SECRET = 'bridge/owner-claude';   // the owner's claude.ai lo
 // refuses *.execute-api.amazonaws.com, so the connector and its Apple return URL use this one.
 const PUBLIC_URL = 'https://api.talktobridge.com';
 const OWNER_ROUTINE_SECRET = 'bridge/owner-routine'; // { url, token }: the routine new tasks start as, runner only
+// Error reports (cloud/api/sentry.mjs): the bridge-cloud project's DSN, from the SENTRY_DSN_CLOUD secret at deploy.
+// Unset (CI's synth, a fork) means no reports.
+const SENTRY = process.env.SENTRY_DSN_CLOUD ? { SENTRY_DSN: process.env.SENTRY_DSN_CLOUD } : {};
 
 export class ApiStack extends Stack {
   constructor(scope, id, props) {
@@ -51,7 +54,7 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(29),                 // HTTP API's limit is 30s; the inbox waits up to ~20s
       memorySize: 512,
-      environment: { TABLE: table.tableName, LOOK_MODEL, BUNDLE_ID, APNS_SECRET },
+      environment: { ...SENTRY, TABLE: table.tableName, LOOK_MODEL, BUNDLE_ID, APNS_SECRET },
       logGroup: new logs.LogGroup(this, 'VoiceLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     table.grantReadWriteData(voice);
@@ -148,7 +151,7 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(10),
       memorySize: 256,
-      environment: { TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn },
+      environment: { ...SENTRY, TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn },
       logGroup: new logs.LogGroup(this, 'AuthLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     authFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['kms:Sign', 'kms:GetPublicKey'], resources: [signingKey.keyArn] }));
@@ -161,7 +164,7 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(5),
       memorySize: 256,
-      environment: { TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn, OWNER_SECRET },
+      environment: { ...SENTRY, TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn, OWNER_SECRET },
       logGroup: new logs.LogGroup(this, 'AuthorizerLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     // Only the owner token's hash; until the secret exists nobody is the owner.
@@ -208,7 +211,7 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(15),
       memorySize: 256,
-      environment: { TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn, SERVICES_ID },
+      environment: { ...SENTRY, TABLE: table.tableName, ISSUER, BUNDLE_ID, SIGNING_KEY: signingKey.keyArn, SERVICES_ID },
       logGroup: new logs.LogGroup(this, 'ConnectorLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     connectorFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['kms:Sign', 'kms:GetPublicKey'], resources: [signingKey.keyArn] }));
@@ -251,7 +254,7 @@ export class ApiStack extends Stack {
       code: lambda.Code.fromAsset(API_DIR, { exclude: ['*.test.mjs'] }),
       timeout: Duration.seconds(10),
       memorySize: 256,
-      environment: { TABLE: table.tableName, BUNDLE_ID },
+      environment: { ...SENTRY, TABLE: table.tableName, BUNDLE_ID },
       logGroup: new logs.LogGroup(this, 'AppStoreLogs', { retention: logs.RetentionDays.ONE_MONTH }),
     });
     // Anyone can reach it, so it gets only the item calls storekit.mjs makes, not Query or Scan.

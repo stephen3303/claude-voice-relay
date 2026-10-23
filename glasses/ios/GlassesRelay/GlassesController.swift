@@ -1,6 +1,8 @@
 import Foundation
+#if !APP_STORE
 import MWDATCore
 import MWDATCamera
+#endif
 
 /// Registers with Meta AI and listens for "Hey Meta, start Bridge".
 /// Modeled on the toolkit's BirdSpotter sample (DatGlassesVoiceRepository): wait for registration,
@@ -17,6 +19,16 @@ final class GlassesController: ObservableObject {
 
     let conversation = Conversation()
 
+    /// App Store screenshots in CI: the seeded state is shown as is, and nothing is started.
+    nonisolated(unsafe) static var screenshotMode = false
+
+    #if APP_STORE
+    // No toolkit in this build (appstore.yml): Meta doesn't allow toolkit apps on the App Store yet,
+    // so it only holds the conversation, and the glasses parts of the screens are hidden.
+    private init() {}
+
+    func start() async {}
+    #else
     private var stream: VoiceInvocationsStream?
     private var listeningOn: DeviceIdentifier?
     private var devices: [DeviceIdentifier] = []
@@ -32,9 +44,6 @@ final class GlassesController: ObservableObject {
     /// Set at launch by GlassesRelayApp. False means Wearables.configure() failed, and nothing may touch Wearables.shared.
     nonisolated(unsafe) static var toolkitReady = false
     nonisolated(unsafe) static var toolkitError: String?
-    /// App Store screenshots in CI: the seeded state is shown as is, and nothing is started.
-    nonisolated(unsafe) static var screenshotMode = false
-
     func start() async {
         guard !started, !Self.screenshotMode else { return }
         started = true
@@ -126,21 +135,6 @@ final class GlassesController: ObservableObject {
     }
 
     // MARK: camera
-
-    enum PhotoFailure: LocalizedError {
-        case noGlasses, notAllowed, timedOut, cameraDidNotStart, cameraBusy, photoNeverArrived, failed(String)
-        var errorDescription: String? {   // spoken aloud, so plain words
-            switch self {
-            case .noGlasses: return "I can't see your glasses. Check they're on and connected."
-            case .notAllowed: return "The camera isn't allowed yet. Open Bridge and tap Allow camera."
-            case .timedOut: return "The glasses took too long to connect. Try again."
-            case .cameraDidNotStart: return "The glasses camera didn't wake up. Try again."
-            case .cameraBusy: return "The glasses camera was busy. Try again."
-            case .photoNeverArrived: return "The photo didn't reach your phone. Try again."
-            case .failed(let why): return "The photo didn't work. \(why)"
-            }
-        }
-    }
 
     func refreshCameraPermission() async {
         cameraAllowed = (try? await Wearables.shared.checkPermissionStatus(.camera)) == .granted
@@ -269,6 +263,24 @@ final class GlassesController: ObservableObject {
                 linkTokens.append(device.addLinkStateListener { [weak self] _ in
                     Task { @MainActor in self?.ensureListening() }
                 })
+            }
+        }
+    }
+    #endif
+
+    // MARK: photo errors (both builds: ErrorReporting reads them)
+
+    enum PhotoFailure: LocalizedError {
+        case noGlasses, notAllowed, timedOut, cameraDidNotStart, cameraBusy, photoNeverArrived, failed(String)
+        var errorDescription: String? {   // spoken aloud, so plain words
+            switch self {
+            case .noGlasses: return "I can't see your glasses. Check they're on and connected."
+            case .notAllowed: return "The camera isn't allowed yet. Open Bridge and tap Allow camera."
+            case .timedOut: return "The glasses took too long to connect. Try again."
+            case .cameraDidNotStart: return "The glasses camera didn't wake up. Try again."
+            case .cameraBusy: return "The glasses camera was busy. Try again."
+            case .photoNeverArrived: return "The photo didn't reach your phone. Try again."
+            case .failed(let why): return "The photo didn't work. \(why)"
             }
         }
     }

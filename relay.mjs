@@ -14,6 +14,7 @@ import { makeGitHubApp, makeAgentGitHub, unsafeMount } from './github-app.mjs';
 import { makePublisher, REQUEST_FILE, MAX_REQUEST, FETCH_SCRIPT, PUSH_SCRIPT } from './publish.mjs';
 import { runCloud, makeCloudTurn, resolveClaude, fireRoutine, routineUrlOk } from './cloud-agents.mjs';
 import { makeNtfy } from './ntfy.mjs';
+import { makeSentry } from './sentry.mjs';
 import { route, inboxAfter } from './voice-routes.mjs';
 import { agentArgs, quickLookArgs, QUICK_BASE, unknownFlag, makeStreamReader, spokenReply } from './agent-turn.mjs';
 import { infoCommand, infoArgs, spokenUsage, spokenContext } from './session-info.mjs';
@@ -50,6 +51,8 @@ const cfg = {
   // Optional: an ntfy topic (https://ntfy.sh/<hard-to-guess topic>) that gets everything the relay says (ntfy.mjs).
   ntfyUrl: process.env.NTFY_URL || '',
   ntfyToken: process.env.NTFY_TOKEN || '',
+  // Optional: error reports to Sentry (sentry.mjs), from the bridge-relay project's Client Keys page.
+  sentryDsn: process.env.SENTRY_DSN || '',
 };
 
 const log = (...a) => {
@@ -74,6 +77,16 @@ else if (cfg.cloud && cfg.routineUrl && !routineOn) log("WARNING: BRIDGE_ROUTINE
 else if (routineOn) log('Finished tasks are recorded as threads in the claude.ai project (BRIDGE_ROUTINE_URL).');
 const ntfy = makeNtfy({ url: cfg.ntfyUrl, token: cfg.ntfyToken, log });
 if (ntfy) log('Messages are also sent to the phone through ntfy (NTFY_URL).');
+const sentry = makeSentry({ dsn: cfg.sentryDsn, environment: cfg.cloud ? 'relay-cloud' : 'relay-docker', log });
+if (sentry.enabled) log('Errors are reported to Sentry (SENTRY_DSN).');
+// A crash is reported before the relay exits; start.ps1 starts it again.
+for (const kind of ['uncaughtException', 'unhandledRejection']) {
+  process.on(kind, async (e) => {
+    log(`${kind}:`, e?.stack || e);
+    await sentry.capture(e, kind);
+    process.exit(1);
+  });
+}
 
 // The agent's final message is read aloud, so it must end with a short, speakable line.
 const VOICE_PROMPT = [
@@ -297,7 +310,7 @@ function runClaude(a, prompt, gitEnv) {
         if (Number.isFinite(r.total_cost_usd)) log(a.name, `turn cost about $${r.total_cost_usd.toFixed(2)}, ${r.num_turns ?? '?'} turns${r.subtype && r.subtype !== 'success' ? `, ${r.subtype}` : ''}`);
         return resolve(r);
       }
-      reject(new Error(`claude exited ${code}: ${err.slice(-400)}`));
+      reject(Object.assign(new Error(`claude exited ${code}: ${err.slice(-400)}`), { report: `claude exited ${code}` }));
     });
     p.stdin.end(prompt);
   });
@@ -339,7 +352,7 @@ const cloudTurn = makeCloudTurn({
     if (!routineOn) return;
     fireRoutine({ url: cfg.routineUrl, token: cfg.routineToken })
       .then((id) => log(a.name, 'project routine started', id))
-      .catch((e) => log(a.name, 'project routine failed:', e.message));
+      .catch((e) => { log(a.name, 'project routine failed:', e.message); sentry.capture(e, 'project routine'); });
   },
 });
 // A cloud turn's CLI would outlive the relay (and keep its session waiting) when start.ps1 restarts it.
@@ -370,6 +383,7 @@ async function turn(a, prompt, photo) {
   } catch (e) {
     if (a.stopped) return;
     log(a.name, 'turn failed:', e.message);
+    sentry.capture(e, 'agent turn');
     say(`${a.name} failed. ${e.message.slice(0, 200)}`);
   } finally {
     if (photo) {
@@ -471,6 +485,7 @@ async function sessionInfo({ kind, agent }) {
       return kind === 'usage' ? spokenUsage(a.name, out) : spokenContext(a.name, out);
     } catch (e) {
       log(a.name, `${kind} failed:`, e.message);
+      sentry.capture(e, `session ${kind}`);
       return `I couldn't get ${a.name}'s ${kind}.`;
     }
   }));
@@ -490,13 +505,19 @@ async function dispatch(text) {
   return reply(text);
 }
 
+function handlerError(e) {
+  log('handler error:', e.message);
+  sentry.capture(e, 'voice handler');
+  say(`Relay error. ${e.message}`);
+}
+
 // ---------- read-back loop for the iPhone Shortcut (/voice/confirm): confirm.mjs ----------
 const confirmStep = makeConfirm({
   parseTask,
   resolveProject: (spoken) => resolveRepo(spoken, false),
   spokenName,
   agentAwaiting: () => [...agents.values()].some((a) => a.awaiting),
-  dispatch: (text) => (typeof text === 'string' ? dispatch(text) : startTask(text)).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); }),
+  dispatch: (text) => (typeof text === 'string' ? dispatch(text) : startTask(text)).catch(handlerError),
   log,
 });
 
@@ -548,6 +569,7 @@ function photo(req, res) {
       reply = m ? photoToAgent(file, m[1], m[2] || '') : await quickLook(file, said);
     } catch (e) {
       log('photo error:', e.message);
+      sentry.capture(e, 'voice photo');
       reply = `Sorry, I couldn't read that photo. ${e.message.slice(0, 150)}`;
     }
     res.writeHead(200, { 'content-type': 'text/plain' }).end(reply);
@@ -579,8 +601,8 @@ function quickLook(file, said) {
   fs.renameSync(file, path.join(dir, 'photo.jpg'));
   const prompt = `${LOOK_PROMPT}\n\nThey said: "${said || 'What am I looking at?'}"`;
   // Prompt over stdin; every argv entry is fixed, so nothing said can become an argument.
-  // It may need the setup token to sign in, but never the routine's token or the ntfy topic.
-  const { BRIDGE_ROUTINE_TOKEN: _r, NTFY_URL: _u, NTFY_TOKEN: _t, ...env } = process.env;
+  // It may need the setup token to sign in, but never the routine's token, the ntfy topic or the Sentry DSN.
+  const { BRIDGE_ROUTINE_TOKEN: _r, NTFY_URL: _u, NTFY_TOKEN: _t, SENTRY_DSN: _s, ...env } = process.env;
   const once = (args) => new Promise((resolve, reject) => {
     const p = spawn(process.env.CLAUDE_BIN || 'claude', args, { cwd: dir, windowsHide: true, env });
     let out = '', err = '';
@@ -595,7 +617,7 @@ function quickLook(file, said) {
   const answer = ({ code, out, err }) => {
     let r;
     try { r = JSON.parse(out.trim().split('\n').pop()); }
-    catch { throw new Error(`claude exited ${code}: ${(err || out).slice(-200)}`); }
+    catch { throw Object.assign(new Error(`claude exited ${code}: ${(err || out).slice(-200)}`), { report: `claude exited ${code}` }); }
     if (r.is_error) throw new Error(r.result || 'Claude returned an error');
     return spokenReply(r).line;
   };
@@ -655,11 +677,12 @@ function tts(req, res) {
           instructions: 'Speak naturally and warmly, at a relaxed conversational pace.' }),
         signal: AbortSignal.timeout(30000),
       });
-      if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      if (!r.ok) throw Object.assign(new Error(`OpenAI ${r.status}: ${(await r.text()).slice(0, 200)}`), { report: 'OpenAI speech refused', status: r.status });
       const audio = Buffer.from(await r.arrayBuffer());
       res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': audio.length }).end(audio);
     } catch (e) {
       log('tts error:', e.message);
+      sentry.capture(e, 'voice tts');
       if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain' }).end('TTS failed.');
     }
   });
@@ -710,7 +733,7 @@ else {
       if (!text) { res.writeHead(400, { 'content-type': 'text/plain' }).end('Nothing heard.'); return; }
       log('voice:', text);
       res.writeHead(200, { 'content-type': 'text/plain' }).end('Sent.');
-      dispatch(text).catch((e) => { log('handler error:', e.message); say(`Relay error. ${e.message}`); });
+      dispatch(text).catch(handlerError);
     });
   }).on('clientError', (err, socket) => {
     // Malformed requests (e.g. a hidden character in a header) never reach the handler above.

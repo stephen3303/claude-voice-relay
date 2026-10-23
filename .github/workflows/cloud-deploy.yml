@@ -33,7 +33,7 @@ jobs:
           cache-dependency-path: cloud/infra/package-lock.json
 
       - name: API tests
-        run: node --test ../api/voice.test.mjs ../api/auth.test.mjs ../api/push.test.mjs
+        run: node --test ../api/voice.test.mjs ../api/auth.test.mjs ../api/push.test.mjs ../api/sentry.test.mjs
 
       - name: Claude connector tests
         run: node --test ../api/connector.test.mjs
@@ -58,6 +58,8 @@ jobs:
         run: npx cdk synth -q && node check-template.mjs
 
       - name: Deploy the API
+        env:
+          SENTRY_DSN_CLOUD: ${{ secrets.SENTRY_DSN_CLOUD }}   # error reports (cloud/api/sentry.mjs); empty means off
         run: npx cdk deploy BridgeApi --require-approval never --outputs-file outputs.json
 
       # Separate, so the API still ships while AWS has CloudFront blocked pending account verification.

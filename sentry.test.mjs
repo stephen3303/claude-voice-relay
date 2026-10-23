@@ -1,0 +1,174 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseDsn, clean, frames, toEvent, makeSentry, reportConsoleErrors, withReports } from './sentry.mjs';
+
+const DSN = 'https://0123456789abcdef0123456789abcdef@o123.sentry.example/456';
+
+test('parseDsn reads the key and the envelope URL, and refuses anything else', () => {
+  assert.deepEqual(parseDsn(DSN), { key: '0123456789abcdef0123456789abcdef', url: 'https://o123.sentry.example/api/456/envelope/', dsn: DSN });
+  assert.equal(parseDsn('http://0123456789abcdef@host/1'), null);
+  assert.equal(parseDsn('https://host/1'), null);
+  assert.equal(parseDsn('https://0123456789abcdef:secret@host/1'), null);
+  assert.equal(parseDsn('https://0123456789abcdef@host/1/../x'), null);
+});
+
+test('clean keeps the start of Bridge\'s own words and takes out what identifies anyone', () => {
+  assert.equal(clean("ENOENT: no such file or directory, open 'C:\\Users\\you\\x'"), 'ENOENT');
+  assert.equal(clean('claude exited 1: here is what you asked about your bank'), 'claude exited 1');
+  assert.equal(clean('fetch https://mypc.example/voice?x=1 refused'), 'fetch <url> refused');
+  assert.equal(clean('no route to 100.64.1.2'), 'no route to <ip>');
+  assert.equal(clean('mail stephen@example.com'), 'mail <email>');
+  assert.equal(clean('cannot open C:\\Users\\you\\Projects\\a.txt'), 'cannot open <path>');
+  assert.equal(clean('cannot open /home/user/x'), 'cannot open <path>');
+  assert.equal(clean('bad token abcdefghijklmnopqrstuvwxyz0123'), 'bad token <redacted>');
+  assert.equal(clean('x'.repeat(500)).length <= 160, true);
+  assert.equal(clean(undefined), '');
+});
+
+test('frames are oldest first, with file names only', () => {
+  const stack = 'Error: boom\n    at inner (C:\\Users\\you\\Projects\\relay\\relay.mjs:10:5)\n    at file:///home/user/x/outer.mjs:20:3\n    at node:internal/process/task_queues:95:5';
+  assert.deepEqual(frames(stack), [
+    { function: '?', filename: 'task_queues', lineno: 95, colno: 5, in_app: false },
+    { function: '?', filename: 'outer.mjs', lineno: 20, colno: 3, in_app: true },
+    { function: 'inner', filename: 'relay.mjs', lineno: 10, colno: 5, in_app: true },
+  ]);
+});
+
+test('toEvent sends the type, code and status, never the message, and no user or request', () => {
+  const e = Object.assign(new Error("private payroll's folder doesn't exist yet"), { code: 'ERR_X', $metadata: { httpStatusCode: 503 } });
+  const ev = toEvent(e, 'voice tts', { environment: 'relay', now: 1_000_000 });
+  assert.equal(ev.exception.values[0].type, 'Error');
+  assert.equal(ev.exception.values[0].value, '(message not sent)');
+  assert.doesNotMatch(JSON.stringify(ev), /payroll/);
+  const own = Object.assign(new Error('claude exited 1: the answer'), { report: 'claude exited 1: the answer' });
+  assert.equal(toEvent(own, 'x').exception.values[0].value, 'claude exited 1');
+  assert.deepEqual(ev.tags, { where: 'voice tts', code: 'ERR_X', status: '503' });
+  assert.equal(ev.timestamp, 1000);
+  assert.equal(ev.environment, 'relay');
+  assert.match(ev.event_id, /^[0-9a-f]{32}$/);
+  for (const k of ['user', 'request', 'extra', 'breadcrumbs', 'server_name']) assert.equal(k in ev, false, k);
+  assert.equal(toEvent('a string', 'x').exception.values[0].value, '(message not sent)');
+});
+
+function fakeFetch(status = 200) {
+  const calls = [];
+  const fetch = async (url, opts) => { calls.push({ url, opts }); if (status === 'throw') throw new TypeError('fetch failed'); return { ok: status < 300, status }; };
+  return { calls, fetch };
+}
+
+test('makeSentry posts an envelope with the auth header, and is off without a DSN', async () => {
+  const off = makeSentry({});
+  assert.equal(off.enabled, false);
+  await off.capture(new Error('x'), 'y');
+
+  const { calls, fetch } = fakeFetch();
+  const s = makeSentry({ dsn: DSN, environment: 'cloud', fetch, now: () => 5_000_000 });
+  await s.capture(new Error('boom'), 'GET /voice/inbox');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://o123.sentry.example/api/456/envelope/');
+  assert.equal(calls[0].opts.redirect, 'error');
+  assert.match(calls[0].opts.headers['x-sentry-auth'], /sentry_key=0123456789abcdef0123456789abcdef/);
+  const [head, item, event] = calls[0].opts.body.split('\n').map((l) => JSON.parse(l));
+  assert.equal(head.dsn, DSN);
+  assert.deepEqual(item, { type: 'event' });
+  assert.equal(event.event_id, head.event_id);
+  assert.equal(event.tags.where, 'GET /voice/inbox');
+  assert.equal(event.environment, 'cloud');
+});
+
+test('a bad DSN is logged and turns reports off', () => {
+  const lines = [];
+  const s = makeSentry({ dsn: 'nope', log: (...a) => lines.push(a.join(' ')) });
+  assert.equal(s.enabled, false);
+  assert.match(lines[0], /not a Sentry DSN/);
+});
+
+test('the same error is sent once a minute, and 30 an hour in all', async () => {
+  let t = 7_200_000;
+  const { calls, fetch } = fakeFetch();
+  const s = makeSentry({ dsn: DSN, fetch, now: () => t, perHour: 3 });
+  await s.capture(new Error('same'), 'here');
+  await s.capture(new Error('same'), 'here');
+  assert.equal(calls.length, 1);
+  t += 61_000;
+  await s.capture(new Error('same'), 'here');
+  await s.capture(new Error('other'), 'there');
+  await s.capture(new Error('third'), 'elsewhere');
+  assert.equal(calls.length, 3);
+  t += 3600_000;
+  await s.capture(new Error('third'), 'elsewhere');
+  assert.equal(calls.length, 4);
+});
+
+test('a failed post is logged without the DSN and never thrown', async () => {
+  const lines = [];
+  for (const status of [500, 'throw']) {
+    const { fetch } = fakeFetch(status);
+    const s = makeSentry({ dsn: DSN, fetch, log: (...a) => lines.push(a.join(' ')) });
+    await s.capture(new Error('x'), 'y');
+  }
+  assert.deepEqual(lines, ['Sentry answered 500', 'Sentry report failed: TypeError']);
+});
+
+test('flush waits for reports in flight, and no longer than its limit', async () => {
+  let release;
+  const fetch = () => new Promise((r) => { release = () => r({ ok: true, status: 200 }); });
+  const s = makeSentry({ dsn: DSN, fetch });
+  s.capture(new Error('x'), 'y');
+  let done = false;
+  const f = s.flush(1000).then(() => { done = true; });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(done, false);
+  release();
+  await f;
+  assert.equal(done, true);
+  s.capture(new Error('z'), 'y');   // never answers
+  const started = Date.now();
+  const alive = setInterval(() => {}, 1000);   // flush's own timer doesn't hold the process open
+  await s.flush(50);
+  clearInterval(alive);
+  assert.ok(Date.now() - started < 500);
+});
+
+function fakeSentry(enabled = true) {
+  const captured = [];
+  let flushed = 0;
+  return { captured, flushes: () => flushed, enabled, capture: (e, where) => { captured.push([e, where]); return Promise.resolve(); },
+    flush: async () => { flushed++; } };
+}
+
+test('reportConsoleErrors still logs, and reports an Error argument tagged with the first string', () => {
+  const s = fakeSentry();
+  const logged = [];
+  const target = { error: (...a) => logged.push(a) };
+  reportConsoleErrors(s, target);
+  const e = new Error('x');
+  target.error('POST /voice/send', e);
+  target.error('no error here');
+  target.error(e);
+  assert.equal(logged.length, 3);
+  assert.deepEqual(s.captured, [[e, 'POST /voice/send'], [e, 'console.error']]);
+
+  const off = { error: () => {} }, before = off.error;
+  reportConsoleErrors(fakeSentry(false), off);
+  assert.equal(off.error, before);
+});
+
+test('withReports reports a thrown error, rethrows it, and flushes either way', async () => {
+  const s = fakeSentry();
+  assert.equal(await withReports(s, async (ev) => ev + 1)(1, {}), 2);
+  assert.equal(s.flushes(), 1);
+  const e = new Error('boom');
+  await assert.rejects(withReports(s, async () => { throw e; })({}, { functionName: 'Voice' }), e);
+  assert.deepEqual(s.captured, [[e, 'unhandled in Voice']]);
+  assert.equal(s.flushes(), 2);
+});
+
+test('a stack trace quoted in the message is not sent as frames', () => {
+  const e = new Error('claude exited 1: Error: x\n    at secretFn (C:\\proj\\private-payroll.js:1:2)');
+  const json = JSON.stringify(toEvent(e, 'x'));
+  assert.doesNotMatch(json, /secretFn|private-payroll/);
+  assert.ok(toEvent(e, 'x').exception.values[0].stacktrace.frames.length > 0);
+  const odd = Object.assign(new Error('m'), { stack: 'weird\n    at leak (a.js:1:1)' });
+  assert.deepEqual(toEvent(odd, 'x').exception.values[0].stacktrace.frames, []);
+});

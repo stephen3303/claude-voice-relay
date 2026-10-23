@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The main screen: where things stand, the two controls (Talk and Look), and the latest exchange.
+/// The main screen: where things stand, the controls (Talk, and Look with the glasses), and the latest exchange.
 /// Settings and Help open from the toolbar.
 struct HomeView: View {
     @EnvironmentObject var glasses: GlassesController
@@ -41,7 +41,8 @@ struct HomeView: View {
 
     // MARK: status
 
-    /// "Bridge" with three icons beside it, side by side: listening, glasses, and the PC (or cloud) connection.
+    /// "Bridge" with icons beside it, side by side: listening, glasses (not in the App Store build, which has no
+    /// glasses toolkit), and the PC (or cloud) connection.
     private var header: some View {
         HStack(spacing: 14) {
             Text("Bridge").font(.largeTitle.bold())
@@ -51,8 +52,10 @@ struct HomeView: View {
             StatusIcon(symbol: phaseSymbol, label: "Listening", value: conversation.phase.rawValue,
                        tint: conversation.phase == .idle ? .secondary : Color.accentColor,
                        animate: conversation.phase == .listening)
+            #if !APP_STORE
             StatusIcon(symbol: "eyeglasses", label: "Glasses", value: glassesValue,
                        tint: glasses.deviceCount > 0 ? .green : .orange)
+            #endif
             StatusIcon(symbol: relayURL == Relay.cloudAddress ? "cloud.fill" : "desktopcomputer", label: "Connection", value: connectionValue,
                        tint: relayURL.isEmpty ? .orange : .green)
         }
@@ -63,7 +66,9 @@ struct HomeView: View {
             #if APP_STORE
             StatusRow(title: "Bridge Pro", value: store.isPro ? "Active" : "Not subscribed", ok: store.isPro)
             #endif
+            #if !APP_STORE
             if glasses.deviceCount == 0 { Text("Glasses: \(glassesValue)").font(.footnote).foregroundStyle(.secondary) }
+            #endif
             if relayURL.isEmpty { Text("Connection: \(connectionValue)").font(.footnote).foregroundStyle(.secondary) }
             if !conversation.status.isEmpty {
                 Text(conversation.status).font(.footnote).foregroundStyle(.secondary)
@@ -114,15 +119,15 @@ struct HomeView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
             }
+            #if APP_STORE
+            Text("Or say \"Hey Siri, talk to Bridge\".")
+                .font(.footnote).foregroundStyle(.secondary)
+            #else
             Button { conversation.look() } label: {
                 Label(store.isPro ? "Look" : "Look (Bridge Pro)", systemImage: "camera.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .disabled(conversation.phase != .idle || !glasses.cameraAllowed)
-            #if APP_STORE
-            Text("Or say \"Hey Siri, talk to Bridge\".")
-                .font(.footnote).foregroundStyle(.secondary)
-            #else
             Text("Or say \"Hey Meta, start Bridge\" on your glasses.")
                 .font(.footnote).foregroundStyle(.secondary)
             #endif
