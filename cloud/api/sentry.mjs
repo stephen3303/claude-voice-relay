@@ -2,8 +2,9 @@
 // error, posted to the DSN's envelope endpoint. The same file is cloud/api/sentry.mjs (sentry.test.mjs checks
 // they match), since the Lambda bundle holds only cloud/api.
 // Like the app (glasses/ios/GlassesRelay/ErrorReporting.swift), a report is the error and where it happened:
-// the error's type and code, the start of its message with addresses, paths and tokens taken out, and the
-// stack as function names and file names. Never what was said, the answers, a URL, a user or the token.
+// the error's type and code, where it happened, and the stack as function names and file names. The message is
+// never sent, since it can quote what was said, an answer or a project name; an error Bridge throws can carry
+// fixed words for the report as error.report (e.g. "claude exited 1"). Never a URL, a user or the token.
 
 import { randomUUID } from 'node:crypto';
 
@@ -14,8 +15,8 @@ export const parseDsn = (dsn) => {
   return m ? { key: m[1], url: `https://${m[2]}/api/${m[3]}/envelope/`, dsn: m[0] } : null;
 };
 
-// The start of a message, before any quoted detail ("ENOENT: no such file, open 'C:\Users\you\...'" keeps
-// "ENOENT"; "claude exited 1: <its output>" keeps "claude exited 1"), with anything identifying taken out.
+// For the tags and error.report, which are Bridge's own words, but still: the part before any quoted detail
+// ("claude exited 1: <its output>" keeps "claude exited 1"), with addresses, paths and tokens taken out.
 export function clean(message) {
   return String(message ?? '').split(/:\s/)[0]
     .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>')
@@ -58,7 +59,7 @@ export function toEvent(error, where, { environment, release, now = Date.now() }
     contexts: { runtime: { name: 'node', version: process.version }, os: { name: process.platform } },
     exception: { values: [{
       type: clean(e.name) || 'Error',
-      value: clean(e.message) || '(no message)',
+      value: clean(e.report) || '(message not sent)',
       stacktrace: { frames: frames(e.stack) },
     }] },
   };

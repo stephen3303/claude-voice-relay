@@ -12,7 +12,7 @@ test('parseDsn reads the key and the envelope URL, and refuses anything else', (
   assert.equal(parseDsn('https://0123456789abcdef@host/1/../x'), null);
 });
 
-test('clean keeps the start of a message and takes out what identifies anyone', () => {
+test('clean keeps the start of Bridge\'s own words and takes out what identifies anyone', () => {
   assert.equal(clean("ENOENT: no such file or directory, open 'C:\\Users\\you\\x'"), 'ENOENT');
   assert.equal(clean('claude exited 1: here is what you asked about your bank'), 'claude exited 1');
   assert.equal(clean('fetch https://mypc.example/voice?x=1 refused'), 'fetch <url> refused');
@@ -34,18 +34,20 @@ test('frames are oldest first, with file names only', () => {
   ]);
 });
 
-test('toEvent sends the type, a cleaned message, code and status, and no user or request', () => {
-  const e = Object.assign(new Error('OpenAI 401: {"error":"bad key sk-abc"}'), { code: 'ERR_X', $metadata: { httpStatusCode: 503 } });
+test('toEvent sends the type, code and status, never the message, and no user or request', () => {
+  const e = Object.assign(new Error("private payroll's folder doesn't exist yet"), { code: 'ERR_X', $metadata: { httpStatusCode: 503 } });
   const ev = toEvent(e, 'voice tts', { environment: 'relay', now: 1_000_000 });
   assert.equal(ev.exception.values[0].type, 'Error');
-  assert.equal(ev.exception.values[0].value, 'OpenAI 401');
+  assert.equal(ev.exception.values[0].value, '(message not sent)');
+  assert.doesNotMatch(JSON.stringify(ev), /payroll/);
+  const own = Object.assign(new Error('claude exited 1: the answer'), { report: 'claude exited 1: the answer' });
+  assert.equal(toEvent(own, 'x').exception.values[0].value, 'claude exited 1');
   assert.deepEqual(ev.tags, { where: 'voice tts', code: 'ERR_X', status: '503' });
   assert.equal(ev.timestamp, 1000);
   assert.equal(ev.environment, 'relay');
   assert.match(ev.event_id, /^[0-9a-f]{32}$/);
   for (const k of ['user', 'request', 'extra', 'breadcrumbs', 'server_name']) assert.equal(k in ev, false, k);
-  assert.equal(toEvent('a string', 'x').exception.values[0].value, 'a string');
-  assert.equal(toEvent(undefined, 'x').exception.values[0].value, 'non-Error thrown');
+  assert.equal(toEvent('a string', 'x').exception.values[0].value, '(message not sent)');
 });
 
 function fakeFetch(status = 200) {
@@ -90,11 +92,11 @@ test('the same error is sent once a minute, and 30 an hour in all', async () => 
   assert.equal(calls.length, 1);
   t += 61_000;
   await s.capture(new Error('same'), 'here');
-  await s.capture(new Error('other'), 'here');
-  await s.capture(new Error('third'), 'here');
+  await s.capture(new Error('other'), 'there');
+  await s.capture(new Error('third'), 'elsewhere');
   assert.equal(calls.length, 3);
   t += 3600_000;
-  await s.capture(new Error('third'), 'here');
+  await s.capture(new Error('third'), 'elsewhere');
   assert.equal(calls.length, 4);
 });
 

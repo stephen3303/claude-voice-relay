@@ -310,7 +310,7 @@ function runClaude(a, prompt, gitEnv) {
         if (Number.isFinite(r.total_cost_usd)) log(a.name, `turn cost about $${r.total_cost_usd.toFixed(2)}, ${r.num_turns ?? '?'} turns${r.subtype && r.subtype !== 'success' ? `, ${r.subtype}` : ''}`);
         return resolve(r);
       }
-      reject(new Error(`claude exited ${code}: ${err.slice(-400)}`));
+      reject(Object.assign(new Error(`claude exited ${code}: ${err.slice(-400)}`), { report: `claude exited ${code}` }));
     });
     p.stdin.end(prompt);
   });
@@ -617,7 +617,7 @@ function quickLook(file, said) {
   const answer = ({ code, out, err }) => {
     let r;
     try { r = JSON.parse(out.trim().split('\n').pop()); }
-    catch { throw new Error(`claude exited ${code}: ${(err || out).slice(-200)}`); }
+    catch { throw Object.assign(new Error(`claude exited ${code}: ${(err || out).slice(-200)}`), { report: `claude exited ${code}` }); }
     if (r.is_error) throw new Error(r.result || 'Claude returned an error');
     return spokenReply(r).line;
   };
@@ -677,7 +677,7 @@ function tts(req, res) {
           instructions: 'Speak naturally and warmly, at a relaxed conversational pace.' }),
         signal: AbortSignal.timeout(30000),
       });
-      if (!r.ok) throw new Error(`OpenAI ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      if (!r.ok) throw Object.assign(new Error(`OpenAI ${r.status}: ${(await r.text()).slice(0, 200)}`), { report: 'OpenAI speech refused', status: r.status });
       const audio = Buffer.from(await r.arrayBuffer());
       res.writeHead(200, { 'content-type': 'audio/mpeg', 'content-length': audio.length }).end(audio);
     } catch (e) {
