@@ -24,7 +24,7 @@ const BUNDLE_ID = 'com.talktobridge.bridge';     // Apple identity tokens' audie
 const ISSUER = 'https://talktobridge.com';           // Bridge session tokens' issuer
 const APNS_SECRET = 'bridge/apns';                   // { teamId, keyId, key }: cloud/setup/setup-apns.ps1
 // The owner account (cloud/api/owner.mjs), both made by cloud/setup/setup-owner.ps1, never by CDK:
-const OWNER_SECRET = 'bridge/owner';                 // { tokenHash }: the owner token's SHA-256
+const OWNER_SECRET = 'bridge/owner';                 // { tokenHash, appleSub? }: the owner token's SHA-256
 const OWNER_CLAUDE_SECRET = 'bridge/owner-claude';   // the owner's claude.ai login (+ routine, ntfy), runner only
 // The API's own address (cloud/setup/setup-api-domain.ps1 maps it, outside CDK): Sign in with Apple for the web
 // refuses *.execute-api.amazonaws.com, so the connector and its Apple return URL use this one.
@@ -114,24 +114,28 @@ export class ApiStack extends Stack {
     ownerClaude.grantRead(runnerTask.taskRole);
     ownerClaude.grantWrite(runnerTask.taskRole);
     secrets.Secret.fromSecretNameV2(this, 'OwnerRoutine', OWNER_ROUTINE_SECRET).grantRead(runnerTask.taskRole);
-    voice.addEnvironment('RUNNER_CLUSTER', cluster.clusterArn);
-    voice.addEnvironment('RUNNER_TASK', runnerTask.taskDefinitionArn);
-    voice.addEnvironment('RUNNER_SUBNETS', vpc.publicSubnets.map((sn) => sn.subnetId).join(','));
-    voice.addEnvironment('RUNNER_SECURITY_GROUP', runnerSg.securityGroupId);
-    voice.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['ecs:RunTask'],
-      resources: [`arn:aws:ecs:${this.region}:${this.account}:task-definition/${runnerTask.family}:*`],
-      conditions: { ArnEquals: { 'ecs:cluster': cluster.clusterArn } },
-    }));
-    voice.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['ecs:StopTask'],
-      resources: [`arn:aws:ecs:${this.region}:${this.account}:task/${cluster.clusterName}/*`],
-    }));
-    voice.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['iam:PassRole'],
-      resources: [runnerTask.taskRole.roleArn, runnerTask.obtainExecutionRole().roleArn],
-      conditions: { StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' } },
-    }));
+    // The Lambdas that start the owner's agents: the voice routes and the Claude connector (index.mjs, startTask).
+    const startsAgents = (fn) => {
+      fn.addEnvironment('RUNNER_CLUSTER', cluster.clusterArn);
+      fn.addEnvironment('RUNNER_TASK', runnerTask.taskDefinitionArn);
+      fn.addEnvironment('RUNNER_SUBNETS', vpc.publicSubnets.map((sn) => sn.subnetId).join(','));
+      fn.addEnvironment('RUNNER_SECURITY_GROUP', runnerSg.securityGroupId);
+      fn.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['ecs:RunTask'],
+        resources: [`arn:aws:ecs:${this.region}:${this.account}:task-definition/${runnerTask.family}:*`],
+        conditions: { ArnEquals: { 'ecs:cluster': cluster.clusterArn } },
+      }));
+      fn.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['ecs:StopTask'],
+        resources: [`arn:aws:ecs:${this.region}:${this.account}:task/${cluster.clusterName}/*`],
+      }));
+      fn.addToRolePolicy(new iam.PolicyStatement({
+        actions: ['iam:PassRole'],
+        resources: [runnerTask.taskRole.roleArn, runnerTask.obtainExecutionRole().roleArn],
+        conditions: { StringEquals: { 'iam:PassedToService': 'ecs-tasks.amazonaws.com' } },
+      }));
+    };
+    startsAgents(voice);
 
     const api = new apigw.HttpApi(this, 'Http', { apiName: 'bridge-api' });
     // Where a task's cloud session sends its spoken answers (agents.mjs, answer): the runner puts it in the task's text.
@@ -216,6 +220,13 @@ export class ApiStack extends Stack {
     });
     connectorFn.addToRolePolicy(new iam.PolicyStatement({ actions: ['kms:Sign', 'kms:GetPublicKey'], resources: [signingKey.keyArn] }));
     table.grantReadWriteData(connectorFn);
+    // The owner's Apple account acts as the owner (owner.mjs, userFor): it reads bridge/owner, starts the owner's
+    // agents, and pushes what they say like the voice routes do.
+    connectorFn.addEnvironment('OWNER_SECRET', OWNER_SECRET);
+    secrets.Secret.fromSecretNameV2(this, 'ConnectorOwner', OWNER_SECRET).grantRead(connectorFn);
+    connectorFn.addEnvironment('APNS_SECRET', APNS_SECRET);
+    secrets.Secret.fromSecretNameV2(this, 'ConnectorApns', APNS_SECRET).grantRead(connectorFn);
+    startsAgents(connectorFn);
     const connectorIntegration = new HttpLambdaIntegration('ConnectorIntegration', connectorFn);
     const connectorRoutes = [
       [['POST', 'GET', 'DELETE'], '/api/mcp'],

@@ -94,6 +94,8 @@ export function makeAuth(deps) {
       // The routes below sit behind the authorizer: a valid session got this far.
       const sub = userOf(event);
       if (!sub) return json(401, { error: 'Sign in to Bridge first.' });
+      // The owner token isn't a Bridge account: it can't be turned into a 30-day session, or delete the owner's data.
+      if (sub === OWNER) return json(403, { error: 'The owner token has no Bridge account to refresh or delete.' });
       if (route === 'POST /api/auth/refresh') return json(200, await session(sub));
       if (route === 'DELETE /api/account') { await deps.deleteUser(sub); return json(200, { deleted: true }); }
       return json(404, { error: 'Not found.' });
