@@ -90,7 +90,7 @@ for (const plan of PLANS) {
   } else {
     // An existing subscription keeps what Pro used to promise unless its texts are brought up to date.
     if (sub.attributes.reviewNote !== REVIEW_NOTE) {
-      // Apple can refuse this once the subscription is in review or approved; the description still gets updated.
+      // Apple can refuse this once the subscription is in review or approved; warn and carry on.
       try {
         await api('PATCH', `/v1/subscriptions/${sub.id}`, { type: 'subscriptions', id: sub.id, attributes: { reviewNote: REVIEW_NOTE } });
         console.log(`updated the review note of ${plan.productId}`);
@@ -106,10 +106,15 @@ for (const plan of PLANS) {
       });
       console.log(`added the description of ${plan.productId}`);
     } else if (loc.attributes.description !== plan.description || loc.attributes.name !== plan.name) {
-      await api('PATCH', `/v1/subscriptionLocalizations/${loc.id}`, {
-        type: 'subscriptionLocalizations', id: loc.id, attributes: { name: plan.name, description: plan.description },
-      });
-      console.log(`updated the description of ${plan.productId}`);
+      // Locked the same way as the review note; a refusal mustn't skip availability, prices and the trial below.
+      try {
+        await api('PATCH', `/v1/subscriptionLocalizations/${loc.id}`, {
+          type: 'subscriptionLocalizations', id: loc.id, attributes: { name: plan.name, description: plan.description },
+        });
+        console.log(`updated the description of ${plan.productId}`);
+      } catch (e) {
+        console.warn(`::warning::couldn't update the description of ${plan.productId}: ${e.message}`);
+      }
     }
   }
 
