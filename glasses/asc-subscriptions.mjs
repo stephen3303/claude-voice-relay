@@ -90,8 +90,13 @@ for (const plan of PLANS) {
   } else {
     // An existing subscription keeps what Pro used to promise unless its texts are brought up to date.
     if (sub.attributes.reviewNote !== REVIEW_NOTE) {
-      await api('PATCH', `/v1/subscriptions/${sub.id}`, { type: 'subscriptions', id: sub.id, attributes: { reviewNote: REVIEW_NOTE } });
-      console.log(`updated the review note of ${plan.productId}`);
+      // Apple can refuse this once the subscription is in review or approved; the description still gets updated.
+      try {
+        await api('PATCH', `/v1/subscriptions/${sub.id}`, { type: 'subscriptions', id: sub.id, attributes: { reviewNote: REVIEW_NOTE } });
+        console.log(`updated the review note of ${plan.productId}`);
+      } catch (e) {
+        console.warn(`::warning::couldn't update the review note of ${plan.productId}: ${e.message}`);
+      }
     }
     const loc = (await all(`/v1/subscriptions/${sub.id}/subscriptionLocalizations`)).find((l) => l.attributes.locale === 'en-US');
     if (!loc) {

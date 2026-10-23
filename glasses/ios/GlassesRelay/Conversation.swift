@@ -422,7 +422,11 @@ final class Conversation: NSObject, ObservableObject {
             } else {
                 do { reply = try await Relay.shared.say(Self.forRelay(text), readBack: Self.readBack) }
                 catch {
+                    #if APP_STORE
+                    reply = "I couldn't reach Bridge Cloud. \(error.localizedDescription)"
+                    #else
                     reply = "I couldn't reach your PC. \(error.localizedDescription)"
+                    #endif
                     ErrorReporting.report(error, "say")
                 }
             }
