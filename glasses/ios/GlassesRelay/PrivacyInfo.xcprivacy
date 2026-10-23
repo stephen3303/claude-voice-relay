@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Apple privacy manifest. Bridge tracks nothing. With a Bridge account, Bridge Cloud keeps the
      Sign in with Apple ID, Bridge Pro transactions, task text, agents' messages and daily natural-voice
-     counts (for limits), linked to the account (site/privacy.html). Only the App Store build ships with
-     this manifest, and it takes no photos (no glasses toolkit), so photos aren't declared. It sends crash, hang and error reports (Sentry,
+     counts (for limits), linked to the account (site/privacy.html). Only an App Store upload is checked against
+     this manifest, and that build takes no photos (no glasses toolkit), so photos aren't declared. It sends crash, hang and error reports (Sentry,
      ErrorReporting.swift), not linked to you, to keep the app working. It reads its own
      UserDefaults (relay address, inbox position), which needs a declared reason. -->
 <plist version="1.0">
