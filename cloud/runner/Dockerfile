@@ -11,7 +11,7 @@ WORKDIR /app
 COPY cloud/runner/package.json cloud/runner/package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY cloud-agents.mjs agent-turn.mjs ntfy.mjs ./
-COPY cloud/api/inbox.mjs cloud/api/voice.mjs cloud/api/auth.mjs cloud/api/owner.mjs ./cloud/api/
+COPY cloud/api/inbox.mjs cloud/api/status.mjs cloud/api/voice.mjs cloud/api/auth.mjs cloud/api/owner.mjs ./cloud/api/
 COPY cloud/runner/main.mjs cloud/runner/turns.mjs cloud/runner/repo.mjs ./cloud/runner/
 # Claude Code keeps its login in ~/.claude; the runner writes it there at start.
 USER node

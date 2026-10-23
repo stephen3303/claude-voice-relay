@@ -16,6 +16,7 @@ import { SecretsManagerClient, GetSecretValueCommand, PutSecretValueCommand } fr
 import { runCloud, resolveClaude, fireRoutine, fireRoutineSession, routineUrlOk } from '../../cloud-agents.mjs';
 import { makeNtfy } from '../../ntfy.mjs';
 import { addMessage } from '../api/inbox.mjs';
+import { statusUpdate, failedStatus } from '../api/status.mjs';
 import { makeRunner } from './turns.mjs';
 import { prepareRepo } from './repo.mjs';
 
@@ -116,6 +117,7 @@ try {
     fireRoutine: routineOn ? () => fireRoutine({ url: secret.routineUrl, token: secret.routineToken }) : null,
     startSession: task ? (text) => fireRoutineSession({ url: task.url, token: task.token, text }) : null,
     replyUrl: REPLY_URL || '',
+    setStatus: (u, k, fields) => db.send(new UpdateCommand(statusUpdate(TABLE, u, k, fields, { by: 'bridge' }))),
     workRoot: path.join(home, 'work'),
     exists: fs.existsSync,
     log,
@@ -131,6 +133,7 @@ try {
     const why = /claude\.ai login|ResourceNotFound/.test(`${e.name} ${e.message}`)
       ? "the claude.ai login for cloud agents isn't set up. Run the owner setup script on your PC." : 'its runner hit an error.';
     await addMessage(db, TABLE, user, `${key} couldn't start: ${why}`).catch(() => {});
+    await db.send(new UpdateCommand(statusUpdate(TABLE, user, key, failedStatus(`it couldn't start: ${why}`), { by: 'bridge' }))).catch(() => {});
   }
 } finally {
   clearInterval(timer);

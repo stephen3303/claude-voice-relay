@@ -44,6 +44,8 @@ export const LOOK_PROMPT = [
  *   words are for the user's agents (agents.mjs: a reply, status or stop)
  * deps.agentAwaiting(user) -> true when an agent asked a question (optional)
  * deps.splitTask(user, body) -> { project, task } for a task said without a comma after the project, or null (optional)
+ * deps.orchestrate(user, said) -> { say } (a status report or briefing), { task: { project, task } } ("tell X to ..."),
+ *   or null when it isn't one (orchestrator.mjs; optional)
  * deps.agentAnswer(bearer, body) -> { status, text }: POST /api/agent/reply, a cloud session's spoken answer. It has
  *   no API Gateway authorizer (the session holds a reply token, not a Bridge session) and checks its own (optional)
  * deps.devices: { save(user, device), remove(user, deviceId), markListening(user), stopListening(user) }
@@ -86,6 +88,14 @@ export function makeHandler(deps) {
       return deps.startTask(user, held.parsed ?? { project: null, task: held.text });
     }
     if (CANCEL.test(body) || (held && NO.test(body))) { await deps.store.setHeld(user, null); return "OK, I won't send it."; }
+    // Reports are answered at once and leave a held task as it was; "tell X to ..." is read back like a task.
+    // Not after "change it", where the next words are the held project's new task whatever they say, nor after "task".
+    const o = held?.project || isTask ? null : await deps.orchestrate?.(user, body);
+    if (o?.say) return o.say;
+    if (o?.task) {
+      await deps.store.setHeld(user, { text: body, parsed: o.task, at: now() });
+      return `Here's your message to Claude for ${o.task.project}, ${o.task.task}. Ready to send it?`;
+    }
     if (held && CHANGE.test(body)) {
       // Keep the project, so the new words go where the old ones were going.
       const project = held.project ?? held.parsed?.project;
@@ -118,6 +128,9 @@ export function makeHandler(deps) {
   async function send(user, raw) {
     const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
     if (!body) return "I didn't catch that. Say it again.";
+    const o = TASK_PREFIX.test(raw) ? null : await deps.orchestrate?.(user, body);
+    if (o?.say) return o.say;
+    if (o?.task) return deps.startTask(user, o.task);
     const m = body.match(PROJECT);
     if (m) return deps.startTask(user, { project: m[1].trim(), task: m[2].trim() });
     const split = TASK_PREFIX.test(raw) || IN_PROJECT.test(body) ? await deps.splitTask?.(user, body) : null;

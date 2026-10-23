@@ -6,7 +6,7 @@ import { makeRunner, spokenError, replyHash, NO_ROUTINE, NO_LOGIN } from './turn
 function setup({ agent = {}, results = [] } = {}) {
   const rec = { name: 'trading bot', repo: 'stephen3303/trading-bot', branch: 'main', busy: true, run: 'r1',
     cloudId: null, cloudNew: true, pending: ['add tests'], ...agent };
-  const said = [], notified = [], runs = [], prepared = [], fired = [], started = [];
+  const said = [], notified = [], runs = [], prepared = [], fired = [], started = [], statuses = [];
   const store = {
     async take(u, k, run) {
       if (rec.run !== run || !rec.pending.length) return null;
@@ -33,11 +33,12 @@ function setup({ agent = {}, results = [] } = {}) {
     notify: async (text) => notified.push(text),
     startSession: agent.noRoutine ? null : async (text) => { started.push(text); return { sessionId: 'sess_1', url: 'https://claude.ai/code/sess_1' }; },
     fireRoutine: agent.routine ? async () => { fired.push(1); return 'sess_r'; } : null,
+    setStatus: async (u, k, fields) => statuses.push({ k, fields }),
     workRoot: '/work',
     replyUrl: agent.noReply ? '' : 'https://api.example/api/agent/reply',
     exists: () => true,
   });
-  return { rec, runner, said, notified, runs, prepared, fired, started };
+  return { rec, runner, said, notified, runs, prepared, fired, started, statuses };
 }
 
 test('starts a new task through the task routine with a reply token, says nothing itself and goes idle', async () => {
@@ -75,10 +76,12 @@ test('without a reply URL the routine text has no reply lines, and a queued repl
 });
 
 test('a failed turn is spoken and the agent still goes idle', async () => {
-  const { rec, runner, said } = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['yes'] }, results: [new Error('not signed in')] });
+  const { rec, runner, said, statuses } = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['yes'] }, results: [new Error('not signed in')] });
   await runner('owner', 'tradingbot', 'r1');
   assert.match(said[0].text, /trading bot failed. not signed in/);
   assert.equal(rec.busy, false);
+  assert.deepEqual(statuses, [{ k: 'tradingbot', fields: { health: 'needs attention', note: 'Its last run failed: not signed in' } }],
+    "the orchestrator's reports hear about it too");
 });
 
 test('after stop (another run took the agent) nothing is spoken or written', async () => {
@@ -118,4 +121,16 @@ test('spokenError keeps whole sentences instead of cutting mid-word', () => {
   assert.match(out, /here\.$/);
   assert.match(spokenError('word '.repeat(50), 60), /word…$/);
   assert.equal(spokenError('Cloud sessions need a claude.ai sign-in. Run `claude auth login` (or /login in a local session), then try again.'), NO_LOGIN);
+});
+
+test('an error result marks the status file too, and a replaced run writes no status', async () => {
+  const { runner, statuses } = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['yes'] },
+    results: [{ result: 'Rate limited.', is_error: true, session_id: 'sess_1' }] });
+  await runner('owner', 'tradingbot', 'r1');
+  assert.equal(statuses.length, 1);
+  assert.equal(statuses[0].fields.health, 'needs attention');
+  const stopped = setup({ agent: { cloudNew: false, cloudId: 'sess_1', pending: ['yes'] },
+    results: [{ hook: (rec) => { rec.run = 'r2'; }, result: 'x', is_error: true, session_id: 'sess_1' }] });
+  await stopped.runner('owner', 'tradingbot', 'r1');
+  assert.deepEqual(stopped.statuses, []);
 });

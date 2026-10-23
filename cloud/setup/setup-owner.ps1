@@ -8,7 +8,8 @@
 #   bridge/owner-claude  a claude.ai login made just for Bridge Cloud (a browser window opens), plus the relay's
 #                        project routine and ntfy settings from its .env
 #   bridge/owner-routine the claude.ai routine new tasks start as ({ url, token }), asked for once (-TaskRoutine to replace it)
-#   PROJECT# items       one per git folder in your projects folder, so "in <project>, ..." works as it did
+#   PROJECT# items       one per git folder in your projects folder, so "in <project>, ..." works as it did,
+#                        with a tag from the name's initials (the orchestrator's registry)
 # Then point the app at Bridge Cloud: Settings, relay address, set it to the address this script prints.
 param(
   [string]$ProjectsRoot = (Join-Path $env:USERPROFILE 'Projects'),
@@ -206,9 +207,12 @@ if (-not $SkipProjects) {
     if (-not $branch -or $branch -eq 'HEAD') { $branch = '' }
     $name = ($d.Name -replace '[_\-.]+', ' ').Trim()
     $key = ($name.ToLower() -replace '[^a-z0-9]', '')
+    # The tag thread titles use ([CVR] for claude voice relay): the words' initials, or a one-word name's first three letters.
+    $words = @($name -split '\s+' | Where-Object { $_ })
+    $tag = if ($words.Count -gt 1) { -join ($words | ForEach-Object { $_.Substring(0, 1) }) } else { $name.Substring(0, [Math]::Min(3, $name.Length)) }
     $item = @{
       pk = @{ S = 'USER#owner' }; sk = @{ S = "PROJECT#$key" }
-      name = @{ S = $name }; repo = @{ S = $repo }; branch = @{ S = [string]$branch }
+      name = @{ S = $name }; repo = @{ S = $repo }; branch = @{ S = [string]$branch }; tag = @{ S = $tag.ToUpper() }
     }
     if ($aliases[$d.Name]) { $item.aliases = @{ L = @($aliases[$d.Name] | ForEach-Object { @{ S = $_ } }) } }
     $file = New-TemporaryFile
@@ -217,7 +221,7 @@ if (-not $SkipProjects) {
       aws dynamodb put-item --region $region --table-name $table --item "file://$file" | Out-Null
       if ($LASTEXITCODE) { throw "Saving project $name failed" }
     } finally { Remove-Item $file -Force }
-    Write-Host "Project: $name ($repo$(if ($branch) { ", $branch" }))"
+    Write-Host "Project: $name [$($tag.ToUpper())] ($repo$(if ($branch) { ", $branch" }))"
     $count++
   }
   Write-Host "Saved $count projects."
