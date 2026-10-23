@@ -265,7 +265,7 @@ const agentStore = {
   async answered(user, key, fields, hash) {
     const names = {}, values = { ':h': hash };
     const sets = Object.entries(fields).map(([f, v], i) => { names[`#f${i}`] = f; values[`:v${i}`] = v; return `#f${i} = :v${i}`; });
-    await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` },
+    return !!await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` },
       UpdateExpression: `SET ${sets.join(', ')}`, ConditionExpression: 'replyHash = :h',
       ExpressionAttributeNames: names, ExpressionAttributeValues: values }));
   },
@@ -476,7 +476,7 @@ export const connector = reported(makeConnector({
   publicJwk: getPublicJwk,
   store: grants,
   startTask,
-  orchestrator: { board: orchestrator.board, report: orchestrator.report, setStatus: agentStore.setStatus, projects: agentStore.projects },
+  orchestrator: { snapshot: orchestrator.snapshot, setStatus: agentStore.setStatus, projects: agentStore.projects },
   userFor: isOwner.userFor,
   messagesAfter: (user, after) => store.messagesAfter(user, after),
   latestMessages,

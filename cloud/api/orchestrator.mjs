@@ -21,6 +21,25 @@ const EVENING = /^(?:(?:give me |start |read me )?(?:the |my )?)?(?:evening|end 
 
 const RANK = { blocked: 0, 'needs attention': 1, 'on track': 2, unknown: 3 };
 const LIST_MAX = 8;   // projects read out one by one before "and N more"
+// A whole report, in characters: well under the cloud voice's 3,000 (voice.mjs SPEAK_MAX), and about two minutes spoken.
+export const SAY_MAX = 2000;
+const OLD_MS = 24 * 3600_000;   // a report older than this says how old it is
+
+// A name said exactly as a project's name or one of its aliases, or null. "Tell X to ..." only routes on these: a loose
+// word match would send "ask Claude to fix the build" to claude voice relay.
+export function exactProject(spoken, projects) {
+  const n = norm(spoken);
+  return n ? projects.find((p) => norm(p.name) === n || (p.aliases ?? []).some((a) => norm(a) === n)) ?? null : null;
+}
+
+// Cut at the last whole sentence that fits, and say that more was left out.
+export function capSaid(text, max = SAY_MAX) {
+  if (text.length <= max) return text;
+  const tail = ' There is more in the Claude app.';
+  const cut = text.slice(0, max - tail.length);
+  const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+  return `${end > 0 ? cut.slice(0, end + 1) : cut.slice(0, cut.lastIndexOf(' '))}${tail}`;
+}
 
 /** What was said -> a command for the orchestrator, or null when it's something else (a task, a reply). */
 export function parseCommand(said) {
@@ -33,7 +52,7 @@ export function parseCommand(said) {
   let m = DETAILS.exec(t);
   if (m) return { kind: 'details', name: m[1].replace(ARTICLE, '') };
   m = SOME.exec(t);
-  if (m) return { kind: 'some', names: splitNames(m[1]) };
+  if (m) return { kind: 'some', names: splitNames(m[1]), phrase: m[1].replace(ARTICLE, '') };
   m = TELL.exec(t);
   if (m) return { kind: 'tell', name: m[1].replace(ARTICLE, ''), task: m[2] };
   return null;
@@ -85,7 +104,8 @@ function nameList(names) {
  * Returns:
  *   handle(user, said) -> { say } (a report), { task: { project, task } } ("tell X to ..."), or null (not a command)
  *   board(user) -> each project's combined view, most urgent first (for the connector)
- *   report(user, command) -> spoken text for a parsed command (also the connector's get_status)
+ *   report(user, command) -> spoken text for a parsed command, capped at SAY_MAX
+ *   snapshot(user, command) -> { text, views }: the report and the board it came from, in one read (get_status)
  */
 export function makeOrchestrator(deps) {
   const now = deps.now ?? Date.now;
@@ -123,9 +143,10 @@ export function makeOrchestrator(deps) {
 
   // One line per project: how it is, and the one thing most worth hearing.
   function line(v) {
+    const old = v.status?.updated && now() - v.status.updated > OLD_MS ? ` Last report ${v.updatedAgo}.` : '';
     const what = v.needs[0] ? `Needs you: ${v.needs[0]}` : v.problem || (v.working ? 'Working on it now.' : '')
       || v.status?.inProgress || v.status?.done || '';
-    return `${v.name}, ${healthWords(v)}.${what ? ` ${sentence(what)}` : ''}`;
+    return `${v.name}, ${healthWords(v)}.${old}${what ? ` ${sentence(what)}` : ''}`;
   }
   const healthWords = (v) => (v.health !== 'unknown' ? v.health : v.working ? 'working, no report yet' : 'no report yet');
 
@@ -171,11 +192,13 @@ export function makeOrchestrator(deps) {
     return parts.join(' ');
   }
 
+  const needLine = (v) => `${v.name}: ${sentence(v.needs.join('. ') || v.status?.note || 'It is blocked.')}`;
+  const capList = (items) => (items.length > LIST_MAX ? [...items.slice(0, LIST_MAX), `And ${plural(items.length - LIST_MAX, 'more')}.`] : items);
+
   function needsReport(views) {
     const items = views.filter((v) => v.needs.length || v.health === 'blocked');
     if (!items.length) return 'Nothing needs you right now.';
-    return [`${plural(items.length, 'project needs', 'projects need')} you.`,
-      ...items.map((v) => `${v.name}: ${sentence(v.needs.join('. ') || v.status?.note || 'It is blocked.')}`)].join(' ');
+    return [`${plural(items.length, 'project needs', 'projects need')} you.`, ...capList(items.map(needLine))].join(' ');
   }
 
   function morning(views) {
@@ -183,8 +206,7 @@ export function makeOrchestrator(deps) {
     const needy = views.filter((v) => v.needs.length || v.health === 'blocked');
     const rest = views.filter((v) => !needy.includes(v));
     const parts = [`Good morning. ${headline(views)}`];
-    parts.push(needy.length ? `Needs your decision: ${needy.map((v) => `${v.name}: ${sentence(v.needs.join('. ') || v.status?.note || 'blocked')}`).join(' ')}`
-      : 'Nothing needs your decision.');
+    parts.push(needy.length ? `Needs your decision: ${capList(needy.map(needLine)).join(' ')}` : 'Nothing needs your decision.');
     parts.push(...lines(rest));
     return parts.join(' ');
   }
@@ -197,7 +219,7 @@ export function makeOrchestrator(deps) {
     parts.push(plans.length ? `Overnight plan. ${plans.join(' ')}` : 'No worker has a plan for tonight.');
     const asks = views.filter((v) => v.status?.overnight || v.needs.length)
       .map((v) => `${v.name}: ${sentence(v.status?.overnight || v.needs.join('. '))}`);
-    parts.push(asks.length ? `Needs from you tonight. ${asks.join(' ')}` : 'Nothing is needed from you tonight.');
+    parts.push(asks.length ? `Needs from you tonight. ${capList(asks).join(' ')}` : 'Nothing is needed from you tonight.');
     const risk = views.filter((v) => v.health === 'blocked' || v.status?.overnight || v.waiting || v.stale).map((v) => v.name);
     parts.push(risk.length ? `At risk of stopping overnight: ${nameList(risk)}.` : 'Nothing is at risk of stopping.');
     return parts.join(' ');
@@ -216,7 +238,17 @@ export function makeOrchestrator(deps) {
   }
 
   async function report(user, cmd) {
+    return (await snapshot(user, cmd)).text;
+  }
+
+  // The report's text and the views it was built from, from one read (the connector returns both).
+  async function snapshot(user, cmd) {
     const loaded = await load(user);
+    const text = compose(loaded, cmd);
+    return { text: text == null ? null : capSaid(text), views: loaded.views };
+  }
+
+  function compose(loaded, cmd) {
     const { views } = loaded;
     if (!views.length) return "You don't have any projects yet. Run the owner setup script on your PC.";
     const unknown = (missing) => (missing.length ? ` I don't know ${nameList(missing.map((m) => `"${m}"`))}.` : '');
@@ -230,7 +262,8 @@ export function makeOrchestrator(deps) {
         return found[0] ? details(found[0]) : `I don't know a project called ${missing[0]}.`;
       }
       case 'some': {
-        const { found, missing } = pick(loaded, cmd.names);
+        const whole = cmd.phrase && cmd.names.length > 1 ? exactProject(cmd.phrase, loaded.projects) : null;
+        const { found, missing } = pick(loaded, whole ? [whole.name] : cmd.names);
         if (!found.length) return `I don't know ${nameList(missing.map((m) => `"${m}"`))}. Say status on all programs to hear every project.`;
         return found.map(more).join(' ') + unknown(missing);
       }
@@ -243,13 +276,13 @@ export function makeOrchestrator(deps) {
     const cmd = parseCommand(said);
     if (!cmd) return null;
     if (cmd.kind === 'tell') {
-      const p = resolveProject(cmd.name, await deps.store.projects(user));
-      // "tell me a joke" isn't for a project: only a name in the registry routes.
+      const p = exactProject(cmd.name, await deps.store.projects(user));
+      // "tell me a joke" or "ask Claude to ..." isn't for a project: only a project's own name or alias routes.
       if (!p) return null;
       return { task: { project: p.name, task: cmd.task.trim() } };
     }
     return { say: await report(user, cmd) };
   }
 
-  return { handle, board, report };
+  return { handle, board, report, snapshot };
 }

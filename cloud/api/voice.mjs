@@ -89,8 +89,8 @@ export function makeHandler(deps) {
     }
     if (CANCEL.test(body) || (held && NO.test(body))) { await deps.store.setHeld(user, null); return "OK, I won't send it."; }
     // Reports are answered at once and leave a held task as it was; "tell X to ..." is read back like a task.
-    // Not after "change it", where the next words are the held project's new task whatever they say.
-    const o = held?.project ? null : await deps.orchestrate?.(user, body);
+    // Not after "change it", where the next words are the held project's new task whatever they say, nor after "task".
+    const o = held?.project || isTask ? null : await deps.orchestrate?.(user, body);
     if (o?.say) return o.say;
     if (o?.task) {
       await deps.store.setHeld(user, { text: body, parsed: o.task, at: now() });
@@ -128,7 +128,7 @@ export function makeHandler(deps) {
   async function send(user, raw) {
     const body = raw.replace(TASK_PREFIX, '').replace(/[\s.!?]+$/, '').trim();
     if (!body) return "I didn't catch that. Say it again.";
-    const o = await deps.orchestrate?.(user, body);
+    const o = TASK_PREFIX.test(raw) ? null : await deps.orchestrate?.(user, body);
     if (o?.say) return o.say;
     if (o?.task) return deps.startTask(user, o.task);
     const m = body.match(PROJECT);

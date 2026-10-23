@@ -11,10 +11,10 @@ const PROJECTS = [
 // An in-memory version of index.mjs's agentStore, with the same conditions.
 function setup({ runFails = false } = {}) {
   let clock = 10_000_000;
-  const agents = new Map(), runs = [], stopped = [], statuses = [];
+  const agents = new Map(), runs = [], stopped = [], statuses = [], hooks = {};
   const store = {
     projects: async () => PROJECTS,
-    agents: async () => [...agents.values()].map((a) => structuredClone(a)),
+    agents: async () => { const list = [...agents.values()].map((a) => structuredClone(a)); hooks.afterRead?.(); return list; },
     async claim(u, a, staleBefore) {
       const old = agents.get(a.key);
       if (old && old.busy && !(old.startedAt < staleBefore)) return false;
@@ -32,7 +32,7 @@ function setup({ runFails = false } = {}) {
     },
     async update(u, key, fields, run) { const a = agents.get(key); if (a?.run === run) Object.assign(a, fields); },
     async remove(u, key) { agents.delete(key); },
-    async answered(u, key, fields, hash) { const a = agents.get(key); if (a?.replyHash === hash) Object.assign(a, fields); },
+    async answered(u, key, fields, hash) { const a = agents.get(key); if (a?.replyHash !== hash) return false; Object.assign(a, fields); return true; },
     async setStatus(u, key, fields) { statuses.push({ u, key, fields }); },
   };
   const delivered = [];
@@ -44,7 +44,7 @@ function setup({ runFails = false } = {}) {
     deliver: async (u, text, from) => delivered.push({ u, text, from }),
   });
   const say = (text, project = null) => tasks.startTask(OWNER, { project, task: text });
-  return { tasks, agents, runs, stopped, statuses, say, delivered, advance: (ms) => (clock += ms) };
+  return { tasks, agents, runs, stopped, statuses, hooks, say, delivered, advance: (ms) => (clock += ms) };
 }
 
 test('projects resolve by name, alias or a unique word', () => {
@@ -178,4 +178,16 @@ test("a worker's status file comes with its answer, or alone, and only with its 
   assert.equal(delivered.length, 1, 'a status alone says nothing aloud');
   assert.equal((await tasks.answer(`Bearer brt.tradingbot.${'B'.repeat(43)}`, { status: { health: 'blocked' } })).status, 401);
   assert.equal(statuses.length, 2);
+});
+
+test('a run replaced between the token check and the write neither speaks nor writes status', async () => {
+  const { tasks, agents, say, delivered, statuses, hooks } = setup();
+  await say('add tests', 'trading bot');
+  const token = `brt.tradingbot.${'A'.repeat(43)}`;
+  agents.get('tradingbot').replyHash = tokenHash(token);
+  // The token check reads the old hash; by the conditional write, a new task has replaced it.
+  hooks.afterRead = () => { agents.get('tradingbot').replyHash = 'f'.repeat(64); };
+  const r = await tasks.answer(`Bearer ${token}`, { spoken: 'Done.', status: { health: 'on track' } });
+  assert.equal(r.status, 409);
+  assert.deepEqual([delivered.length, statuses.length], [0, 0]);
 });

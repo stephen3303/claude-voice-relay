@@ -435,4 +435,6 @@ test('orchestrator commands: reports answer at once, "tell X to" is read back, a
   assert.equal(await say('send', 'tell the trader to merge it'), 'Starting trading bot.');
   assert.equal(await say('send', 'status on all programs'), '2 projects reporting: 2 on track.');
   assert.deepEqual(started.at(-1), { project: 'trading bot', task: 'merge it' });
+  assert.equal(await say('send', 'task: status on all programs belongs on the home page'), 'Starting trading bot.', 'said as a task, it stays a task');
+  assert.match(await say('confirm', 'task: status on all programs belongs on the home page'), /^(?!2 projects)/);
 });

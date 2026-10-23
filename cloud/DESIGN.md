@@ -170,7 +170,8 @@ same words always route the same way, and nothing runs between requests. The Cla
 - **Voice**: "status on all programs", "status on X and Y", "what needs me?", "details on X", "tell X to ...",
   "morning briefing", "evening brief". Reports answer at once; "tell X to" is read back like a task. The connector's
   `get_status` gives the same reports to Claude.
-- **Workers** read and update `.bridge/worker.md` in their repo, so what one task learns reaches the next.
+- **Worker text is data**: status fields are capped, links and paths are kept to `where`, and `get_status` labels them as
+  worker reports, since workers read repos anyone may have changed. Reports are capped at 2,000 characters, under the cloud voice's limit.
 
 ## Build order
 

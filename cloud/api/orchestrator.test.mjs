@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeOrchestrator, parseCommand, splitNames, spokenWhere, ago } from './orchestrator.mjs';
+import { makeOrchestrator, parseCommand, splitNames, spokenWhere, ago, capSaid, SAY_MAX } from './orchestrator.mjs';
 import { STALE_MS } from './agents.mjs';
 import { OWNER } from './owner.mjs';
 
@@ -26,7 +26,7 @@ test('commands are recognised however they are phrased, and anything else is lef
     assert.deepEqual(parseCommand(s), { kind: 'all' }, s);
   for (const s of ['What needs me?', 'anything need me', "what's waiting on me", 'what needs my attention'])
     assert.deepEqual(parseCommand(s), { kind: 'needs' }, s);
-  assert.deepEqual(parseCommand('status on the trader and CVR'), { kind: 'some', names: ['trader', 'CVR'] });
+  assert.deepEqual(parseCommand('status on the trader and CVR'), { kind: 'some', names: ['trader', 'CVR'], phrase: 'trader and CVR' });
   assert.deepEqual(parseCommand('Details on the trader'), { kind: 'details', name: 'trader' });
   assert.deepEqual(parseCommand('tell the trader to add a stop loss'), { kind: 'tell', name: 'trader', task: 'add a stop loss' });
   assert.deepEqual(parseCommand('morning briefing'), { kind: 'morning' });
@@ -89,6 +89,8 @@ test('tell X to routes to the project by alias; an unknown name is not a command
   const { ask } = setup();
   assert.deepEqual(await ask('tell the trader to add a stop loss'), { task: { project: 'trading bot', task: 'add a stop loss' } });
   assert.equal(await ask('tell me to stretch'), null);
+  assert.equal(await ask('ask Claude to fix the build'), null, 'a shared word is not a project name');
+  assert.equal(await ask('get the bot to retry'), null);
   assert.equal(await ask('in trading bot add tests'), null);
 });
 
@@ -114,4 +116,24 @@ test('only the owner has an orchestrator, and an empty registry says how to fill
   assert.equal(await o.handle('apple.1', 'status on all programs'), null);
   const empty = makeOrchestrator({ store: { projects: async () => [], agents: async () => [], statuses: async () => [] } });
   assert.match((await empty.handle(OWNER, 'what needs me')).say, /don't have any projects yet/);
+});
+
+test('long reports are capped at whole sentences, and old reports say how old', async () => {
+  const many = Array.from({ length: 40 }, (_, i) => ({ name: `project ${i}`, repo: `x/p${i}` }));
+  const statuses = many.map((p) => ({ key: p.name.replace(/ /g, ''), health: 'blocked', needs: 'x'.repeat(250), updated: clock - 30 * HOUR }));
+  const o = makeOrchestrator({ store: { projects: async () => many, agents: async () => [], statuses: async () => statuses }, now: () => clock });
+  for (const said of ['morning briefing', 'what needs me', 'evening brief', 'status on all programs']) {
+    const r = (await o.handle(OWNER, said)).say;
+    assert.ok(r.length <= SAY_MAX, `${said}: ${r.length}`);
+  }
+  assert.match((await o.handle(OWNER, 'status on all programs')).say, /project \d+, blocked\. Last report 30 hours ago\./);
+  const capped = capSaid('Alpha one. '.repeat(300));
+  assert.ok(capped.length <= SAY_MAX);
+  assert.ok(capped.endsWith('Alpha one. There is more in the Claude app.'), 'cut after a whole sentence');
+});
+
+test('a project whose name has "and" in it is found whole', async () => {
+  const o = makeOrchestrator({ store: { projects: async () => [{ name: 'research and development', repo: 'x/rd' }, { name: 'research', repo: 'x/r' }],
+    agents: async () => [], statuses: async () => [] }, now: () => clock });
+  assert.equal((await o.handle(OWNER, 'status on research and development')).say, 'research and development, no report yet.');
 });

@@ -38,7 +38,10 @@ export function cleanStatus(input) {
     if (!(f in input) || input[f] == null) continue;
     if (f === 'health') { const h = healthOf(input.health); if (h) out.health = h; continue; }
     const v = Array.isArray(input[f]) ? input[f].map(String).join('. ') : String(input[f]);
-    const s = v.replace(/\s+/g, ' ').trim();
+    // Worker text is data from a model working in a repo that may hold hostile content: links and paths stay in
+    // `where`, the one field meant for them, so a report can't carry an address to fetch or a file to read.
+    let s = v.replace(/\s+/g, ' ').trim();
+    if (f !== 'where') s = s.replace(/\b(?:https?|ftp|file):\/\/\S+/gi, 'a link').replace(/(?:^|\s)(?:~|\.{0,2})\/[\w.\-/]+/g, ' a path').trim();
     const max = MAX[f] ?? LINE;
     out[f] = s.length > max ? `${s.slice(0, max - 1)}…` : s;
   }
@@ -47,11 +50,12 @@ export function cleanStatus(input) {
 
 /**
  * The UpdateCommand input that merges fields into the project's status file and stamps it. `note` is Bridge Cloud's
- * own remark (a failed run); a worker's report clears it, since the worker has spoken since.
+ * own remark (a failed run). The worker's own report clears it, since it has spoken since; another session's update
+ * (by 'session', the connector) clears it only when it sets health, so health never says "needs attention" with no reason.
  */
 export function statusUpdate(table, user, key, fields, { by = 'worker', now = Date.now() } = {}) {
   const set = { ...fields, updated: now, by };
-  if (by === 'worker' && !('note' in set)) set.note = '';
+  if ((by === 'worker' || (by === 'session' && 'health' in fields)) && !('note' in set)) set.note = '';
   const names = {}, values = {};
   const parts = Object.entries(set).map(([f, v], i) => { names[`#f${i}`] = f; values[`:v${i}`] = v; return `#f${i} = :v${i}`; });
   return { TableName: table, Key: { pk: `USER#${user}`, sk: `STATUS#${key}` },
