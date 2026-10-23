@@ -519,7 +519,7 @@ final class Conversation: NSObject, ObservableObject {
 
     /// Only an unmistakable request for the camera: what a build with no camera answers with noCamera.
     nonisolated static func asksForCamera(_ text: String) -> Bool {
-        text.range(of: #"^(take a (picture|photo)|look at (this|that)|what am i looking at|(send|show|give) (this|that) (photo|picture) to )"#,
+        text.range(of: #"^(take a (picture|photo)|look at (this|that)\W*$|what am i looking at|(send|show|give) (this|that) (photo|picture) to )"#,
                    options: [.regularExpression, .caseInsensitive]) != nil
     }
 
