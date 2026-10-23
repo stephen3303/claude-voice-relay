@@ -21,7 +21,7 @@ jobs:
       - name: Generate Xcode project
         run: |
           brew install xcodegen xcbeautify
-          xcodegen generate
+          xcodegen generate --spec appstore.yml   # the App Store build, without the glasses toolkit
 
       - name: Pick the largest iPhone simulator (6.9")
         run: |

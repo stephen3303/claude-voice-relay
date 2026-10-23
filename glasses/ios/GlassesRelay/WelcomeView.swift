@@ -19,13 +19,13 @@ struct WelcomeView: View {
                 .accessibilityHidden(true)
             VStack(spacing: 8) {
                 Text("Welcome to Bridge").font(.largeTitle.bold())
-                Text("Talk to your Claude agents through your Ray-Ban Meta glasses.")
+                Text("Talk to your Claude agents hands-free, through AirPods, any Bluetooth headset or your iPhone.")
                     .multilineTextAlignment(.center).foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 16) {
                 Feature(symbol: "waveform", title: "Hands-free", text: "Say \"Hey Siri, talk to Bridge\" and speak your task.")
                 Feature(symbol: "bubble.left.and.text.bubble.right", title: "Answers out loud", text: "Your agents' replies are read to you as they arrive.")
-                Feature(symbol: "camera", title: "Show, don't tell", text: "Ask about what you're looking at, or send a photo to an agent.")
+                Feature(symbol: "phone", title: "Agents call you", text: "When an agent needs you, it rings like a phone call.")
             }
             Spacer()
             VStack(spacing: 12) {

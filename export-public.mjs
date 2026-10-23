@@ -25,14 +25,14 @@ export const INCLUDE = [
   'publish.test.mjs', 'setup-github-app.mjs', 'install-hook.mjs', 'start.ps1', 'aliases.json', 'package.json',
   '.env.example', '.gitignore', 'README.md', 'agent/', 'hooks/', 'glasses/SIDELOAD.md',
   '.github/workflows/glasses-release.yml', '.github/workflows/impactor-check.yml',
-  'glasses/ios/project.yml', 'glasses/ios/icon.test.mjs', 'glasses/ios/GlassesRelay/Assets.xcassets/',
+  'glasses/ios/project.yml', 'glasses/ios/base.yml', 'glasses/ios/icon.test.mjs', 'glasses/ios/GlassesRelay/Assets.xcassets/',
   ...['Conversation', 'ErrorReporting', 'GlassesController', 'GlassesRelayApp', 'HelpView', 'HomeView', 'Relay',
     'SettingsView', 'Shortcuts', 'Store'].map((n) => `glasses/ios/GlassesRelay/${n}.swift`),
   'glasses/ios/GlassesRelay/PrivacyInfo.xcprivacy',
 ];
-// Paid files under glasses/ios: App Store signing, and whole-file `#if APP_STORE`.
+// Paid files under glasses/ios: the App Store build's spec and signing, and whole-file `#if APP_STORE`.
 export const EXCLUDE = [
-  'glasses/ios/AppStore.entitlements', 'glasses/ios/GlassesRelay/Account.swift',
+  'glasses/ios/appstore.yml', 'glasses/ios/AppStore.entitlements', 'glasses/ios/GlassesRelay/Account.swift',
   'glasses/ios/GlassesRelay/Push.swift', 'glasses/ios/GlassesRelay/WelcomeView.swift',
 ];
 // Every file under these folders must be in INCLUDE or EXCLUDE, so a new paid file can't slip out unnoticed.
@@ -95,24 +95,8 @@ export function publicReadme(source) {
   return out.join('\n').replace(/\n*$/, '\n');
 }
 
-/**
- * project.yml without the comment that explains how CI builds the App Store flavour, and without the voip
- * background mode, which only the App Store build's agent calls (Push.swift) use.
- */
-export function publicProject(source) {
-  const lines = source.split('\n').filter((l) => !/^\s*# voip:/.test(l))
-    .map((l) => l.replace(/(UIBackgroundModes: \[.*), voip\]/, '$1]'));
-  const start = lines.findIndex((l) => /^\s*# The App Store flavour/.test(l));
-  if (start < 0) return lines.join('\n');
-  let end = start;
-  while (end < lines.length && /^\s*#/.test(lines[end])) end++;
-  lines.splice(start, end - start);
-  return lines.join('\n');
-}
-
 function transform(path, text) {
   if (path.endsWith('.swift')) return stripAppStore(text);
-  if (path === 'glasses/ios/project.yml') return publicProject(text);
   // The public repo is bridge-relay, so its README and voice aliases point at a clone of that.
   if (path === 'README.md') return publicReadme(text).replaceAll('claude-voice-relay', 'bridge-relay');
   if (path === 'aliases.json') return text.replaceAll('claude-voice-relay', 'bridge-relay');

@@ -64,7 +64,9 @@ struct SettingsView: View {
                 accountSection
                 #endif
                 connectionSection
-                glassesSection
+                #if !APP_STORE
+                glassesSection   // the App Store build has no glasses toolkit (appstore.yml)
+                #endif
                 Section {
                     Toggle("Read back what I said", isOn: $readBack)
                         .onChange(of: readBack) { _, on in Conversation.readBack = on }
@@ -261,6 +263,7 @@ struct SettingsView: View {
         }
     }
 
+    #if !APP_STORE
     // MARK: glasses
 
     private var glassesSection: some View {
@@ -285,6 +288,7 @@ struct SettingsView: View {
             if !photoResult.isEmpty { Text(photoResult).font(.footnote) }
         }
     }
+    #endif
 
     #if APP_STORE
     // MARK: Bridge Pro (App Store build)

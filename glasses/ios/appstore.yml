@@ -1,0 +1,15 @@
+# XcodeGen spec for the App Store build: base.yml without the Meta Wearables toolkit. Meta doesn't allow
+# toolkit apps on the App Store yet, and Apple rejects the glasses' accessory protocol (com.meta.ar.wearable)
+# without MFi approval, so this build talks through Siri, AirPods or any Bluetooth headset, and the phone.
+# When Meta opens publishing, move the toolkit parts of project.yml here too.
+#
+# CI runs `xcodegen generate --spec appstore.yml`, then builds with
+# SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) APP_STORE" (no glasses code, Pro sold via StoreKit),
+# signed with CODE_SIGN_ENTITLEMENTS=AppStore.entitlements (Sign in with Apple, push, time-sensitive).
+include: [base.yml]
+targets:
+  GlassesRelay:
+    info:
+      properties:
+        # voip: an agent's call (PushKit + CallKit, Push.swift) reaches the app while it's in the background
+        UIBackgroundModes: [voip]

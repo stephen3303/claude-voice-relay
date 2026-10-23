@@ -5,7 +5,7 @@ import AppIntents
 
 struct TalkToBridge: AppIntent {
     static let title: LocalizedStringResource = "Talk to Bridge"
-    static let description = IntentDescription("Start a hands-free conversation with your Claude agents through your glasses.")
+    static let description = IntentDescription("Start a hands-free conversation with your Claude agents.")
     static let openAppWhenRun = true   // the conversation needs the app's audio session
 
     @MainActor func perform() async throws -> some IntentResult {
@@ -29,6 +29,7 @@ struct AskBridge: AppIntent {
     }
 }
 
+#if !APP_STORE   // the glasses camera needs the Meta toolkit, which the App Store build leaves out
 struct LookWithBridge: AppIntent {
     static let title: LocalizedStringResource = "Look with Bridge"
     static let description = IntentDescription(
@@ -44,6 +45,7 @@ struct LookWithBridge: AppIntent {
         return .result(value: reply, dialog: "\(reply)")
     }
 }
+#endif
 
 struct BridgeShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
@@ -53,8 +55,10 @@ struct BridgeShortcuts: AppShortcutsProvider {
         AppShortcut(intent: AskBridge(),
                     phrases: ["Ask \(.applicationName)", "Send to \(.applicationName)"],
                     shortTitle: "Ask", systemImageName: "text.bubble")
+        #if !APP_STORE
         AppShortcut(intent: LookWithBridge(),
                     phrases: ["Look with \(.applicationName)", "What am I looking at with \(.applicationName)"],
                     shortTitle: "Look", systemImageName: "camera")
+        #endif
     }
 }

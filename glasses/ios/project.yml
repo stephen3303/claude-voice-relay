@@ -1,78 +1,34 @@
-# XcodeGen spec: generates GlassesRelay.xcodeproj (CI runs `xcodegen generate`).
-# Info.plist keys follow the toolkit's getting-started guide for meta-wearables-dat-ios 1.0.1.
-name: GlassesRelay
-options:
-  bundleIdPrefix: com.talktobridge
-  deploymentTarget:
-    iOS: "17.2"
+# XcodeGen spec for the personal (sideloaded) build: base.yml plus the Meta Wearables toolkit for the glasses.
+# CI runs `xcodegen generate`. Info.plist keys follow the toolkit's getting-started guide for meta-wearables-dat-ios 1.0.1.
+include: [base.yml]
 packages:
   MWDAT:
     url: https://github.com/facebook/meta-wearables-dat-ios
     exactVersion: "1.0.1"
-  Sentry:
-    url: https://github.com/getsentry/sentry-cocoa
-    exactVersion: "9.30.2"
 targets:
   GlassesRelay:
-    type: application
-    platform: iOS
-    sources: [GlassesRelay]
     dependencies:
       - package: MWDAT
         product: MWDATCore
       - package: MWDAT
         product: MWDATCamera
-      - package: Sentry
-        product: Sentry
     info:
-      path: GlassesRelay/Info.plist
       properties:
-        CFBundleDisplayName: $(APP_DISPLAY_NAME)   # must match the Meta app's name (Wearables Developer Center); a CI build may override it
-        INAlternativeAppNames:              # Siri still answers to "Bridge" when the home-screen name is longer
-          - INAlternativeAppName: Bridge
-        CFBundleShortVersionString: $(MARKETING_VERSION)
-        CFBundleVersion: $(CURRENT_PROJECT_VERSION)   # CI sets this to the run number
-        ITSAppUsesNonExemptEncryption: false          # HTTPS only: exempt, so no export paperwork per upload
-        UILaunchScreen:                     # navy, with the icon in the middle (Assets.xcassets)
-          UIColorName: LaunchBackground
-          UIImageName: LaunchLogo
-        CFBundleURLTypes:
-          - CFBundleTypeRole: Editor
-            CFBundleURLName: com.talktobridge.bridge
-            CFBundleURLSchemes: [glassesrelay]
         MWDAT:
           AppLinkURLScheme: "glassesrelay://"
-          MetaAppID: $(META_APP_ID)          # "0" = Developer Mode, no attestation; the App Store build sets the real one
+          MetaAppID: $(META_APP_ID)          # "0" = Developer Mode, no attestation
           ClientToken: $(CLIENT_TOKEN)
           TeamID: $(DEVELOPMENT_TEAM)
           Analytics: { OptOut: true }
           CrashReporting: { OptOut: true }
-        SentryDSN: $(SENTRY_DSN)            # empty unless CI sets it from the SENTRY_DSN secret (ErrorReporting.swift)
-        # bluetooth/external-accessory: links the toolkit uses; audio: keeps the conversation alive in your pocket;
-        # voip: an agent's call (PushKit + CallKit, Push.swift) reaches the app while it's in the background
-        UIBackgroundModes: [audio, bluetooth-central, bluetooth-peripheral, external-accessory, voip]
+        # bluetooth/external-accessory: links the toolkit uses (added to base.yml's audio)
+        UIBackgroundModes: [bluetooth-central, bluetooth-peripheral, external-accessory]
         UISupportedExternalAccessoryProtocols: [com.meta.ar.wearable]
         NSBluetoothAlwaysUsageDescription: Connects to your Meta glasses.
         NSLocalNetworkUsageDescription: Lets your phone find and connect to your glasses over Wi-Fi.
         NSBonjourServices: [_bonjour._tcp]
-        NSMicrophoneUsageDescription: Hears you through the glasses microphone.
         NSCameraUsageDescription: Takes photos with your glasses camera when you ask, for Claude to look at.
-        NSSpeechRecognitionUsageDescription: Turns what you say into text for your Claude agents.
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.talktobridge.bridge
-        SWIFT_VERSION: "5"
-        TARGETED_DEVICE_FAMILY: "1"
-        CODE_SIGN_STYLE: Automatic
-        GENERATE_INFOPLIST_FILE: NO
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
-        APP_DISPLAY_NAME: Bridge
         META_APP_ID: "0"
         CLIENT_TOKEN: "0"
-        SENTRY_DSN: ""
-        # The App Store flavour (no experimental Meta features, Pro sold via StoreKit) is selected with
-        # SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) APP_STORE" on the xcodebuild command line,
-        # and signed with CODE_SIGN_ENTITLEMENTS=AppStore.entitlements (Sign in with Apple, push, time-sensitive).

@@ -1,5 +1,7 @@
 import SwiftUI
+#if !APP_STORE
 import MWDATCore
+#endif
 
 @main
 struct GlassesRelayApp: App {
@@ -11,6 +13,7 @@ struct GlassesRelayApp: App {
     init() {
         ErrorReporting.start()
         Conversation.noteNaturalVoiceBefore()
+        #if !APP_STORE
         // The toolkit must be configured once, before anything touches Wearables.shared.
         // If it fails (or on the simulator), Wearables.shared must never be touched: the toolkit
         // traps on access. The app still works for voice; the glasses features say why they're off.
@@ -22,6 +25,7 @@ struct GlassesRelayApp: App {
             GlassesController.toolkitError = "\(error)"
             ErrorReporting.report(error, "Wearables.configure")
         }
+        #endif
         // CI launches the simulator with -screenshots to take the App Store screenshots.
         if CommandLine.arguments.contains("-screenshots") { Self.seedScreenshots() }
     }
@@ -56,7 +60,7 @@ struct GlassesRelayApp: App {
                 .task { await glasses.start() }
                 #if APP_STORE
                 .task { await Account.shared.check() }
-                #endif
+                #else
                 // Meta AI calls back into the app after registration; only its links go to the toolkit.
                 .onOpenURL { url in
                     guard URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -67,6 +71,7 @@ struct GlassesRelayApp: App {
                         catch { glasses.lastError = "Meta AI callback failed: \(error)"; ErrorReporting.report(error, "Meta AI callback") }
                     }
                 }
+                #endif
         }
     }
 }

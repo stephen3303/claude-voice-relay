@@ -9,9 +9,9 @@ const BUNDLE_ID = 'com.talktobridge.bridge';
 const GROUP = 'Bridge Pro';
 const PLANS = [
   { productId: `${BUNDLE_ID}.pro.monthly`, name: 'Bridge Pro Monthly', period: 'ONE_MONTH', price: '4.99', level: 2,
-    description: 'Photos, Shortcuts and hosted agents' },
+    description: 'Natural voice, Shortcuts and hosted agents' },
   { productId: `${BUNDLE_ID}.pro.yearly`, name: 'Bridge Pro Yearly', period: 'ONE_YEAR', price: '49.99', level: 1,
-    description: 'Photos, Shortcuts and hosted agents' },
+    description: 'Natural voice, Shortcuts and hosted agents' },
 ];
 
 const { ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 } = process.env;
@@ -77,7 +77,7 @@ for (const plan of PLANS) {
       type: 'subscriptions',
       attributes: { name: plan.name, productId: plan.productId, subscriptionPeriod: plan.period,
         familySharable: false, groupLevel: plan.level,
-        reviewNote: 'Unlocks photo questions and Shortcuts actions. A demo relay is built in: Settings > PC relay > Use demo.' },
+        reviewNote: 'Unlocks the natural cloud voice and the Ask Bridge Shortcuts action. A demo relay is built in: Settings > PC relay > Use demo.' },
       relationships: { group: rel('subscriptionGroups', group.id) },
     })).data;
     await api('POST', '/v1/subscriptionLocalizations', {

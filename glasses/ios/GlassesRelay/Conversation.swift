@@ -405,7 +405,8 @@ final class Conversation: NSObject, ObservableObject {
         Task {
             phase = .thinking
             let reply: String
-            if Self.wantsPhoto(text), !Store.shared.isPro {
+            // No camera (the App Store build has no glasses toolkit): "what is this…" is just a question for the agent.
+            if Self.wantsPhoto(text), takePhoto != nil, !Store.shared.isPro {
                 reply = Store.Locked.needsPro.localizedDescription
             } else if Self.wantsPhoto(text), let takePhoto {
                 await say("Taking a picture.")
@@ -453,7 +454,7 @@ final class Conversation: NSObject, ObservableObject {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, canSendText else { return false }
         transcript.append(("You", text))
-        if Self.wantsPhoto(text) { transcript.append(("Relay", "Photos are voice-only. Ask out loud.")); return true }
+        if Self.wantsPhoto(text), takePhoto != nil { transcript.append(("Relay", "Photos are voice-only. Ask out loud.")); return true }
         sendingText = true
         Task {
             defer { sendingText = false }
