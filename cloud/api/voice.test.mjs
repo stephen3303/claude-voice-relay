@@ -410,3 +410,29 @@ test('POST /api/agent/reply needs no Bridge session and hands the token and body
   const other = await handler({ requestContext: { http: { method: 'POST' } }, rawPath: '/api/voice/send', body: 'hi' });
   assert.equal(other.statusCode, 401);
 });
+
+test('orchestrator commands: reports answer at once, "tell X to" is read back, and "change it" words stay a task', async () => {
+  let held = null;
+  const started = [];
+  const handler = makeHandler({
+    store: { getHeld: async () => held, setHeld: async (u, h) => { held = h; } },
+    startTask: async (u, t) => { started.push(t); return 'Starting trading bot.'; },
+    orchestrate: async (u, said) => (/^status on all/i.test(said) ? { say: '2 projects reporting: 2 on track.' }
+      : /^tell the trader to (.+)$/i.test(said) ? { task: { project: 'trading bot', task: said.replace(/^tell the trader to /i, '') } } : null),
+    pro: { plan: async () => null },
+  });
+  const say = async (route, body) => (await handler({ requestContext: { http: { method: 'POST' }, authorizer: { lambda: { sub: 'owner' } } },
+    rawPath: `/api/voice/${route}`, body })).body;
+  assert.equal(await say('confirm', 'Status on all programs.'), '2 projects reporting: 2 on track.');
+  assert.equal(held, null);
+  assert.equal(await say('confirm', 'tell the trader to add a stop loss'), "Here's your message to Claude for trading bot, add a stop loss. Ready to send it?");
+  assert.equal(await say('confirm', 'status on all programs'), '2 projects reporting: 2 on track.', 'a report leaves the held task');
+  assert.equal(await say('confirm', 'send it'), 'Starting trading bot.');
+  assert.deepEqual(started, [{ project: 'trading bot', task: 'add a stop loss' }]);
+  held = { project: 'trading bot', at: Date.now() };
+  assert.match(await say('confirm', 'status on all programs'), /^Here's your message to Claude for trading bot, status on all programs/);
+  held = null;
+  assert.equal(await say('send', 'tell the trader to merge it'), 'Starting trading bot.');
+  assert.equal(await say('send', 'status on all programs'), '2 projects reporting: 2 on track.');
+  assert.deepEqual(started.at(-1), { project: 'trading bot', task: 'merge it' });
+});

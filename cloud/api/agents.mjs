@@ -7,6 +7,7 @@
 // Dependencies are passed in, so tests run with fakes and no AWS.
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { OWNER, tokenHash } from './owner.mjs';
+import { cleanStatus } from './status.mjs';
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|approved?|do it|go ahead|go for it)\b[\s.!]*$/i;
 const NO = /^(no|nope|nah|don'?t|deny|denied|cancel)\b[\s.!]*$/i;
@@ -49,6 +50,7 @@ export function resolveProject(spoken, projects) {
  *   queue(user, key, text, staleBefore) -> true when text was added to a busy (not stale) agent's pending turns
  *   update(user, key, fields, run) (only while the agent is still on that run), remove(user, key)
  *   answered(user, key, fields, hash): sets fields only while the agent's replyHash is still hash
+ *   setStatus(user, key, fields): merges a worker's report into the project's status file (status.mjs)
  * }
  * deps.deliver(user, text, from): posts to the inbox and pushes it (index.mjs)
  * deps.runTask(user, key, run) -> the runner's task ARN; deps.stopTask(arn)
@@ -183,8 +185,12 @@ export function makeAgents(deps) {
     const hash = tokenHash(token);
     if (!a?.replyHash || !/^[0-9a-f]{64}$/.test(a.replyHash)
       || !timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(a.replyHash, 'hex'))) return { status: 401, text: 'Not a reply token.' };
+    // The worker's status file comes with its answer (or alone, between answers): orchestrator.mjs reports from it.
+    const report = cleanStatus(body?.status);
+    if (Object.keys(report).length) await deps.store.setStatus(OWNER, a.key, report);
     let said = String(body?.spoken ?? '').replace(/^\s*SPOKEN:\s*/i, '').replace(/\s+/g, ' ').trim();
-    if (!said) return { status: 400, text: 'Send {"spoken": "...", "question": false}.' };
+    if (!said && Object.keys(report).length) return { status: 200, text: 'Status saved.' };
+    if (!said) return { status: 400, text: 'Send {"spoken": "...", "question": false, "status": {...}}.' };
     if (said.length > MAX_SPOKEN) said = `${said.slice(0, MAX_SPOKEN - 1)}…`;
     const question = body?.question === true;
     await deps.store.answered(OWNER, a.key, { awaiting: question, question: question ? said : '', lastAt: now() }, a.replyHash);

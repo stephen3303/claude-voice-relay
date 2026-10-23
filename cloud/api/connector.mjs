@@ -5,6 +5,9 @@
 // Dependencies are passed in, so tests run with fakes and no AWS.
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { APPLE_ISSUER, KID, signJwt, verifyJwt } from './auth.mjs';
+import { OWNER } from './owner.mjs';
+import { resolveProject, norm } from './agents.mjs';
+import { cleanStatus, FIELDS, HEALTH } from './status.mjs';
 
 export const ACCESS_S = 3600;            // access tokens: an hour, then Claude refreshes
 export const REFRESH_S = 30 * 86400;     // a sign-in lasts 30 days, like app sessions, however often it refreshes
@@ -28,6 +31,8 @@ const INSTRUCTIONS = [
   "Bridge runs the user's Claude Code agents, one per project, and reads their answers aloud on the user's",
   'phone and glasses. Use send_task to start work in a project or to answer an agent that asked something,',
   'and read_inbox to hear back. Agents work on their own and answer later, so check the inbox after a while.',
+  'get_status reports on every project from its status file (what needs the user, details, the morning and evening',
+  'briefings), and update_status lets any session report on a project in the same format.',
   "When Bridge says it can't do something, tell the user what it said; don't guess at a setting to change.",
 ].join(' ');
 
@@ -67,7 +72,53 @@ export const TOOLS = [
     },
     annotations: { title: 'Read the inbox', readOnlyHint: true, openWorldHint: false },
   },
+  {
+    name: 'get_status',
+    title: 'Status of projects',
+    description: [
+      "Reports on the user's projects from each worker's status file and live state, worded to be read aloud.",
+      'mode all: one line per project, blocked first. needs_me: only what needs the user. morning or evening: the',
+      'briefing. With projects: those projects (one project gives its whole status file). structuredContent has the fields.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['all', 'needs_me', 'morning', 'evening'], description: 'Which report. Default all.' },
+        projects: { type: 'array', items: { type: 'string', maxLength: 200 }, maxItems: 20, description: 'Only these projects, by name or alias.' },
+      },
+      additionalProperties: false,
+    },
+    annotations: { title: 'Status of projects', readOnlyHint: true, openWorldHint: false },
+  },
+  {
+    name: 'update_status',
+    title: 'Update a project status',
+    description: [
+      "Writes a project's status file, the standard report Bridge reads aloud in status reports and briefings.",
+      'Send only the fields that changed; each is one short plain sentence with no markdown, since it is spoken.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'The project, by name or alias.', maxLength: 200 },
+        health: { type: 'string', enum: HEALTH, description: FIELDS.health },
+        done: { type: 'string', maxLength: 300, description: FIELDS.done },
+        in_progress: { type: 'string', maxLength: 300, description: FIELDS.inProgress },
+        id: { type: 'string', maxLength: 40, description: FIELDS.id },
+        next: { type: 'string', maxLength: 300, description: FIELDS.next },
+        needs: { type: 'string', maxLength: 300, description: FIELDS.needs },
+        owner: { type: 'string', maxLength: 40, description: FIELDS.owner },
+        where: { type: 'string', maxLength: 300, description: FIELDS.where },
+        overnight: { type: 'string', maxLength: 300, description: FIELDS.overnight },
+      },
+      required: ['project'],
+      additionalProperties: false,
+    },
+    annotations: { title: 'Update a project status', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
 ];
+
+const ONLY_OWNER = "Project status is only for the Bridge owner's agents.";
 
 const b64url = (b) => Buffer.from(b).toString('base64url');
 const sha256 = (s) => createHash('sha256').update(s).digest();
@@ -85,6 +136,8 @@ const sameSecret = (a, b) => a.length === b.length && timingSafeEqual(a, b);
  *   token used in one step and says whether it already was. Refresh tokens are kept under the user's
  *   own records, so deleting the account revokes them.
  * deps.startTask(user, { project, task }) -> spoken line
+ * deps.orchestrator: { board(user), report(user, command), setStatus(user, key, fields), projects(user) } (orchestrator.mjs;
+ *   optional, owner only)
  * deps.userFor(sub) -> the user whose tasks and inbox the tools use (optional; the owner's Apple account is OWNER)
  * deps.messagesAfter(user, id) -> [{ id, text, at }], deps.latestMessages(user, n) -> the newest n, oldest first
  * deps.now() -> ms
@@ -265,6 +318,25 @@ export function makeConnector(deps) {
         content: [{ type: 'text', text: shown.length ? JSON.stringify({ last, messages: shown }) : 'No new messages.' }],
         structuredContent: { last, messages: shown },
       };
+    }
+    if (name === 'get_status') {
+      if (user !== OWNER || !deps.orchestrator) return toolText(ONLY_OWNER, true);
+      const names = Array.isArray(args.projects) ? args.projects.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()) : [];
+      const mode = { needs_me: 'needs', morning: 'morning', evening: 'evening' }[args.mode] ?? 'all';
+      const command = names.length === 1 ? { kind: 'details', name: names[0] } : names.length ? { kind: 'some', names } : { kind: mode };
+      const text = await deps.orchestrator.report(user, command);
+      const projects = (await deps.orchestrator.board(user)).map((v) => ({ name: v.name, tag: v.tag, repo: v.repo, health: v.health,
+        working: v.working, needs: v.needs, problem: v.problem, status: v.status }));
+      return { content: [{ type: 'text', text }], structuredContent: { text, projects } };
+    }
+    if (name === 'update_status') {
+      if (user !== OWNER || !deps.orchestrator) return toolText(ONLY_OWNER, true);
+      const p = resolveProject(String(args.project ?? ''), await deps.orchestrator.projects(user));
+      if (!p) return toolText(`No project called ${String(args.project ?? '').slice(0, 200)}. Use a name from get_status.`, true);
+      const fields = cleanStatus({ ...args, inProgress: args.in_progress });
+      if (!Object.keys(fields).length) return toolText('Send at least one field to update.', true);
+      await deps.orchestrator.setStatus(user, norm(p.name), fields, 'worker');
+      return toolText(`Saved ${p.name}'s status.`);
     }
     return null;
   }

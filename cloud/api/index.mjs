@@ -15,6 +15,8 @@ import { makeSpeak } from './speech.mjs';
 import { makePro } from './storekit.mjs';
 import { makeAgents } from './agents.mjs';
 import { makeOwner, OWNER } from './owner.mjs';
+import { makeOrchestrator } from './orchestrator.mjs';
+import { statusUpdate } from './status.mjs';
 import { ECSClient, RunTaskCommand, StopTaskCommand } from '@aws-sdk/client-ecs';
 
 const TABLE = process.env.TABLE;
@@ -212,11 +214,16 @@ const pro = makePro({ store: proStore, bundleId: process.env.BUNDLE_ID });
 
 // ---------- agent tasks (agents.mjs): the owner's agents, run by cloud/runner on Fargate ----------
 // pk USER#<sub>; sk PROJECT#<key> (the projects "in <name>" can name: cloud/setup/setup-owner.ps1 writes them),
-// AGENT#<key> (an agent's state and pending turns; the runner takes them).
+// AGENT#<key> (an agent's state and pending turns; the runner takes them), STATUS#<key> (the project's status file,
+// status.mjs: its worker's latest report).
 const agentStore = {
   async projects(user) {
-    return (await queryPrefix(user, 'PROJECT#')).map(({ name, repo, branch, aliases }) => ({ name, repo, branch, aliases }));
+    return (await queryPrefix(user, 'PROJECT#')).map(({ name, repo, branch, aliases, tag }) => ({ name, repo, branch, aliases, tag }));
   },
+  async statuses(user) {
+    return (await queryPrefix(user, 'STATUS#')).map(({ pk, sk, ...s }) => ({ ...s, key: sk.slice('STATUS#'.length) }));
+  },
+  setStatus: (user, key, fields, by) => db.send(new UpdateCommand(statusUpdate(TABLE, user, key, fields, { by }))),
   async agents(user) {
     return (await queryPrefix(user, 'AGENT#')).map(({ pk, sk, ...a }) => ({ ...a, key: sk.slice('AGENT#'.length) }));
   },
@@ -311,8 +318,11 @@ async function startTask(user, req) {
 // The owner has every Pro feature, with paid Pro's allowances: there's no App Store subscription to check.
 const proForOwner = { ...pro, plan: async (user) => (user === OWNER ? 'Production' : pro.plan(user)) };
 
+// The orchestrator (orchestrator.mjs): status reports, briefings and "tell X to ..." across the owner's projects.
+const orchestrator = makeOrchestrator({ store: agentStore });
+
 export const handler = makeHandler({ store, look, startTask, devices, deliver, speak, pro: proForOwner, agentAwaiting: agentTasks.awaiting, splitTask: agentTasks.splitTask,
-  agentAnswer: agentTasks.answer });
+  agentAnswer: agentTasks.answer, orchestrate: orchestrator.handle });
 
 // App Store Server Notifications v2 (POST /api/appstore/notifications, no authorizer: Apple signs the body).
 export async function appStore(event) {
@@ -458,6 +468,7 @@ export const connector = makeConnector({
   publicJwk: getPublicJwk,
   store: grants,
   startTask,
+  orchestrator: { board: orchestrator.board, report: orchestrator.report, setStatus: agentStore.setStatus, projects: agentStore.projects },
   userFor: isOwner.userFor,
   messagesAfter: (user, after) => store.messagesAfter(user, after),
   latestMessages,

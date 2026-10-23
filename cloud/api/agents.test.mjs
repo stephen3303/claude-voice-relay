@@ -11,7 +11,7 @@ const PROJECTS = [
 // An in-memory version of index.mjs's agentStore, with the same conditions.
 function setup({ runFails = false } = {}) {
   let clock = 10_000_000;
-  const agents = new Map(), runs = [], stopped = [];
+  const agents = new Map(), runs = [], stopped = [], statuses = [];
   const store = {
     projects: async () => PROJECTS,
     agents: async () => [...agents.values()].map((a) => structuredClone(a)),
@@ -33,6 +33,7 @@ function setup({ runFails = false } = {}) {
     async update(u, key, fields, run) { const a = agents.get(key); if (a?.run === run) Object.assign(a, fields); },
     async remove(u, key) { agents.delete(key); },
     async answered(u, key, fields, hash) { const a = agents.get(key); if (a?.replyHash === hash) Object.assign(a, fields); },
+    async setStatus(u, key, fields) { statuses.push({ u, key, fields }); },
   };
   const delivered = [];
   const tasks = makeAgents({
@@ -43,7 +44,7 @@ function setup({ runFails = false } = {}) {
     deliver: async (u, text, from) => delivered.push({ u, text, from }),
   });
   const say = (text, project = null) => tasks.startTask(OWNER, { project, task: text });
-  return { tasks, agents, runs, stopped, say, delivered, advance: (ms) => (clock += ms) };
+  return { tasks, agents, runs, stopped, statuses, say, delivered, advance: (ms) => (clock += ms) };
 }
 
 test('projects resolve by name, alias or a unique word', () => {
@@ -162,4 +163,19 @@ test('a cloud session speaks its answer with its reply token, and only with it',
   }
   assert.equal((await tasks.answer(`Bearer ${token}`, { spoken: '  ' })).status, 400);
   assert.equal(delivered.length, 2);
+});
+
+test("a worker's status file comes with its answer, or alone, and only with its reply token", async () => {
+  const { tasks, agents, say, delivered, statuses } = setup();
+  await say('add tests', 'trading bot');
+  const token = `brt.tradingbot.${'A'.repeat(43)}`;
+  agents.get('tradingbot').replyHash = tokenHash(token);
+  const status = { health: 'On track', done: 'Added tests', inProgress: 'Opening a PR', where: 'https://github.com/x/y/pull/3', junk: 'dropped' };
+  assert.equal((await tasks.answer(`Bearer ${token}`, { spoken: 'Tests added.', status })).status, 200);
+  assert.deepEqual(statuses, [{ u: OWNER, key: 'tradingbot',
+    fields: { health: 'on track', done: 'Added tests', inProgress: 'Opening a PR', where: 'https://github.com/x/y/pull/3' } }]);
+  assert.deepEqual((await tasks.answer(`Bearer ${token}`, { status: { next: 'Merge it' } })), { status: 200, text: 'Status saved.' });
+  assert.equal(delivered.length, 1, 'a status alone says nothing aloud');
+  assert.equal((await tasks.answer(`Bearer brt.tradingbot.${'B'.repeat(43)}`, { status: { health: 'blocked' } })).status, 401);
+  assert.equal(statuses.length, 2);
 });

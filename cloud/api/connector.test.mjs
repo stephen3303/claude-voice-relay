@@ -24,7 +24,7 @@ function appleToken(claims) {
 
 function setup({ userFor } = {}) {
   let clock = NOW;
-  const clients = new Map(), grants = new Map(), refresh = new Map(), started = [], inbox = [];
+  const clients = new Map(), grants = new Map(), refresh = new Map(), started = [], inbox = [], reports = [], statuses = [];
   const keys = {
     appleKeys: async () => ({ keys: [{ ...apple.publicKey.export({ format: 'jwk' }), kid: 'apple-1' }] }),
     sign: async (bytes) => createSign('RSA-SHA256').update(bytes).sign(bridge.privateKey),
@@ -51,6 +51,12 @@ function setup({ userFor } = {}) {
       },
     },
     userFor,
+    orchestrator: {
+      report: async (user, command) => { reports.push({ user, command }); return 'All good.'; },
+      board: async () => [{ name: 'trading bot', tag: 'TB', repo: 'x/trading-bot', health: 'on track', working: false, needs: [], problem: '', status: null }],
+      setStatus: async (user, key, fields, by) => statuses.push({ user, key, fields, by }),
+      projects: async () => [{ name: 'trading bot', repo: 'x/trading-bot', aliases: ['the trader'] }],
+    },
     startTask: async (user, t) => { started.push({ user, ...t }); return 'Sent.'; },
     messagesAfter: async (user, after) => inbox.filter((m) => m.user === user && m.id > after).slice(0, 20),
     latestMessages: async (user, n) => inbox.filter((m) => m.user === user).slice(-n),
@@ -97,7 +103,7 @@ function setup({ userFor } = {}) {
   // What deleteUser does to the connector's rows: everything under USER#<sub> goes.
   const deleteAccount = (sub) => { for (const k of refresh.keys()) if (k.startsWith(`${sub}|`)) refresh.delete(k); };
 
-  return { call, register, signIn, exchange, connect, mcp, refreshWith, deleteAccount, started, inbox, app, grants, clients,
+  return { call, register, signIn, exchange, connect, mcp, refreshWith, deleteAccount, started, inbox, reports, statuses, app, grants, clients,
     advance: (ms) => (clock += ms) };
 }
 
@@ -147,7 +153,7 @@ test('sign in with Apple, then the code becomes tokens that work for MCP', async
   assert.equal((await mcp(access_token, { jsonrpc: '2.0', method: 'notifications/initialized' })).statusCode, 202);
 
   const list = JSON.parse((await mcp(access_token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })).body);
-  assert.deepEqual(list.result.tools.map((t) => t.name), ['send_task', 'read_inbox']);
+  assert.deepEqual(list.result.tools.map((t) => t.name), ['send_task', 'read_inbox', 'get_status', 'update_status']);
 
   const sent = JSON.parse((await mcp(access_token, { jsonrpc: '2.0', id: 3, method: 'tools/call',
     params: { name: 'send_task', arguments: { project: ' trading bot ', task: 'add a stop-loss check' } } })).body);
@@ -380,4 +386,35 @@ test('MCP only takes POST once signed in; unknown routes are 404', async () => {
   const { access_token } = await connect();
   assert.equal((await call('GET', '/api/mcp', { headers: { authorization: `Bearer ${access_token}` } })).statusCode, 405);
   assert.equal((await call('GET', '/api/oauth/nope')).statusCode, 404);
+});
+
+test("the owner's status tools: reports by mode or project, and status updates by name or alias", async () => {
+  const { connect, mcp, reports, statuses } = setup({ userFor: async (sub) => (sub === 'apple.001.abc' ? 'owner' : sub) });
+  const { access_token } = await connect();
+  const call = async (name, args) => JSON.parse((await mcp(access_token, { jsonrpc: '2.0', id: 1, method: 'tools/call',
+    params: { name, arguments: args } })).body).result;
+  const all = await call('get_status', {});
+  assert.equal(all.content[0].text, 'All good.');
+  assert.equal(all.structuredContent.projects[0].tag, 'TB');
+  await call('get_status', { mode: 'needs_me' });
+  await call('get_status', { projects: ['the trader'] });
+  await call('get_status', { projects: ['a', 'b'], mode: 'morning' });
+  assert.deepEqual(reports.map((r) => r.command), [{ kind: 'all' }, { kind: 'needs' }, { kind: 'details', name: 'the trader' },
+    { kind: 'some', names: ['a', 'b'] }]);
+  assert.equal((await call('update_status', { project: 'the trader', health: 'blocked', in_progress: 'Waiting on a key', needs: 'An API key' })).isError, undefined);
+  assert.deepEqual(statuses, [{ user: 'owner', key: 'tradingbot', by: 'worker',
+    fields: { health: 'blocked', inProgress: 'Waiting on a key', needs: 'An API key' } }]);
+  assert.equal((await call('update_status', { project: 'zebra', health: 'blocked' })).isError, true);
+  assert.equal((await call('update_status', { project: 'trading bot' })).isError, true);
+});
+
+test('status tools are only for the owner', async () => {
+  const { connect, mcp, statuses } = setup();
+  const { access_token } = await connect();
+  for (const name of ['get_status', 'update_status']) {
+    const r = JSON.parse((await mcp(access_token, { jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name, arguments: { project: 'trading bot', health: 'blocked' } } })).body).result;
+    assert.equal(r.isError, true, name);
+  }
+  assert.deepEqual(statuses, []);
 });

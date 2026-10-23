@@ -9,6 +9,7 @@ import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import { makeCloudTurn } from '../../cloud-agents.mjs';
 import { spokenReply } from '../../agent-turn.mjs';
+import { failedStatus } from '../api/status.mjs';
 
 export const NO_ROUTINE = "New tasks need the Bridge task routine, and it isn't set up yet. Run the owner setup script on your PC.";
 
@@ -50,6 +51,8 @@ export function spokenError(message, max = 400) {
  * deps.replyUrl: where the session posts its spoken answers (the API's /api/agent/reply). The CLI only queues a
  *   message to a cloud session, so the answers can't come back through it.
  * deps.deliver(user, spoken, from), deps.notify(text) (ntfy, optional), deps.fireRoutine() (optional)
+ * deps.setStatus(user, key, fields) (optional): a failed turn marks the project's status file "needs attention"
+ *   (cloud/api/status.mjs), so the orchestrator's reports don't keep saying it's on track
  * deps.workRoot: where repo folders go; deps.exists(dir); deps.log(...)
  */
 export function makeRunner(deps) {
@@ -125,6 +128,7 @@ export function makeRunner(deps) {
       } catch (e) {
         log(a.name, 'turn failed:', e.message);
         say(`${a.name} failed. ${spokenError(e.message)}`);
+        await deps.setStatus?.(user, key, failedStatus(spokenError(e.message, 250))).catch((x) => log('status failed', x.message));
       }
       save();
       await writes;

@@ -155,6 +155,23 @@ moved: each task is a claude.ai cloud session that shows in the Claude app.
 - **Known limits**: two runners starting at once with an expired login can race on its refresh and sign the
   other out (rerun the setup script). Sideloaded builds get no push, so answers arrive while the app listens, and through ntfy.
 
+## The orchestrator: status on all of the owner's projects
+
+One entry point for every spoken request about the owner's projects (`cloud/api/orchestrator.mjs`). It's plain code in
+the Voice Lambda, not a model: matching a project and reading reports need no judgement, so answers are instant, the
+same words always route the same way, and nothing runs between requests. The Claude work stays in the workers.
+
+- **Registry**: the `PROJECT#` items (name, repo, aliases, and a `tag` such as CVR from `setup-owner.ps1`).
+- **Status files** (`cloud/api/status.mjs`): a `STATUS#<project>` item per project in the standard format (health, done,
+  in progress and its ID, next, needs the owner, assigned to, where, needs to continue overnight). Workers send it as
+  `status` with each answer to `/api/agent/reply` (the routine prompt asks for it), any Claude session can write it with
+  the connector's `update_status`, and the runner marks a project "needs attention" when a run fails. Live agent state
+  outranks the file: a question waiting on the owner, or a run that went quiet, shows in every report.
+- **Voice**: "status on all programs", "status on X and Y", "what needs me?", "details on X", "tell X to ...",
+  "morning briefing", "evening brief". Reports answer at once; "tell X to" is read back like a task. The connector's
+  `get_status` gives the same reports to Claude.
+- **Workers** read and update `.bridge/worker.md` in their repo, so what one task learns reaches the next.
+
 ## Build order
 
 1. Deploy role + GitHub OIDC; Bedrock access check. Domain, ACM certificate, website moved to S3/CloudFront.
