@@ -52,3 +52,4 @@ jobs:
         with:
           name: GlassesRelay-ipa
           path: glasses/ios/GlassesRelay.ipa
+          retention-days: 3
