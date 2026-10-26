@@ -72,3 +72,4 @@ jobs:
         with:
           name: screenshots
           path: glasses/ios/shots/
+          retention-days: 3

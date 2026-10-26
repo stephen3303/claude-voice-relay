@@ -67,6 +67,7 @@ jobs:
         with:
           name: GlassesRelay-dev-ipa
           path: glasses/ios/GlassesRelay.ipa
+          retention-days: 3
 
   publish:
     needs: build
