@@ -7,11 +7,17 @@ import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 import { KMSClient, SignCommand, GetPublicKeyCommand } from '@aws-sdk/client-kms';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { createHash, createPublicKey } from 'node:crypto';
-import { makeHandler, LOOK_PROMPT, INBOX_KEEP_S } from './voice.mjs';
+import { makeHandler, LOOK_PROMPT } from './voice.mjs';
+import { addMessage } from './inbox.mjs';
 import { makeAuth } from './auth.mjs';
 import { makeApns, makeNotifier, http2Send } from './push.mjs';
 import { makeSpeak } from './speech.mjs';
 import { makePro } from './storekit.mjs';
+import { makeAgents } from './agents.mjs';
+import { makeOwner, OWNER } from './owner.mjs';
+import { makeOrchestrator } from './orchestrator.mjs';
+import { statusUpdate } from './status.mjs';
+import { ECSClient, RunTaskCommand, StopTaskCommand } from '@aws-sdk/client-ecs';
 import { makeSentry, reportConsoleErrors, withReports } from './sentry.mjs';
 
 // Error reports (sentry.mjs), when the stack was deployed with a DSN. Every failure the handlers catch is already
@@ -39,18 +45,7 @@ const store = {
     const Key = { pk: `USER#${user}`, sk: 'HELD' };
     await db.send(held ? new PutCommand({ TableName: TABLE, Item: { ...Key, held } }) : new DeleteCommand({ TableName: TABLE, Key }));
   },
-  async addMessage(user, text) {
-    const seq = await db.send(new UpdateCommand({
-      TableName: TABLE, Key: { pk: `USER#${user}`, sk: 'SEQ' },
-      UpdateExpression: 'ADD n :one', ExpressionAttributeValues: { ':one': 1 }, ReturnValues: 'UPDATED_NEW',
-    }));
-    const id = seq.Attributes.n;
-    await db.send(new PutCommand({ TableName: TABLE, Item: {
-      pk: `USER#${user}`, sk: `MSG#${String(id).padStart(9, '0')}`, id, text, at: Date.now(),
-      expires: Math.floor(Date.now() / 1000) + INBOX_KEEP_S,
-    } }));
-    return id;
-  },
+  addMessage: (user, text) => addMessage(db, TABLE, user, text),
   // Natural-voice characters spent today, per account (pk SPEECH#<sub>, outside USER#<sub> so deleting and
   // recreating an account doesn't reset it; it expires in 3 days) and in total (pk ALL). Refused past max.
   async spendSpeech(key, day, chars, max) {
@@ -125,9 +120,10 @@ const devices = {
   },
 };
 
+// The command's result, or null when its condition failed.
 async function conditional(command) {
-  try { await db.send(command); }
-  catch (e) { if (e.name !== 'ConditionalCheckFailedException') throw e; }
+  try { return await db.send(command); }
+  catch (e) { if (e.name !== 'ConditionalCheckFailedException') throw e; return null; }
 }
 
 // The APNs key lives in Secrets Manager (cloud/setup/setup-apns.ps1). Until it's there, messages
@@ -223,7 +219,97 @@ const proStore = {
 };
 const pro = makePro({ store: proStore, bundleId: process.env.BUNDLE_ID });
 
-// Cloud agents (Fargate, GitHub App) are build step 4 in cloud/DESIGN.md. Until then a confirmed task
+// ---------- agent tasks (agents.mjs): the owner's agents, run by cloud/runner on Fargate ----------
+// pk USER#<sub>; sk PROJECT#<key> (the projects "in <name>" can name: cloud/setup/setup-owner.ps1 writes them),
+// AGENT#<key> (an agent's state and pending turns; the runner takes them), STATUS#<key> (the project's status file,
+// status.mjs: its worker's latest report).
+const agentStore = {
+  async projects(user) {
+    return (await queryPrefix(user, 'PROJECT#')).map(({ name, repo, branch, aliases, tag }) => ({ name, repo, branch, aliases, tag }));
+  },
+  async statuses(user) {
+    return (await queryPrefix(user, 'STATUS#')).map(({ pk, sk, ...s }) => ({ ...s, key: sk.slice('STATUS#'.length) }));
+  },
+  setStatus: (user, key, fields, by) => db.send(new UpdateCommand(statusUpdate(TABLE, user, key, fields, { by }))),
+  async agents(user) {
+    return (await queryPrefix(user, 'AGENT#')).map(({ pk, sk, ...a }) => ({ ...a, key: sk.slice('AGENT#'.length) }));
+  },
+  async claim(user, { key, ...agent }, staleBefore) {
+    return !!await conditional(new PutCommand({ TableName: TABLE, Item: { pk: `USER#${user}`, sk: `AGENT#${key}`, ...agent },
+      ConditionExpression: 'attribute_not_exists(pk) OR busy = :f OR startedAt < :stale',
+      ExpressionAttributeValues: { ':f': false, ':stale': staleBefore } }));
+  },
+  async wake(user, key, text, run, now, staleBefore) {
+    return !!await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` },
+      UpdateExpression: 'SET busy = :t, #run = :run, startedAt = :now, lastAt = :now, pending = :p, awaiting = :f REMOVE runArn',
+      ConditionExpression: 'attribute_exists(pk) AND (busy = :f OR startedAt < :stale)',
+      ExpressionAttributeNames: { '#run': 'run' },
+      ExpressionAttributeValues: { ':t': true, ':f': false, ':run': run, ':now': now, ':p': [text], ':stale': staleBefore } }));
+  },
+  async queue(user, key, text, staleBefore) {
+    return !!await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` },
+      UpdateExpression: 'SET pending = list_append(if_not_exists(pending, :none), :p)',
+      ConditionExpression: 'busy = :t AND startedAt >= :stale',
+      ExpressionAttributeValues: { ':t': true, ':none': [], ':p': [text], ':stale': staleBefore } }));
+  },
+  async update(user, key, fields, run) {
+    const names = { '#run': 'run' }, values = { ':run': run };
+    const sets = Object.entries(fields).map(([f, v], i) => { names[`#f${i}`] = f; values[`:v${i}`] = v; return `#f${i} = :v${i}`; });
+    await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` },
+      UpdateExpression: `SET ${sets.join(', ')}`, ConditionExpression: '#run = :run',
+      ExpressionAttributeNames: names, ExpressionAttributeValues: values }));
+  },
+  async remove(user, key) {
+    await db.send(new DeleteCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` } }));
+  },
+  async answered(user, key, fields, hash) {
+    const names = {}, values = { ':h': hash };
+    const sets = Object.entries(fields).map(([f, v], i) => { names[`#f${i}`] = f; values[`:v${i}`] = v; return `#f${i} = :v${i}`; });
+    return !!await conditional(new UpdateCommand({ TableName: TABLE, Key: { pk: `USER#${user}`, sk: `AGENT#${key}` },
+      UpdateExpression: `SET ${sets.join(', ')}`, ConditionExpression: 'replyHash = :h',
+      ExpressionAttributeNames: names, ExpressionAttributeValues: values }));
+  },
+};
+
+async function queryPrefix(user, prefix) {
+  const items = [];
+  let ExclusiveStartKey;
+  do {
+    const r = await db.send(new QueryCommand({ TableName: TABLE, KeyConditionExpression: 'pk = :pk AND begins_with(sk, :p)',
+      ExpressionAttributeValues: { ':pk': `USER#${user}`, ':p': prefix }, ExclusiveStartKey }));
+    items.push(...(r.Items ?? []));
+    ExclusiveStartKey = r.LastEvaluatedKey;
+  } while (ExclusiveStartKey);
+  return items;
+}
+
+const ecs = new ECSClient({});
+const agentTasks = makeAgents({
+  store: agentStore,
+  async runTask(user, key, run) {
+    // Off until the BridgeApi stack has the runner (RUNNER_TASK is its task definition).
+    if (!process.env.RUNNER_TASK) throw new Error('The agent runner isn\'t deployed.');
+    const r = await ecs.send(new RunTaskCommand({
+      cluster: process.env.RUNNER_CLUSTER, taskDefinition: process.env.RUNNER_TASK, launchType: 'FARGATE', count: 1,
+      startedBy: 'bridge-voice',
+      networkConfiguration: { awsvpcConfiguration: { subnets: process.env.RUNNER_SUBNETS.split(','),
+        securityGroups: [process.env.RUNNER_SECURITY_GROUP], assignPublicIp: 'ENABLED' } },
+      // Only ids: what was said stays in DynamoDB, out of the ECS API's logs (CloudTrail).
+      overrides: { containerOverrides: [{ name: 'runner', environment: [
+        { name: 'USER_ID', value: user }, { name: 'AGENT_KEY', value: key }, { name: 'RUN_ID', value: run }] }] },
+    }));
+    const arn = r.tasks?.[0]?.taskArn;
+    if (!arn) throw new Error(r.failures?.[0]?.reason || 'Fargate started nothing');
+    return arn;
+  },
+  async stopTask(arn) {
+    await ecs.send(new StopTaskCommand({ cluster: process.env.RUNNER_CLUSTER, task: arn, reason: 'Stopped by voice' }));
+  },
+  deliver: (user, text, from) => deliver(user, text, from),
+  log: (...a) => console.log(...a),
+});
+
+// Other accounts' tasks would need API billing (cloud/DESIGN.md, build step 4). Until then a confirmed task
 // is answered honestly instead of pretending to run. The answer is the reply itself, not "Sent.", and
 // says there's nothing to switch on: "aren't switched on yet" made Claude tell people to find a setting.
 const NO_AGENTS = (project) =>
@@ -231,11 +317,19 @@ const NO_AGENTS = (project) =>
   "This isn't a setting: there's nothing to turn on in the Bridge app or in Claude. " +
   'Send it through your PC relay instead, with the Bridge app in My PC mode.';
 // Only as the reply: an inbox copy would be read out a second time, or rung through as a call.
-async function startTask(user, { project }) {
-  return NO_AGENTS(project);
+async function startTask(user, req) {
+  if (user === OWNER) return agentTasks.startTask(user, req);
+  return NO_AGENTS(req?.project);
 }
 
-export const handler = reported(makeHandler({ store, look, startTask, devices, deliver, speak, pro }));
+// The owner has every Pro feature, with paid Pro's allowances: there's no App Store subscription to check.
+const proForOwner = { ...pro, plan: async (user) => (user === OWNER ? 'Production' : pro.plan(user)) };
+
+// The orchestrator (orchestrator.mjs): status reports, briefings and "tell X to ..." across the owner's projects.
+const orchestrator = makeOrchestrator({ store: agentStore });
+
+export const handler = reported(makeHandler({ store, look, startTask, devices, deliver, speak, pro: proForOwner, agentAwaiting: agentTasks.awaiting, splitTask: agentTasks.splitTask,
+  agentAnswer: agentTasks.answer, orchestrate: orchestrator.handle }));
 
 // App Store Server Notifications v2 (POST /api/appstore/notifications, no authorizer: Apple signs the body).
 export const appStore = reported(async (event) => {
@@ -292,7 +386,21 @@ async function getPublicJwk() {
   return publicJwk;
 }
 
+// The owner token (owner.mjs): only its SHA-256 is stored, as bridge/owner. Until it exists nobody is the owner.
+const isOwner = makeOwner({
+  async secret() {
+    if (!process.env.OWNER_SECRET) return null;
+    try {
+      return JSON.parse((await new SecretsManagerClient({}).send(new GetSecretValueCommand({ SecretId: process.env.OWNER_SECRET }))).SecretString);
+    } catch (e) {
+      if (e.name === 'ResourceNotFoundException') return null;
+      throw e;
+    }
+  },
+});
+
 const accounts = makeAuth({
+  isOwner,
   issuer: process.env.ISSUER,
   audience: process.env.BUNDLE_ID,
   appleKeys: fetchAppleKeys,
@@ -368,6 +476,8 @@ export const connector = reported(makeConnector({
   publicJwk: getPublicJwk,
   store: grants,
   startTask,
+  orchestrator: { snapshot: orchestrator.snapshot, setStatus: agentStore.setStatus, projects: agentStore.projects },
+  userFor: isOwner.userFor,
   messagesAfter: (user, after) => store.messagesAfter(user, after),
   latestMessages,
 }));
